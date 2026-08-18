@@ -1,0 +1,9 @@
+.DS_Store
+*.letsinfer
+*.o
+*.pyc
+__pycache__/
+build/
+dist/
+evidence/
+local/

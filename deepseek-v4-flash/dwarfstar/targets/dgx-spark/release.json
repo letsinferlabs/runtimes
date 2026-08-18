@@ -1,0 +1,592 @@
+{
+  "schema_version": 1,
+  "release": "deepseek-v4-flash-dwarfstar-0.11.0-rc.7",
+  "status": "candidate",
+  "target": {
+    "id": "dgx-spark",
+    "platform": "linux/arm64",
+    "accelerator": {
+      "vendor": "nvidia",
+      "architecture": "sm_121",
+      "count": 1,
+      "partitioning": "full-device"
+    },
+    "memory": {
+      "topology": "unified",
+      "minimum_total_gib": 118
+    },
+    "placement": {
+      "strategy": "single",
+      "member_count": 1,
+      "engine_strategy": "single-node",
+      "interconnect": {
+        "kind": "any",
+        "rdma_required": false,
+        "minimum_speed_mbps": 0,
+        "minimum_mtu": 0
+      }
+    }
+  },
+  "engine": {
+    "name": "dwarfstar",
+    "model_format": "dwarfstar-gguf-pair",
+    "api_protocol": "openai-v1",
+    "cache_provider": "dwarfstar-letsinfer-prefix-v1",
+    "arguments": [
+      "--cuda",
+      "--no-mtp",
+      "--ctx",
+      "557056"
+    ],
+    "environment": {
+      "DS4_BATCH_FIT_HEADROOM_MB": "14336",
+      "DS4_BATCH_HOST_FLOOR_MB": "13312",
+      "DS4_BATCH_IDLE_HOST_FLOOR_MB": "10368",
+      "DS4_BATCH_PENDING_HOST_RESERVE_MB": "256",
+      "DS4_BATCH_VMM_COMP": "1",
+      "DS4_BATCH_VMM_TRIM": "1",
+      "DS4_CONT_CAPTURE": "1",
+      "DS4_CONT_CAPTURE_STATS": "1",
+      "DS4_CONT_DSPARK": "1",
+      "DS4_CONT_MTP_MODE": "2",
+      "DS4_CONT_PREFILL_CHUNK": "2048",
+      "DS4_CONT_PREFILL_CHUNK_LIVE": "0",
+      "DS4_CONT_PREFILL_SEGMENTED_COHORT": "1",
+      "DS4_CONT_PROFILE": "1",
+      "DS4_CUDA_FP4_INDEX": "1",
+      "DS4_CUDA_FP8_KV": "1",
+      "DS4_CUDA_NO_HBM_CACHE": "1",
+      "DS4_DSPARK_AUTO_BATCH": "1",
+      "DS4_DSPARK_COMPACT_INJECT": "1",
+      "DS4_DSPARK_CONFIDENCE_MIN_DEPTH": "1",
+      "DS4_DSPARK_CONFIDENCE_THRESHOLD": "0.30",
+      "DS4_DSPARK_GREEDY_TOP1": "1",
+      "DS4_DSPARK_MAX_NLIVE": "0",
+      "DS4_DSPARK_PROFILE": "1",
+      "DS4_DSPARK_QUENCH": "0",
+      "DS4_DSPARK_RECURSIVE": "1",
+      "DS4_DSPARK_RECURSIVE_DEPTH": "2",
+      "DS4_DSPARK_RECURSIVE_THRESHOLD": "0.50",
+      "DS4_DSPARK_REJECTION_ALT_MASS": "0.15",
+      "DS4_DSPARK_REJECTION_TOP2": "1",
+      "DS4_SERVER_BANK_CHECKPOINT": "1",
+      "DS4_SERVER_COALESCE_MAX": "128",
+      "DS4_SERVER_COALESCE_WAIT_MS": "20",
+      "DS4_SERVER_DEFAULT_TEMP": "0",
+      "DS4_SERVER_DISK_PARTIAL": "1",
+      "DS4_SERVER_FORK": "1",
+      "DS4_SERVER_FORK_PARTIAL": "1",
+      "DS4_SERVER_PIN_MIN_TOKENS": "65536",
+      "DS4_SERVER_SHALLOW_IDLE_MAX": "4",
+      "DS4_SERVER_IDLE_RECLAIM_FLOOR_MB": "13312",
+      "DS4_SERVER_WARM": "1"
+    }
+  },
+  "model": {
+    "alias": "deepseek-v4-flash",
+    "id": "deepseek-v4-flash",
+    "repository": "antirez/deepseek-v4-gguf",
+    "revision": "1cd7b564460821938add0475a60b942c409295e0",
+    "cache_repository": "models--antirez--deepseek-v4-gguf",
+    "filename": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+    "bytes": 86720111488,
+    "sha256": "ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0",
+    "drafter": {
+      "repository": "bleysg/DeepSeek-V4-Flash-DSpark-drafter-GGUF",
+      "revision": "81c6fdd38f9582da45ba27f0ed7b63bcd3ea3b62",
+      "cache_repository": "models--bleysg--DeepSeek-V4-Flash-DSpark-drafter-GGUF",
+      "filename": "DSpark-drafter-Q2K-Q8-0731.gguf",
+      "bytes": 6971241504,
+      "sha256": "8fa269560dc76fd73e4233ad9b1938b5f65dd363381fd9b1a5c6183f7d12d686"
+    },
+    "acquisition_image": "vllm/vllm-openai@sha256:e51157695347d2cee1b13f1ac05369df6216af5d2991b6ad5a2e700861cba4b1"
+  },
+  "image": {
+    "distribution": "local-image-id",
+    "reference": "sha256:587f5d315db74c48915781e453af725cdae59c7a1d9beaf9b8627bf4065015b7",
+    "immutable_id": "sha256:587f5d315db74c48915781e453af725cdae59c7a1d9beaf9b8627bf4065015b7",
+    "base": "ghcr.io/miaai-lab/mia-vllm-gb10-linear-b12x@sha256:19627342e1da2607f4db50745dca30e57d7dd0ebff06062f03fd69b43a252931"
+  },
+  "source_artifacts": [
+    {
+      "path": "benchmark.json",
+      "sha256": "559acf805508bb57e5578ba8ae83e27b17d0d2d7376606257752400ef182573c"
+    },
+    {
+      "path": "adapters/dwarfstar/README.md",
+      "sha256": "8480868564f16626660af900bbb1a084b568314a4d5dba0366a0fe75735b1e3b"
+    },
+    {
+      "path": "adapters/dwarfstar/gateway.py",
+      "sha256": "ee542309bfdccd7f16fd91273d203fca3502fe82a980526fac288af2333efc9b"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/Cargo.lock",
+      "sha256": "e1d2cae3cd14745023ceb5abe943a4bfaf0c5103af03c4da49058e39f35bee42"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/Cargo.toml",
+      "sha256": "c8ed647c2b8c34086c065c71f3e4611dcd0cf392440764371a53609121513c36"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/README.md",
+      "sha256": "11b28affb76e45c375ef639e82f9ab3b224cf740d3520eb8d9243535f56c6c94"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/capi/Cargo.toml",
+      "sha256": "5ae036d146b2410e5cdbf1142d68716d17eb12d207fc7ffc81793f88ea4d4315"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/capi/src/lib.rs",
+      "sha256": "f83cc551cbfff666dc29b322768b3bbcd126a926cc59d2dd19daceebfe1a448d"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/capi/tests-c/smoke.c",
+      "sha256": "74ebefde12c66cf03bfa96c1e2227404cb0e85765e4c70190da4bd8e2f1cc1b7"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/vendor/letsinfer_prefix_store/Cargo.toml",
+      "sha256": "5ed1ba273c2666df97e146818622deaccfddd6a7f7e20cf76f7831eb26d416cc"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/vendor/letsinfer_prefix_store/src/format.rs",
+      "sha256": "febf82320ba518caede4776a30f63995870828db6c942b96c597c21906f9e22d"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/vendor/letsinfer_prefix_store/src/io.rs",
+      "sha256": "9773341d2bb1c150711111103430f3a10b4ccc2078459249307a372f6dbb71be"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/vendor/letsinfer_prefix_store/src/lib.rs",
+      "sha256": "a2e56c1fceb236fa7e52b8372a8d3bd7879e55ea1f9c2ce1ec358f3b18cca2ab"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/vendor/letsinfer_prefix_store/src/py.rs",
+      "sha256": "4ab51d47331c16ff4b7fc2426296831ef248bf393c3e2743f20c10f932959af4"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/vendor/letsinfer_prefix_store/src/ram_tier.rs",
+      "sha256": "4bc2f3cf8a80698ca9a71a39dcd5e79e43614e07f40a1e031482bebc6f714c61"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/vendor/letsinfer_prefix_store/src/store.rs",
+      "sha256": "b96f6d457b6aac8513f5d33f77589a1cff600d42cacb5ca91ce61879a6e944df"
+    },
+    {
+      "path": "adapters/dwarfstar/letsinfer-bridge/vendor/letsinfer_prefix_store/tests/store_tests.rs",
+      "sha256": "5249d570ea994594ad27ba2415f0c0203bdbcd7fa1778fda790c1c97734a3f18"
+    },
+    {
+      "path": "benchmarks/benchmark_record.py",
+      "sha256": "22de89b2bfe3573644bbeb6217b62f5322fd7ad1e928d53bbbc17584576607e1"
+    },
+    {
+      "path": "benchmarks/cache_replay.py",
+      "sha256": "439dd44ef97ed8bd70eb5ebc5275f3962fe6481e5c495ddb30d1f9018b0d7457"
+    },
+    {
+      "path": "benchmarks/load-plans/agent-concurrency-soak.json",
+      "sha256": "e5e7968be31f9b30c66cf0dc4fc588c86433cd0461dac827e79e50faf4cc1b67"
+    },
+    {
+      "path": "benchmarks/load-plans/agent-concurrency.json",
+      "sha256": "119d75aaf5ac4050fb370683d448b88f04fdfcf29747b825a04a5a59d8912eb3"
+    },
+    {
+      "path": "benchmarks/load-plans/single-stream-soak.json",
+      "sha256": "e302f648048f84c90383b39b47d8e68337f3d88456fb5b8e2f486e77110f1c69"
+    },
+    {
+      "path": "benchmarks/load-plans/single-stream.json",
+      "sha256": "d348bd45775e4b32f2d6f37fad19cf1afcbf94e16bcd0e8729054ff18733fbeb"
+    },
+    {
+      "path": "benchmarks/openai_load.py",
+      "sha256": "007dbe7282b0483f2829f5af47365b5aad6473b307cfe70db0ba7a3012725c2d"
+    },
+    {
+      "path": "benchmarks/openai_matrix.py",
+      "sha256": "045504c64de09a1797168625c6490aae8028986086ffbf4af10284afb2e3d41e"
+    },
+    {
+      "path": "benchmarks/prompt_generator.py",
+      "sha256": "32e1ecaa4e5cf3febd7ddec87b1e6865eb9d9f893e9b8c5ef2939762ccb8947c"
+    },
+    {
+      "path": "benchmarks/prompts/PROTOCOL.md",
+      "sha256": "ff134f9df376a0861392f48e1b4c1688d355c19ec1f9895f9f6796ea9c72d5a5"
+    },
+    {
+      "path": "benchmarks/prompts/concurrency.md",
+      "sha256": "4032fe4a445372d5a350702ed25c97cd7135bb27f4e61da5a4b741fe4304cad6"
+    },
+    {
+      "path": "benchmarks/prompts/context.md",
+      "sha256": "9b448e8aa2f5dc94f89e8cf81af7a55321cfa6d47f45d2951a691751f82fa6de"
+    },
+    {
+      "path": "benchmarks/prompts/retrieval.md",
+      "sha256": "000c4ee924559f5a0c6d319c252f65e42ef6161fbf19b610f4f27578e3cc7edd"
+    },
+    {
+      "path": "benchmarks/runtime_matrix.py",
+      "sha256": "2152f8434f7ce8c0d5af3a427f23e8335113cc7822ad2857afb8c45dd6c3547b"
+    },
+    {
+      "path": "benchmarks/watchdog_client.py",
+      "sha256": "0ee26d7c1dec75d7d45f71c8cd1d1ab76b2f74c62c03a84f969f33df8009a1f8"
+    },
+    {
+      "path": "bin/letsinfer",
+      "sha256": "22e930c388ac0db5e896b7689d0d962df63b7af3342ae5d75ce63f674982dfb5"
+    },
+    {
+      "path": "bin/letsinfer-recovery",
+      "sha256": "46180d7052c84230b6a82eec5cfcfa504d90707a26b8788828748cc52d6e8874"
+    },
+    {
+      "path": "core/__init__.py",
+      "sha256": "5e8a48f1b75a782211133ef95d4931068ba4cbda6d7dd2e5197baa96658426db"
+    },
+    {
+      "path": "core/actions.py",
+      "sha256": "caaee00b75499ebdd3fdb82827f9826726beeb15446cd29343932e1a1b758ffc"
+    },
+    {
+      "path": "core/cli.py",
+      "sha256": "5193e1f47a90b721a1aad64f48bf1aa8ed84d11bca12582d7c7136a17da0dd47"
+    },
+    {
+      "path": "core/ui.py",
+      "sha256": "e0bc74b09cc570234cbbad308745c26c045e03ae68733abc36e46cf94b3c32c9"
+    },
+    {
+      "path": "core/engines.py",
+      "sha256": "d106b5faf773aaec401de466bd2d254a9488ea9b7b1cd81d20dce3c53cda1aa4"
+    },
+    {
+      "path": "core/exposure.py",
+      "sha256": "b3dede4199aac8cda90b852e4af5c19b081dfaf2198e92c334e9761ad5e8257b"
+    },
+    {
+      "path": "core/gateway/__init__.py",
+      "sha256": "05fed54df45dc4a1734eb06613c27b1130d1d12aab26bf4291e20f1f435307b9"
+    },
+    {
+      "path": "core/gateway/server.py",
+      "sha256": "8109f758137f8c1cf440532b92b61c9cee2f73118e24f5de48ed0ee44726861c"
+    },
+    {
+      "path": "core/orchestration/__init__.py",
+      "sha256": "1653a8d70287471fae44ae4b37f08c66fd782b9f7d944bd3791cab6e7db3efe1"
+    },
+    {
+      "path": "core/orchestration/contracts.py",
+      "sha256": "a1fa6339268409df7e837949697fa0b1f53d1426cce1aadbacd1a25f8825bde3"
+    },
+    {
+      "path": "core/orchestration/coordinator.py",
+      "sha256": "f9b5ffca3a90f9a0dd4a66cb95ee44e365ba2879b7a8419ed57465b48772fe8d"
+    },
+    {
+      "path": "core/orchestration/credentials.py",
+      "sha256": "e3d4f5a82cc818c9eae560bd6fd23096aa247f009a4089e21840791e0ab00694"
+    },
+    {
+      "path": "core/orchestration/member.py",
+      "sha256": "136f56099d65a8c7cfaa8ed58493abc800362f1dc51c9d49e488e2b9849fbd1a"
+    },
+    {
+      "path": "core/runtime_packs.py",
+      "sha256": "b1de90fafd12ce669d5b5886051acda7475d3b155e1516a6c1c33c1e290fc0fb"
+    },
+    {
+      "path": "core/site/__init__.py",
+      "sha256": "7c4efe8ce60530071ffc531e7190dc48efa171c9ba09acdc54d36718671800f5"
+    },
+    {
+      "path": "core/site/administration.py",
+      "sha256": "2834fd2f1f620f7ab1ff778e796839b0cd81918fb650e54b2a6903fa2d102fbc"
+    },
+    {
+      "path": "core/site/adoption.py",
+      "sha256": "76ecf36f8b0af428e2b37f1d695d7ecdc2492c9c296e560d2fdd295d88df2ec4"
+    },
+    {
+      "path": "core/site/control.py",
+      "sha256": "d31f67674838c40aec26b266f984f1c9324b8d758409516dcc2198004d73d41a"
+    },
+    {
+      "path": "core/site/controller.py",
+      "sha256": "a37eacca17ca1d9f683299ef6a2e8b74bc5fde6526926b5b5ea2a957a8b53258"
+    },
+    {
+      "path": "core/site/discovery.py",
+      "sha256": "ddca9c3423ccb27172e78b6adc56492e38032e326eca68d520511e0ea3a783b5"
+    },
+    {
+      "path": "core/site/inventory.py",
+      "sha256": "a059f7e094cf87eb54525026c28c11b261d949de178681c8a3b3687885cadcdd"
+    },
+    {
+      "path": "core/site/links.py",
+      "sha256": "7f66d32d62f2563fd2c8fa319b6de99c92412362506f71a295d55475da74cd01"
+    },
+    {
+      "path": "core/site/move.py",
+      "sha256": "10b0351e64ca62db7ff9fc6b307d0b5888952ea08b137fbdc8eed14f8f61fd8d"
+    },
+    {
+      "path": "core/site/state.py",
+      "sha256": "4ece32db1916ae0ed40490c60161b409af6dd29697ecf98cc2b68a93a349d2b6"
+    },
+    {
+      "path": "core/site/telemetry.py",
+      "sha256": "d8132d9253acfb02540daae6043c2f956fcc0ea49610a56d9f3243d89d3d0429"
+    },
+    {
+      "path": "core/site/topology.py",
+      "sha256": "b19f8580b2010608232db0a0d02c1fae63943c8d9f42739909b8d2ffb65ab704"
+    },
+    {
+      "path": "watchdog/CMakeLists.txt",
+      "sha256": "64768f4095b8531981b1af2cc88980e8ae59f82e072f1560e0754bc05737c636"
+    },
+    {
+      "path": "watchdog/include/watchdog/controllers.h",
+      "sha256": "444240307ea989a2e71389e344fa364cea03833834fb0f2ae1f9f20e23d37f6d"
+    },
+    {
+      "path": "watchdog/include/watchdog/crc32.h",
+      "sha256": "e85652586b8a3e0a866179c2caa1cc0b869bb1d5a4400c74858f523165ffa72e"
+    },
+    {
+      "path": "watchdog/include/watchdog/gateway.h",
+      "sha256": "f08a4038a165ae1ae94ecf2a10e06b054517ebae22465ce02ffe21acb711f5fc"
+    },
+    {
+      "path": "watchdog/include/watchdog/metadata.h",
+      "sha256": "fe512bf84582579e364f27a2025169fc383a69e146445eb89a85b7506e47993c"
+    },
+    {
+      "path": "watchdog/include/watchdog/nvml.h",
+      "sha256": "b2d87657fa51e5d37f26709096811d240fa928b9aa538b1bfba76e4e811d8b62"
+    },
+    {
+      "path": "watchdog/include/watchdog/protobuf.h",
+      "sha256": "ae1bdb2d8a251024385468a00a6ba61efe56812e96d17c0c847798ad91e066be"
+    },
+    {
+      "path": "watchdog/include/watchdog/record.h",
+      "sha256": "12e4b49c3b26bffa1d6ae6ccd819b2ad47bb9d2a145fb738b731a80883aed848"
+    },
+    {
+      "path": "watchdog/include/watchdog/ring.h",
+      "sha256": "3b560ebdc0367b4950f40ef4f67c5fb99729ce6dba16d174b07c19f79a2bfca4"
+    },
+    {
+      "path": "watchdog/include/watchdog/rollup.h",
+      "sha256": "139059fe72151c15d0994361420af3fd2fba372ba9d9e51038d3b09e4e5662cb"
+    },
+    {
+      "path": "watchdog/include/watchdog/safety.h",
+      "sha256": "925f0ffa07dcd545d3420c7fd67cf1e6ca40d134ed28dd1f12db2a041ea10387"
+    },
+    {
+      "path": "watchdog/include/watchdog/sampler.h",
+      "sha256": "33db3ffe1c669a27263cd2a19175f213001402653221cdacbc2e690ff95c87ef"
+    },
+    {
+      "path": "watchdog/include/watchdog/server.h",
+      "sha256": "c6707fb08d5cb94173ff00a83a5c137cafa5dce123a01f2796888f9dcb8a65dc"
+    },
+    {
+      "path": "watchdog/packaging/letsinfer-watchdog.service",
+      "sha256": "75bd757a88400d524c148bc31346d23b36d47d9e9caad45ae6229e7f562bf7d3"
+    },
+    {
+      "path": "watchdog/proto/watchdog.proto",
+      "sha256": "108d0baad70447e045005e5ef26bfea9fd13fed57f27243b070be472a3c416f6"
+    },
+    {
+      "path": "watchdog/src/controllers.c",
+      "sha256": "3e1f018b1129c03c9561e26584a9abc930c0b729ab8a1288241264d0aaeb1bb9"
+    },
+    {
+      "path": "watchdog/src/crc32.c",
+      "sha256": "9191d026c240f051ee393a89c1274b05c138f0c45d38582133d85263527f2fe7"
+    },
+    {
+      "path": "watchdog/src/gateway.c",
+      "sha256": "1d157e9d17c5803520ebf261bc9bbd7e4fbbe3e1d3b566561391223b4edc6c77"
+    },
+    {
+      "path": "watchdog/src/main_linux.c",
+      "sha256": "b39b4a6f566e7df848b34e03a707f877b58a1d0d58f5d13f511ba63b7feb15e8"
+    },
+    {
+      "path": "watchdog/src/metadata.c",
+      "sha256": "b73f10b352c6157eec61b629686271487fe7d76fda67bc07f2d56ce729568728"
+    },
+    {
+      "path": "watchdog/src/nvml_linux.c",
+      "sha256": "0abf84a7bb5f6308dbeca580c7c136393a4d21dae554a877bd43968de189843a"
+    },
+    {
+      "path": "watchdog/src/protobuf.c",
+      "sha256": "5123e4d11dd40665808f133404d660b881f82439a5360d8e6af78aa127922735"
+    },
+    {
+      "path": "watchdog/src/record.c",
+      "sha256": "86dac668e7dde1fbc1d8cdfab83fb445b71ec91479b0bf94463ed7e29abd99b3"
+    },
+    {
+      "path": "watchdog/src/ring.c",
+      "sha256": "7975695512b23ccdf1def0b280b441c6a72690c149af365b4e6a7218b17e0351"
+    },
+    {
+      "path": "watchdog/src/rollup.c",
+      "sha256": "860a5cc3a1167a6e07b8b9cae3d80eec076393b941467acc008e3ba903d8a3dd"
+    },
+    {
+      "path": "watchdog/src/safety.c",
+      "sha256": "b4a5254c162319342c17fe799a1eacf2fca1540dda7a4407229e65b07c81e121"
+    },
+    {
+      "path": "watchdog/src/safety_linux.c",
+      "sha256": "d34274fca917b332fe8af2314f2d7429d86a7f039c0bbed64ee4435a1816b0bf"
+    },
+    {
+      "path": "watchdog/src/sampler_linux.c",
+      "sha256": "d369ce853b3f3fc4fdff277b91eeeee9f460337d097651f63f6c439d573e73e0"
+    },
+    {
+      "path": "watchdog/src/server_linux.c",
+      "sha256": "e1930567b83c7a604a41020b0efea0424f83726c8fefa7acbb91b9e23e77f94f"
+    },
+    {
+      "path": "watchdog/tests/test.h",
+      "sha256": "14dfbe77047e91b2c462f5f1731020d47f622d3212e36a3c664dbceed687f6b3"
+    },
+    {
+      "path": "watchdog/tests/test_controllers.c",
+      "sha256": "3ca517c3788705e247b8d413684a1cf7b23744388742129d825839f0910a51df"
+    },
+    {
+      "path": "watchdog/tests/test_gateway.c",
+      "sha256": "becd6bafe25b259705b7649ec7f01fe36d0f2469ada6c77895683c5f081ed8bf"
+    },
+    {
+      "path": "watchdog/tests/test_main.c",
+      "sha256": "3cb9dcca003695e3c6aaa7ad9bdd3afa39088060f3b7f111b909a524886c369c"
+    },
+    {
+      "path": "watchdog/tests/test_metadata.c",
+      "sha256": "22e510f4d176909dd1bf34fb98a16d663e313ac4792aa968c2ebc2614ad7e46b"
+    },
+    {
+      "path": "watchdog/tests/test_protobuf.c",
+      "sha256": "8991e480b67a23803a6dad1b687503eca2117c71036c281743e38444848a8a1f"
+    },
+    {
+      "path": "watchdog/tests/test_record.c",
+      "sha256": "47211549b5e96e63eed245e6805ac269aacfd55531e682435bb110c712b8996d"
+    },
+    {
+      "path": "watchdog/tests/test_ring.c",
+      "sha256": "88415a9126c959fcc77c5d9c9c71107120666f9f64290ca9333d1f6026900fbb"
+    },
+    {
+      "path": "watchdog/tests/test_rollup.c",
+      "sha256": "2442eace1e509e2a09b422fa8bf52880b785b569f075ca220fa8dfb9ed1fdb0e"
+    },
+    {
+      "path": "watchdog/tests/test_safety.c",
+      "sha256": "ca2933d2d4d409aae9f01f3e46e1df1cc08d64aa3475162a148689832fd29872"
+    }
+  ],
+  "runtime_plugins": {
+    "default_root": "~/.local/share/letsinfer/runtime/dwarfstar",
+    "native_builder": {
+      "image": "ghcr.io/pyo3/maturin@sha256:b6c8b59a0170b77eb31a35b56034abd39972483ad0ebfff344deaa42a85f3bd3",
+      "source_root": "adapters/dwarfstar/letsinfer-bridge",
+      "source_date_epoch": 1785594180,
+      "entrypoint": "cargo",
+      "arguments": [
+        "build",
+        "--release",
+        "--locked"
+      ],
+      "output": "release/libletsinfer_prefix_capi.so"
+    },
+    "artifacts": [
+      {
+        "path": "dwarfstar_gateway.py",
+        "source_path": "adapters/dwarfstar/gateway.py",
+        "sha256": "ee542309bfdccd7f16fd91273d203fca3502fe82a980526fac288af2333efc9b"
+      },
+      {
+        "path": "libletsinfer_prefix_capi.so",
+        "sha256": "552114b86cff8bec1cb560ae7a61c1f0f668c715624796baadeaa65e7fd14efd"
+      }
+    ]
+  },
+  "container": {
+    "memory_bytes": 120259084288,
+    "shm_bytes": 34359738368,
+    "model_cache": "~/.cache/huggingface",
+    "min_available_gib": 105,
+    "runtime_min_available_gib": 4,
+    "startup_timeout_seconds": 1800
+  },
+  "watchdog": {
+    "protocol_version": 3,
+    "listen": "0.0.0.0",
+    "port": 9768,
+    "sample_interval_ms": 1000,
+    "flush_interval_ms": 10000,
+    "max_controllers": 2,
+    "memory_high_bytes": 25165824,
+    "memory_max_bytes": 31457280,
+    "protection": {
+      "warning_available_bytes": 12884901888,
+      "graceful_available_bytes": 10737418240,
+      "emergency_available_bytes": 8589934592,
+      "swap_stop_bytes": 1073741824,
+      "psi_some_us": 150000,
+      "psi_full_us": 50000,
+      "state_failures": 8,
+      "containment_grace_ms": 3000
+    },
+    "build": {
+      "source_root": "watchdog",
+      "target": "letsinfer_watchdog",
+      "output": "letsinfer-watchdog"
+    }
+  },
+  "cache": {
+    "provider": "dwarfstar-letsinfer-prefix-v1",
+    "persistent": true,
+    "replay_output_policy": "restored-repeat-exact",
+    "prewarm": true,
+    "durable_capacity_bytes": 68719476736,
+    "resident_capacity_bytes": 0,
+    "ttl_seconds": 604800,
+    "min_tokens": 512,
+    "direct_reads": true,
+    "capture": true,
+    "prefix_lookup": false
+  },
+  "serving": {
+    "qualified": true,
+    "max_connections": 128,
+    "max_active_requests": 128,
+    "max_context_tokens": 557056,
+    "gate": {
+      "measured_commit": "6cd114626b91f2d87d3dc349707263beef58cca6",
+      "bench_block": "runtime-benchmark-v1",
+      "evidence_directory": "evidence/deepseek-v4-flash-dwarfstar-dgx-spark-0.11.0-rc.3",
+      "results_sha256": "04dac5fd2690d6ae92a06657b640c73a7a960ce0b3154dca6d6ddc257f45afe4"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "name": "qwen3.8-27b/sglang/dgx-spark",
+  "version": "0.1.0-rc.1",
+  "model": "qwen3.8-27b",
+  "engine": "sglang",
+  "target": "dgx-spark",
+  "status": "candidate",
+  "release_manifest": "release.json",
+  "core_compatibility": {
+    "api": 1
+  }
+}

@@ -1,0 +1,14 @@
+# Models and build outputs never belong in the runtime image context.
+**/*.gguf
+gguf/
+.git/
+local/
+**/*.o
+ds4
+ds4-server
+ds4_server_test
+ds4-bench
+ds4-eval
+ds4-agent
+ds4_weight_server
+image/payload/
