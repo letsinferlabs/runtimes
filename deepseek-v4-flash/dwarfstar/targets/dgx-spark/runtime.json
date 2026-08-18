@@ -5,7 +5,7 @@
   "model": "deepseek-v4-flash",
   "engine": "dwarfstar",
   "target": "dgx-spark",
-  "status": "candidate",
+  "status": "stable",
   "release_manifest": "release.json",
   "core_compatibility": {
     "api": 1

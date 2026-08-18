@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release": "deepseek-v4-flash-dwarfstar-0.11.0-rc.8",
-  "status": "candidate",
+  "status": "stable",
   "target": {
     "id": "dgx-spark",
     "platform": "linux/arm64",
