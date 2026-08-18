@@ -102,8 +102,8 @@
     "acquisition_image": "vllm/vllm-openai@sha256:e51157695347d2cee1b13f1ac05369df6216af5d2991b6ad5a2e700861cba4b1"
   },
   "image": {
-    "distribution": "local-image-id",
-    "reference": "sha256:587f5d315db74c48915781e453af725cdae59c7a1d9beaf9b8627bf4065015b7",
+    "distribution": "registry-digest",
+    "reference": "ghcr.io/letsinferlabs/deepseek-v4-flash-dwarfstar-image@sha256:16b94ee8ccf1fdea51ac8c077cac04cc6a3f1d991e1c9f90a5e284d1f760841a",
     "immutable_id": "sha256:587f5d315db74c48915781e453af725cdae59c7a1d9beaf9b8627bf4065015b7",
     "base": "ghcr.io/miaai-lab/mia-vllm-gb10-linear-b12x@sha256:19627342e1da2607f4db50745dca30e57d7dd0ebff06062f03fd69b43a252931"
   },
