@@ -8,7 +8,7 @@
   "status": "stable",
   "release_manifest": "release.json",
   "core_compatibility": {
-    "api": 1
+    "api": 2
   },
   "benchmark": {
     "schema_version": 1,

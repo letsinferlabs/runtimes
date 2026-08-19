@@ -59,6 +59,8 @@
       "1000000",
       "--speculative-algorithm",
       "DFLASH",
+      "--speculative-draft-model-path",
+      "${artifact:draft}",
       "--speculative-num-draft-tokens",
       "8",
       "--reasoning-parser",
@@ -77,15 +79,23 @@
   "model": {
     "alias": "qwen3.8-27b",
     "id": "RadixArk/Qwen3.8-27B-NVFP4",
-    "revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4",
-    "cache_repository": "models--RadixArk--Qwen3.8-27B-NVFP4",
-    "acquisition_image": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6",
-    "drafter": {
-      "repository": "incoai/Qwen3.8-27B-DFlash2",
-      "revision": "dedf8df68adfb1afeaf7b7480c0a0243108177b4",
-      "cache_repository": "models--incoai--Qwen3.8-27B-DFlash2"
-    }
+    "artifact": "model",
+    "acquisition_image": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
   },
+  "artifacts": [
+    {
+      "name": "model",
+      "format": "huggingface-snapshot",
+      "repository": "RadixArk/Qwen3.8-27B-NVFP4",
+      "revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4"
+    },
+    {
+      "name": "draft",
+      "format": "huggingface-snapshot",
+      "repository": "incoai/Qwen3.8-27B-DFlash2",
+      "revision": "dedf8df68adfb1afeaf7b7480c0a0243108177b4"
+    }
+  ],
   "image": {
     "distribution": "local-image-id",
     "reference": "sha256:2532529d858e760d9ce66f90e532d1adc36811a537bff5d43380729af140f1c5",
