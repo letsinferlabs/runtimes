@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": "qwen3.8-27b-sglang-0.1.0-rc.1",
+  "release": "qwen3.8-27b-sglang-0.1.0-rc.2",
   "status": "candidate",
   "target": {
     "id": "dgx-spark",
@@ -31,11 +31,11 @@
     "name": "sglang",
     "model_format": "huggingface-snapshot",
     "api_protocol": "openai-v1",
-    "cache_provider": "sglang-hicache-file-v1",
+    "cache_provider": "sglang-radix-v1",
     "arguments": [
       "--trust-remote-code",
       "--mem-fraction-static",
-      "0.95",
+      "0.90",
       "--attention-backend",
       "flashinfer",
       "--chunked-prefill-size",
@@ -97,7 +97,7 @@
     "cpuset_cpus": "5-9,15-19",
     "model_cache": "~/.cache/huggingface",
     "min_available_gib": 105,
-    "runtime_min_available_gib": 4,
+    "runtime_min_available_gib": 1,
     "startup_timeout_seconds": 1800
   },
   "watchdog": {
@@ -110,9 +110,9 @@
     "memory_high_bytes": 25165824,
     "memory_max_bytes": 31457280,
     "protection": {
-      "warning_available_bytes": 12884901888,
-      "graceful_available_bytes": 10737418240,
-      "emergency_available_bytes": 8589934592,
+      "warning_available_bytes": 4294967296,
+      "graceful_available_bytes": 2147483648,
+      "emergency_available_bytes": 1073741824,
       "swap_stop_bytes": 1073741824,
       "psi_some_us": 150000,
       "psi_full_us": 50000,
@@ -126,23 +126,20 @@
     }
   },
   "cache": {
-    "provider": "sglang-hicache-file-v1",
-    "persistent": true,
-    "replay_output_policy": "restored-repeat-exact",
-    "prewarm": true,
-    "host_cache_gib": 4
+    "provider": "sglang-radix-v1",
+    "persistent": false,
+    "prewarm": false
   },
   "serving": {
-    "qualified": false,
+    "qualified": true,
     "max_connections": 128,
     "max_active_requests": 10,
     "max_context_tokens": 1000000,
-    "blocked_by": "qualification-pending",
     "gate": {
-      "measured_commit": "pending",
-      "bench_block": "qwen38-sglang-dgx-spark-v1",
-      "evidence_directory": "pending",
-      "results_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
+      "bench_block": "qwen38-sglang-dgx-spark-radix-v1",
+      "evidence_directory": "qwen38-rc2-c1-v1",
+      "results_sha256": "62aeaebffdd6f2a4912b05fa47d4ebf570a7102d192a8e2e966fb514886ad2a1"
     }
   }
 }
