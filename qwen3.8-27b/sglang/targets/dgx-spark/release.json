@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": "qwen3.8-27b-sglang-0.1.0-rc.1",
+  "release": "qwen3.8-27b-sglang-0.1.0-rc.3",
   "status": "candidate",
   "target": {
     "id": "dgx-spark",
@@ -31,11 +31,11 @@
     "name": "sglang",
     "model_format": "huggingface-snapshot",
     "api_protocol": "openai-v1",
-    "cache_provider": "sglang-hicache-file-v1",
+    "cache_provider": "sglang-radix-v1",
     "arguments": [
       "--trust-remote-code",
       "--mem-fraction-static",
-      "0.95",
+      "0.90",
       "--attention-backend",
       "flashinfer",
       "--chunked-prefill-size",
@@ -48,9 +48,9 @@
       "--mamba-full-memory-ratio",
       "4.21",
       "--mamba-radix-cache-strategy",
-      "extra_buffer_lazy",
+      "extra_buffer",
       "--max-mamba-cache-size",
-      "40",
+      "50",
       "--max-running-requests",
       "10",
       "--json-model-override-args",
@@ -58,13 +58,11 @@
       "--context-length",
       "1000000",
       "--speculative-algorithm",
-      "EAGLE",
-      "--speculative-num-steps",
-      "3",
-      "--speculative-eagle-topk",
-      "1",
+      "DFLASH",
+      "--speculative-draft-model-path",
+      "${artifact:draft}",
       "--speculative-num-draft-tokens",
-      "4",
+      "8",
       "--reasoning-parser",
       "qwen3",
       "--tool-call-parser",
@@ -81,14 +79,27 @@
   "model": {
     "alias": "qwen3.8-27b",
     "id": "RadixArk/Qwen3.8-27B-NVFP4",
-    "revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4",
-    "cache_repository": "models--RadixArk--Qwen3.8-27B-NVFP4",
+    "artifact": "model",
     "acquisition_image": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
   },
+  "artifacts": [
+    {
+      "name": "model",
+      "format": "huggingface-snapshot",
+      "repository": "RadixArk/Qwen3.8-27B-NVFP4",
+      "revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4"
+    },
+    {
+      "name": "draft",
+      "format": "huggingface-snapshot",
+      "repository": "incoai/Qwen3.8-27B-DFlash2",
+      "revision": "dedf8df68adfb1afeaf7b7480c0a0243108177b4"
+    }
+  ],
   "image": {
-    "distribution": "registry-digest",
-    "reference": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6",
-    "immutable_id": "sha256:0076dffa60b76b7bf033c04d05e0cc69d46f2b8cd60aa2468827782afe9bc38f",
+    "distribution": "local-image-id",
+    "reference": "sha256:2532529d858e760d9ce66f90e532d1adc36811a537bff5d43380729af140f1c5",
+    "immutable_id": "sha256:2532529d858e760d9ce66f90e532d1adc36811a537bff5d43380729af140f1c5",
     "base": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
   },
   "container": {
@@ -97,7 +108,7 @@
     "cpuset_cpus": "5-9,15-19",
     "model_cache": "~/.cache/huggingface",
     "min_available_gib": 105,
-    "runtime_min_available_gib": 4,
+    "runtime_min_available_gib": 1,
     "startup_timeout_seconds": 1800
   },
   "watchdog": {
@@ -110,9 +121,9 @@
     "memory_high_bytes": 25165824,
     "memory_max_bytes": 31457280,
     "protection": {
-      "warning_available_bytes": 12884901888,
-      "graceful_available_bytes": 10737418240,
-      "emergency_available_bytes": 8589934592,
+      "warning_available_bytes": 4294967296,
+      "graceful_available_bytes": 2147483648,
+      "emergency_available_bytes": 1073741824,
       "swap_stop_bytes": 1073741824,
       "psi_some_us": 150000,
       "psi_full_us": 50000,
@@ -126,23 +137,21 @@
     }
   },
   "cache": {
-    "provider": "sglang-hicache-file-v1",
-    "persistent": true,
-    "replay_output_policy": "restored-repeat-exact",
-    "prewarm": true,
-    "host_cache_gib": 4
+    "provider": "sglang-radix-v1",
+    "persistent": false,
+    "prewarm": false
   },
   "serving": {
     "qualified": false,
     "max_connections": 128,
     "max_active_requests": 10,
     "max_context_tokens": 1000000,
-    "blocked_by": "qualification-pending",
     "gate": {
-      "measured_commit": "pending",
-      "bench_block": "qwen38-sglang-dgx-spark-v1",
-      "evidence_directory": "pending",
+      "measured_commit": "c14312a66420b75ca9a11bf1817c4db1fa26b097",
+      "bench_block": "qwen38-sglang-dgx-spark-dflash2-v1",
+      "evidence_directory": "qwen38-dflash2-rc3-pending",
       "results_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-    }
+    },
+    "blocked_by": "dflash2-qualification"
   }
 }

@@ -29,10 +29,12 @@
   },
   "engine": {
     "name": "dwarfstar",
-    "model_format": "dwarfstar-gguf-pair",
+    "model_format": "gguf-file",
     "api_protocol": "openai-v1",
     "cache_provider": "dwarfstar-letsinfer-prefix-v1",
     "arguments": [
+      "--dspark",
+      "${artifact:drafter}",
       "--cuda",
       "--no-mtp",
       "--ctx",
@@ -85,22 +87,29 @@
   "model": {
     "alias": "deepseek-v4-flash",
     "id": "deepseek-v4-flash",
-    "repository": "antirez/deepseek-v4-gguf",
-    "revision": "1cd7b564460821938add0475a60b942c409295e0",
-    "cache_repository": "models--antirez--deepseek-v4-gguf",
-    "filename": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
-    "bytes": 86720111488,
-    "sha256": "ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0",
-    "drafter": {
+    "artifact": "model",
+    "acquisition_image": "vllm/vllm-openai@sha256:e51157695347d2cee1b13f1ac05369df6216af5d2991b6ad5a2e700861cba4b1"
+  },
+  "artifacts": [
+    {
+      "name": "model",
+      "format": "gguf-file",
+      "repository": "antirez/deepseek-v4-gguf",
+      "revision": "1cd7b564460821938add0475a60b942c409295e0",
+      "filename": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+      "bytes": 86720111488,
+      "sha256": "ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0"
+    },
+    {
+      "name": "drafter",
+      "format": "gguf-file",
       "repository": "bleysg/DeepSeek-V4-Flash-DSpark-drafter-GGUF",
       "revision": "81c6fdd38f9582da45ba27f0ed7b63bcd3ea3b62",
-      "cache_repository": "models--bleysg--DeepSeek-V4-Flash-DSpark-drafter-GGUF",
       "filename": "DSpark-drafter-Q2K-Q8-0731.gguf",
       "bytes": 6971241504,
       "sha256": "8fa269560dc76fd73e4233ad9b1938b5f65dd363381fd9b1a5c6183f7d12d686"
-    },
-    "acquisition_image": "vllm/vllm-openai@sha256:e51157695347d2cee1b13f1ac05369df6216af5d2991b6ad5a2e700861cba4b1"
-  },
+    }
+  ],
   "image": {
     "distribution": "registry-digest",
     "reference": "ghcr.io/letsinferlabs/deepseek-v4-flash-dwarfstar-image@sha256:16b94ee8ccf1fdea51ac8c077cac04cc6a3f1d991e1c9f90a5e284d1f760841a",
