@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": "qwen3.8-27b-sglang-0.1.0-rc.2",
+  "release": "qwen3.8-27b-sglang-0.1.0-rc.3",
   "status": "candidate",
   "target": {
     "id": "dgx-spark",
@@ -48,9 +48,9 @@
       "--mamba-full-memory-ratio",
       "4.21",
       "--mamba-radix-cache-strategy",
-      "extra_buffer_lazy",
+      "extra_buffer",
       "--max-mamba-cache-size",
-      "40",
+      "50",
       "--max-running-requests",
       "10",
       "--json-model-override-args",
@@ -58,13 +58,9 @@
       "--context-length",
       "1000000",
       "--speculative-algorithm",
-      "EAGLE",
-      "--speculative-num-steps",
-      "3",
-      "--speculative-eagle-topk",
-      "1",
+      "DFLASH",
       "--speculative-num-draft-tokens",
-      "4",
+      "8",
       "--reasoning-parser",
       "qwen3",
       "--tool-call-parser",
@@ -83,12 +79,17 @@
     "id": "RadixArk/Qwen3.8-27B-NVFP4",
     "revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4",
     "cache_repository": "models--RadixArk--Qwen3.8-27B-NVFP4",
-    "acquisition_image": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
+    "acquisition_image": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6",
+    "drafter": {
+      "repository": "incoai/Qwen3.8-27B-DFlash2",
+      "revision": "dedf8df68adfb1afeaf7b7480c0a0243108177b4",
+      "cache_repository": "models--incoai--Qwen3.8-27B-DFlash2"
+    }
   },
   "image": {
-    "distribution": "registry-digest",
-    "reference": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6",
-    "immutable_id": "sha256:0076dffa60b76b7bf033c04d05e0cc69d46f2b8cd60aa2468827782afe9bc38f",
+    "distribution": "local-image-id",
+    "reference": "sha256:2532529d858e760d9ce66f90e532d1adc36811a537bff5d43380729af140f1c5",
+    "immutable_id": "sha256:2532529d858e760d9ce66f90e532d1adc36811a537bff5d43380729af140f1c5",
     "base": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
   },
   "container": {
@@ -131,15 +132,16 @@
     "prewarm": false
   },
   "serving": {
-    "qualified": true,
+    "qualified": false,
     "max_connections": 128,
     "max_active_requests": 10,
     "max_context_tokens": 1000000,
     "gate": {
-      "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
-      "bench_block": "qwen38-sglang-dgx-spark-radix-v1",
-      "evidence_directory": "qwen38-rc2-c1-v1",
-      "results_sha256": "62aeaebffdd6f2a4912b05fa47d4ebf570a7102d192a8e2e966fb514886ad2a1"
-    }
+      "measured_commit": "c14312a66420b75ca9a11bf1817c4db1fa26b097",
+      "bench_block": "qwen38-sglang-dgx-spark-dflash2-v1",
+      "evidence_directory": "qwen38-dflash2-rc3-pending",
+      "results_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "blocked_by": "dflash2-qualification"
   }
 }

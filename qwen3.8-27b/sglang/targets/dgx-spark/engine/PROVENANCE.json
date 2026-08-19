@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "base_image": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6",
+  "base_image_id": "sha256:0076dffa60b76b7bf033c04d05e0cc69d46f2b8cd60aa2468827782afe9bc38f",
+  "base_sglang_version": "0.0.0.dev0+qwen38.27b.g561c8f3",
+  "upstream_repository": "sgl-project/sglang",
+  "upstream_parent": "3a8f522f6547f4fe772885145ea0a50a3a6967c0",
+  "upstream_commit": "c14312a66420b75ca9a11bf1817c4db1fa26b097",
+  "upstream_pull_request": 35371,
+  "method": "three-way-source-port",
+  "runtime_fixes": [
+    "isolate-target-config-overrides-from-the-dflash-draft",
+    "run-the-dflash-selector-through-the-target-quantized-lm-head"
+  ]
+}
