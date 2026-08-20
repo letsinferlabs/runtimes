@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": "qwen3.8-27b-sglang-0.1.0-rc.4",
+  "release": "qwen3.8-27b-sglang-0.1.0-rc.6",
   "status": "candidate",
   "target": {
     "id": "dgx-spark",
@@ -48,23 +48,19 @@
       "--mamba-full-memory-ratio",
       "4.21",
       "--mamba-radix-cache-strategy",
-      "extra_buffer_lazy",
+      "extra_buffer",
       "--max-mamba-cache-size",
       "40",
       "--max-running-requests",
       "10",
-      "--json-model-override-args",
-      "{\"text_config\":{\"rope_parameters\":{\"mrope_interleaved\":true,\"mrope_section\":[11,11,10],\"rope_type\":\"yarn\",\"rope_theta\":10000000,\"partial_rotary_factor\":0.25,\"factor\":4,\"original_max_position_embeddings\":262144}}}",
       "--context-length",
-      "1000000",
+      "262144",
       "--speculative-algorithm",
-      "EAGLE",
-      "--speculative-num-steps",
-      "3",
-      "--speculative-eagle-topk",
-      "1",
+      "DFLASH",
+      "--speculative-draft-model-path",
+      "${artifact:draft}",
       "--speculative-num-draft-tokens",
-      "4",
+      "8",
       "--reasoning-parser",
       "qwen3",
       "--tool-call-parser",
@@ -73,7 +69,6 @@
       "model"
     ],
     "environment": {
-      "SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN": "1",
       "SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK": "0",
       "TRITON_CACHE_DIR": "/root/.triton"
     }
@@ -90,12 +85,18 @@
       "format": "huggingface-snapshot",
       "repository": "RadixArk/Qwen3.8-27B-NVFP4",
       "revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4"
+    },
+    {
+      "name": "draft",
+      "format": "huggingface-snapshot",
+      "repository": "z-lab/Qwen3.8-27B-DFlash2",
+      "revision": "50307d4c4cde6860d4eee73e2547cd786fe8e8a4"
     }
   ],
   "image": {
-    "distribution": "registry-digest",
-    "reference": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6",
-    "immutable_id": "sha256:0076dffa60b76b7bf033c04d05e0cc69d46f2b8cd60aa2468827782afe9bc38f",
+    "distribution": "local-image-id",
+    "reference": "sha256:2532529d858e760d9ce66f90e532d1adc36811a537bff5d43380729af140f1c5",
+    "immutable_id": "sha256:2532529d858e760d9ce66f90e532d1adc36811a537bff5d43380729af140f1c5",
     "base": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
   },
   "container": {
@@ -138,15 +139,16 @@
     "prewarm": false
   },
   "serving": {
-    "qualified": true,
+    "qualified": false,
     "max_connections": 128,
     "max_active_requests": 10,
-    "max_context_tokens": 1000000,
+    "max_context_tokens": 262144,
     "gate": {
       "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
-      "bench_block": "qwen38-sglang-dgx-spark-radix-v1",
-      "evidence_directory": "qwen38-rc2-c1-v1",
-      "results_sha256": "62aeaebffdd6f2a4912b05fa47d4ebf570a7102d192a8e2e966fb514886ad2a1"
-    }
+      "bench_block": "qwen38-sglang-dgx-spark-code-prose-v1",
+      "evidence_directory": "qwen38-code-prose-rc6-pending",
+      "results_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "blocked_by": "code-prose-qualification"
   }
 }
