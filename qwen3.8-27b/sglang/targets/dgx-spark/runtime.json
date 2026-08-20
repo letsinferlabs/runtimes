@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "name": "qwen3.8-27b/sglang/dgx-spark",
-  "version": "0.1.0-rc.4",
+  "version": "0.1.0-rc.6",
   "model": "qwen3.8-27b",
   "engine": "sglang",
   "target": "dgx-spark",
@@ -11,16 +11,16 @@
     "api": 2
   },
   "benchmark": {
-    "schema_version": 1,
-    "suite": "letsinfer-standard-context-v1",
+    "schema_version": 2,
+    "suite": "letsinfer-code-prose-v1",
     "generator": {
-      "id": "letsinfer-synthetic-document",
+      "id": "letsinfer-code-prose",
       "version": 1
     },
     "tokenizer": {
       "capability": "engine-rendered-chat-count-v1",
       "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
-      "engine_image_sha256": "0076dffa60b76b7bf033c04d05e0cc69d46f2b8cd60aa2468827782afe9bc38f",
+      "engine_image_sha256": "2532529d858e760d9ce66f90e532d1adc36811a537bff5d43380729af140f1c5",
       "render_contract": "openai-chat-user-v1"
     },
     "request": {
@@ -34,31 +34,23 @@
     "cases": [
       {
         "id": "32k",
-        "workload": "context-summary-v1",
         "prompt_tokens": 32768,
-        "concurrencies": [1, 2, 4, 8, 16],
-        "seed": 90
+        "concurrencies": [1, 2, 4, 8, 16]
       },
       {
         "id": "64k",
-        "workload": "context-summary-v1",
         "prompt_tokens": 65536,
-        "concurrencies": [1, 2, 4, 8, 16],
-        "seed": 60
+        "concurrencies": [1, 2, 4, 8, 16]
       },
       {
         "id": "128k",
-        "workload": "context-summary-v1",
         "prompt_tokens": 131072,
-        "concurrencies": [1, 2, 4, 8, 16],
-        "seed": 30
+        "concurrencies": [1, 2, 4, 8, 16]
       },
       {
         "id": "256k",
-        "workload": "context-summary-v1",
-        "prompt_tokens": 262144,
-        "concurrencies": [1, 2, 4, 8, 16],
-        "seed": 0
+        "prompt_tokens": 260000,
+        "concurrencies": [1, 2, 4, 8, 16]
       }
     ]
   }
