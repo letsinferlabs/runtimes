@@ -23,11 +23,9 @@ from sglang.srt.layers.linear import (
     QKVParallelLinear,
     RowParallelLinear,
 )
-from sglang.srt.layers.logits_processor import (
-    LogitsProcessorOutput,
-    should_apply_lm_head_quant_method,
-)
+from sglang.srt.layers.logits_processor import LogitsProcessorOutput
 from sglang.srt.layers.radix_attention import AttentionType, RadixAttention
+from sglang.srt.layers.logits_processor import should_apply_lm_head_quant_method
 from sglang.srt.layers.rotary_embedding import get_rope
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_loader.weight_utils import default_weight_loader
@@ -62,6 +60,15 @@ def _radix_topk(scores: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tenso
     return torch.topk(scores, k, dim=-1)
 
 
+def _get_dflash_attention_type(config, *, default: AttentionType) -> AttentionType:
+    """Honor explicit causality while preserving legacy layer defaults."""
+    text_config = config.get_text_config()
+    is_causal = getattr(text_config, "is_causal", None)
+    if is_causal is None:
+        return default
+    return AttentionType.DECODER if is_causal else AttentionType.ENCODER_ONLY
+
+
 def _get_dflash_layer_attention_params(
     config, layer_id: int
 ) -> Tuple[int, AttentionType]:
@@ -76,17 +83,15 @@ def _get_dflash_layer_attention_params(
 
     layer_type = layer_types[layer_id]
     if layer_type == "full_attention":
-        text_config = getattr(config, "text_config", None) or config
-        attention_type = (
-            AttentionType.DECODER
-            if getattr(text_config, "is_causal", False)
-            else AttentionType.ENCODER_ONLY
+        return -1, _get_dflash_attention_type(
+            config, default=AttentionType.ENCODER_ONLY
         )
-        return -1, attention_type
     if layer_type == "sliding_attention":
         sliding_window_size = get_dflash_attention_sliding_window_size(config)
         assert sliding_window_size is not None
-        return sliding_window_size, AttentionType.DECODER
+        return sliding_window_size, _get_dflash_attention_type(
+            config, default=AttentionType.DECODER
+        )
     raise ValueError(
         "Unsupported DFLASH draft layer type. "
         f"layer_types[{layer_id}]={layer_type!r}."
@@ -168,6 +173,13 @@ class DFlashAttention(nn.Module):
         )
 
         self.scaling = head_dim**-0.5
+        rotary = self.rotary_emb
+        self.use_table_qk_norm_rope = (
+            not _is_npu
+            and hasattr(rotary, "cos_sin_cache")
+            and getattr(rotary, "rotary_dim", None) == head_dim
+            and getattr(rotary, "is_neox_style", False)
+        )
         self.sliding_window_size, self.attn_type = _get_dflash_layer_attention_params(
             config, layer_id
         )
@@ -210,6 +222,21 @@ class DFlashAttention(nn.Module):
         qkv, _ = self.qkv_proj(hidden_states)
         if _is_npu:
             q, k, v = self.forward_prepare_npu(positions, hidden_states)
+        elif self.use_table_qk_norm_rope and qkv.dtype == torch.bfloat16:
+            from sglang.srt.speculative.dflash_utils import table_qk_norm_rope_
+
+            table_qk_norm_rope_(
+                qkv,
+                positions,
+                self.q_norm.weight,
+                self.k_norm.weight,
+                self.rotary_emb.cos_sin_cache,
+                self.num_heads,
+                self.num_kv_heads,
+                self.head_dim,
+                self.q_norm.variance_epsilon,
+            )
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         else:
             q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
             q, k = apply_qk_norm(q, k, self.q_norm, self.k_norm, self.head_dim)
@@ -594,6 +621,12 @@ class DFlashDraftModel(nn.Module):
 
         params_dict = dict(self.named_parameters())
 
+        # Alias the native export's "encoder." names.
+        _VENDOR_ENCODER_ALIASES = {
+            "encoder.fc.weight": "fc.weight",
+            "encoder.output_norm_enc.weight": "hidden_norm.weight",
+        }
+
         def resolve_param_name(name: str) -> Optional[str]:
             if name in params_dict:
                 return name
@@ -605,6 +638,9 @@ class DFlashDraftModel(nn.Module):
                 prefixed_name = f"model.{name}"
                 if prefixed_name in params_dict:
                     return prefixed_name
+            aliased_name = _VENDOR_ENCODER_ALIASES.get(name)
+            if aliased_name is not None and aliased_name in params_dict:
+                return aliased_name
             return None
 
         for name, loaded_weight in weights:
@@ -926,31 +962,33 @@ class DFlash2DraftModel(DFlashDraftModel):
         per shard, all-gather K logits/ids (not the full vocab), then a global top-k --
         identical candidates at O(tp*K) instead of O(vocab) gather bandwidth."""
         assert self.lm_head is not None, "draft_model.lm_head unset before capture"
+        lm_head = self.lm_head
         k = self.candidate_selector.top_k
-        # The worker screens the head before capture, but its eager fallback
-        # (_propose_selector_block) attaches whatever the target has.
-        weight = getattr(self.lm_head, "weight", None)
-        if is_dense_head_weight(weight):
-            local_logits = torch.matmul(hidden.to(weight.dtype), weight.T)
+        parallel = get_parallel()
+        if parallel.tp_size == 1:
+            num_org = int(lm_head.org_vocab_size)
+            org_vocab_start = 0
         else:
-            quant_method = getattr(self.lm_head, "quant_method", None)
-            if not should_apply_lm_head_quant_method(self.lm_head, quant_method):
-                raise RuntimeError(
-                    "DFlash2 selector requires a supported dense or quantized "
-                    "target lm_head."
-                )
-            local_logits = quant_method.apply(
-                self.lm_head, hidden, getattr(self.lm_head, "bias", None)
+            shard = lm_head.shard_indices
+            num_org = int(shard.num_org_elements)
+            org_vocab_start = int(shard.org_vocab_start_index)
+
+        weight = getattr(lm_head, "weight", None)
+        quant_method = getattr(lm_head, "quant_method", None)
+        if should_apply_lm_head_quant_method(lm_head, quant_method):
+            local_logits = quant_method.apply(lm_head, hidden, None)[:, :num_org]
+        elif is_dense_head_weight(weight):
+            local_logits = torch.matmul(hidden.to(weight.dtype), weight[:num_org].T)
+        else:
+            raise RuntimeError(
+                "DFlash2 selector requires a dense target lm_head or a supported "
+                "lm_head.quant_method."
             )
-        if get_parallel().tp_size == 1:
-            org = int(self.lm_head.org_vocab_size)
-            vals, ids = _radix_topk(local_logits[:, :org], k)
+
+        vals, ids = _radix_topk(local_logits, k)
+        if parallel.tp_size == 1:
             return ids.long(), self._transform_unary_logits(vals)
-        shard = self.lm_head.shard_indices
-        vals, ids = _radix_topk(
-            local_logits[:, : int(shard.num_org_elements)], k
-        )
-        global_ids = ids.long() + int(shard.org_vocab_start_index)
+        global_ids = ids.long() + org_vocab_start
         gathered_vals = tensor_model_parallel_all_gather(vals.float(), dim=-1)
         gathered_ids = tensor_model_parallel_all_gather(global_ids, dim=-1)
         top_vals, sel = torch.topk(gathered_vals, k, dim=-1)

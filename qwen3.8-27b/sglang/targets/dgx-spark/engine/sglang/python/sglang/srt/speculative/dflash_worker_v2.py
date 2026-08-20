@@ -20,7 +20,7 @@ from sglang.srt.configs.hybrid_arch import mambaish_config
 from sglang.srt.distributed import get_tp_group
 from sglang.srt.distributed.parallel_state_wrapper import ParallelState
 from sglang.srt.environ import envs
-from sglang.srt.layers.logprob_processor import compute_spec_v2_logprobs
+from sglang.srt.layers.logprob_processor import compute_spec_logprobs
 from sglang.srt.managers.schedule_batch import ScheduleBatch
 from sglang.srt.managers.scheduler import GenerationBatchResult
 from sglang.srt.managers.tp_worker import TpModelWorker
@@ -31,7 +31,7 @@ from sglang.srt.model_executor.forward_batch_info import (
     ForwardMode,
     compute_position,
 )
-from sglang.srt.runtime_context import get_exec
+from sglang.srt.runtime_context import get_exec, get_schedule
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.speculative.base_spec_worker import BaseSpecWorker
 from sglang.srt.speculative.dflash_info import DFlashVerifyInput
@@ -275,7 +275,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         self._target_worker = target_worker
         self.model_runner = target_worker.model_runner
         self._need_mamba_verify_commit = False
-        self.page_size = server_args.page_size
+        self.page_size = get_schedule().page_size
         # Normalized in arg_groups.speculative_hook.handle_speculative_decoding.
         self.draft_window_size: Optional[int] = (
             server_args.speculative_draft_window_size
@@ -290,7 +290,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         bundle = build_draft_tp_worker(
             server_args=server_args,
             gpu_id=gpu_id,
-            ps=replace(ps, pp_rank=0, pp_size=1),
+            ps=replace(ps, pp_rank=0),
             nccl_port=nccl_port,
             target_model_config=target_worker.model_runner.model_config,
             algo_label="DFLASH",
@@ -328,6 +328,12 @@ class DFlashWorkerV2(BaseSpecWorker):
             mask_token=self._mask_token,
             mask_token_id=self._mask_token_id_override,
         )
+        target_model = self._target_worker.model_runner.model
+        self._noise_embed_scale = (
+            float(target_model.get_dflash_noise_embedding_scale())
+            if hasattr(target_model, "get_dflash_noise_embedding_scale")
+            else 1.0
+        )
         if self.ps.tp_rank == 0:
             logger.info(
                 "Initialized DFLASH draft runner. attention_backend=%s, model=%s, block_size=%s, draft_window_size=%s, compact_cache=%s",
@@ -338,10 +344,11 @@ class DFlashWorkerV2(BaseSpecWorker):
                 self.use_compact_draft_cache,
             )
             logger.info(
-                "DFLASH draft runner ready. mask_token=%s, mask_token_id=%s, mask_token_id_override=%s",
+                "DFLASH draft runner ready. mask_token=%s, mask_token_id=%s, mask_token_id_override=%s, noise_embed_scale=%s",
                 self._mask_token,
                 self._mask_token_id,
                 self._mask_token_id_override,
+                self._noise_embed_scale,
             )
 
         self._block_pos_offsets = build_block_pos_offsets(
@@ -473,7 +480,7 @@ class DFlashWorkerV2(BaseSpecWorker):
             return _eager("block_size<=1")
         target_model = self._target_worker.model_runner.model
         lm_head = getattr(target_model, "lm_head", None)
-        if lm_head is None or not hasattr(lm_head, "weight"):
+        if lm_head is None:
             return _eager("no target lm_head")
         if not hasattr(lm_head, "weight"):
             return _eager("quantized lm_head has no dense weight")
@@ -771,7 +778,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         self,
         *,
         batch_seq_lens_cpu: Optional[torch.Tensor],
-        reserved_seq_lens_cpu: Optional[torch.Tensor],
+        nxt_kv_lens_cpu: Optional[torch.Tensor],
         draft_prefix_lens: torch.Tensor,
         out: torch.Tensor,
     ) -> None:
@@ -780,8 +787,8 @@ class DFlashWorkerV2(BaseSpecWorker):
         (same contract as the non-compact path in forward_batch_generation)."""
         if batch_seq_lens_cpu is not None:
             self._compute_compact_draft_seq_lens_host(batch_seq_lens_cpu, out=out)
-        elif reserved_seq_lens_cpu is not None:
-            self._compute_compact_draft_seq_lens_host(reserved_seq_lens_cpu, out=out)
+        elif nxt_kv_lens_cpu is not None:
+            self._compute_compact_draft_seq_lens_host(nxt_kv_lens_cpu, out=out)
         else:
             # Last resort: the legacy blocking D2H copy.
             out.copy_(draft_prefix_lens)
@@ -1735,9 +1742,13 @@ class DFlashWorkerV2(BaseSpecWorker):
         target_model = self.target_worker.model_runner.model
         embed_module = target_model.get_input_embeddings()
         lm_head = getattr(target_model, "lm_head", None)
-        if lm_head is None or not hasattr(lm_head, "weight"):
+        if lm_head is None or not (
+            hasattr(lm_head, "weight")
+            or callable(getattr(getattr(lm_head, "quant_method", None), "apply", None))
+        ):
             raise RuntimeError(
-                "DFLASH requires the target model to expose `lm_head` with `weight`."
+                "DFLASH requires the target model to expose `lm_head` with either "
+                "`weight` or a `quant_method` that can produce logits."
             )
 
         block_size = int(self.block_size)
@@ -1810,6 +1821,8 @@ class DFlashWorkerV2(BaseSpecWorker):
             verify_out_cache_loc_2d.copy_(verify_out_cache_loc.view(bs, block_size))
 
         noise_embedding = embed_module(block_ids)
+        if self._noise_embed_scale != 1.0:
+            noise_embedding = noise_embedding * self._noise_embed_scale
         input_embeds = noise_embedding.view(-1, noise_embedding.shape[-1])
 
         positions = positions_2d.reshape(-1)
@@ -1821,7 +1834,7 @@ class DFlashWorkerV2(BaseSpecWorker):
             draft_prefix_lens = self._compute_compact_draft_seq_lens(prefix_lens)
             self._fill_compact_seq_lens_cpu_bound(
                 batch_seq_lens_cpu=batch.seq_lens_cpu,
-                reserved_seq_lens_cpu=draft_input.reserved_seq_lens_cpu,
+                nxt_kv_lens_cpu=draft_input.nxt_kv_lens_cpu,
                 draft_prefix_lens=draft_prefix_lens,
                 out=seq_lens_cpu,
             )
@@ -1845,10 +1858,10 @@ class DFlashWorkerV2(BaseSpecWorker):
                 seq_lens_cpu.copy_(batch.seq_lens_cpu)
                 seq_lens_cpu.add_(block_size)
                 draft_seq_lens_sum = int(seq_lens_cpu.sum())
-            elif draft_input.reserved_seq_lens_cpu is not None:
+            elif draft_input.nxt_kv_lens_cpu is not None:
                 # GPU-only backend: reserved is a safe over-estimate.
-                seq_lens_cpu.copy_(draft_input.reserved_seq_lens_cpu)
-                draft_seq_lens_sum = int(draft_input.reserved_seq_lens_sum)
+                seq_lens_cpu.copy_(draft_input.nxt_kv_lens_cpu)
+                draft_seq_lens_sum = int(draft_input.nxt_kv_lens_sum)
             else:
                 seq_lens_cpu.copy_(prefix_lens.to("cpu", dtype=torch.int32))
                 draft_seq_lens_sum = int(prefix_lens.sum().item())
@@ -1946,9 +1959,9 @@ class DFlashWorkerV2(BaseSpecWorker):
             verify_host_seq_lens = seq_lens_cpu_backup + block_size
             batch.seq_lens_cpu = verify_host_seq_lens
             batch.seq_lens_sum = int(verify_host_seq_lens.sum())
-        elif draft_input.reserved_seq_lens_cpu is not None:
-            batch.seq_lens_cpu = draft_input.reserved_seq_lens_cpu
-            batch.seq_lens_sum = int(draft_input.reserved_seq_lens_sum)
+        elif draft_input.nxt_kv_lens_cpu is not None:
+            batch.seq_lens_cpu = draft_input.nxt_kv_lens_cpu
+            batch.seq_lens_sum = int(draft_input.nxt_kv_lens_sum)
 
         verify_forward_batch, _ = verify_input.prepare_for_verify(
             batch, self.target_worker
@@ -2083,15 +2096,11 @@ class DFlashWorkerV2(BaseSpecWorker):
             new_seq_lens = None
 
         if batch.return_logprob:
-            output_indices = torch.arange(
-                bs * block_size, dtype=torch.int64, device=device
-            ).view(bs, block_size)
-            compute_spec_v2_logprobs(
+            compute_spec_logprobs(
                 batch,
                 logits_output,
                 out_tokens.reshape(-1),
-                output_indices,
-                block_size - 1,
+                chain_stride=block_size,
             )
 
         if self._need_mamba_verify_commit:
@@ -2141,4 +2150,6 @@ class DFlashWorkerV2(BaseSpecWorker):
             # The non-overlap (sync) scheduler path advances batch.seq_lens
             # from the result; overlap carries it via next_draft_input instead.
             new_seq_lens=new_seq_lens,
+            routed_experts_output=target_out.routed_experts_output,
+            indexer_topk_output=target_out.indexer_topk_output,
         )
