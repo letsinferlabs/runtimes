@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "name": "qwen3.8-27b/sglang/dgx-spark",
-  "version": "0.1.0-rc.6",
+  "version": "0.1.0-rc.7",
   "model": "qwen3.8-27b",
   "engine": "sglang",
   "target": "dgx-spark",
@@ -15,7 +15,7 @@
     "suite": "letsinfer-code-prose-v1",
     "generator": {
       "id": "letsinfer-code-prose",
-      "version": 1
+      "version": 2
     },
     "tokenizer": {
       "capability": "engine-rendered-chat-count-v1",

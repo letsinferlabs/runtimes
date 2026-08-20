@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": "qwen3.8-27b-sglang-0.1.0-rc.6",
+  "release": "qwen3.8-27b-sglang-0.1.0-rc.7",
   "status": "candidate",
   "target": {
     "id": "dgx-spark",
@@ -145,8 +145,8 @@
     "max_context_tokens": 262144,
     "gate": {
       "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
-      "bench_block": "qwen38-sglang-dgx-spark-code-prose-v1",
-      "evidence_directory": "qwen38-code-prose-rc6-pending",
+      "bench_block": "qwen38-sglang-dgx-spark-code-prose-v2",
+      "evidence_directory": "qwen38-code-prose-rc7-pending",
       "results_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     "blocked_by": "code-prose-qualification"
