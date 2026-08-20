@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
   "name": "qwen3.8-27b/sglang/dgx-spark",
-  "version": "0.1.0-rc.7",
+  "version": "0.1.0-rc.10",
   "model": "qwen3.8-27b",
   "engine": "sglang",
   "target": "dgx-spark",
-  "status": "candidate",
+  "status": "stable",
   "release_manifest": "release.json",
   "core_compatibility": {
     "api": 2
@@ -20,7 +20,7 @@
     "tokenizer": {
       "capability": "engine-rendered-chat-count-v1",
       "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
-      "engine_image_sha256": "2532529d858e760d9ce66f90e532d1adc36811a537bff5d43380729af140f1c5",
+      "engine_image_sha256": "1c351587826c739778e2e2b170fa0c6b3592a00cff297b201a97962676fcc26e",
       "render_contract": "openai-chat-user-v1"
     },
     "request": {

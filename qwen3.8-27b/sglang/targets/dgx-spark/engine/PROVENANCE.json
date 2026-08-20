@@ -7,9 +7,9 @@
   "upstream_parent": "3a8f522f6547f4fe772885145ea0a50a3a6967c0",
   "upstream_commit": "c14312a66420b75ca9a11bf1817c4db1fa26b097",
   "upstream_pull_request": 35371,
-  "method": "three-way-source-port",
+  "method": "full-tree-source-overlay",
   "runtime_fixes": [
-    "isolate-target-config-overrides-from-the-dflash-draft",
-    "run-the-dflash-selector-through-the-target-quantized-lm-head"
+    "run-the-dflash-selector-through-the-target-quantized-lm-head",
+    "install-a-target-qualified-flashinfer-autotune-profile"
   ]
 }

@@ -1,0 +1,24 @@
+{
+  "benchmark": {
+    "id": "82d99d254b6db08d14bcd150664143f5f0e41b9fbaa3894d7b37736d0c107117",
+    "record_sha256": "72a0ec8f0df41f6acb0839f4d1226adb5f453f2ee2b3f9e101676a7f4e234fe7",
+    "results_sha256": "3b4ac7d4bfc6df856da60f7a63fc15c4f41dc3e305a5b99ebc66d719bc056c3a",
+    "rows": 6
+  },
+  "checks": {
+    "cache_restore": "deferred",
+    "context_256k": "deferred",
+    "crash_protection": "deferred",
+    "memory_pressure": "deferred",
+    "restart_persistence": "deferred"
+  },
+  "contract": "sglang-radix-v1",
+  "image_immutable_id": "sha256:1c351587826c739778e2e2b170fa0c6b3592a00cff297b201a97962676fcc26e",
+  "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
+  "owner_acceptance": {
+    "deferred_gates": "accepted",
+    "qualification": "accepted"
+  },
+  "schema_version": 1,
+  "target": "dgx-spark"
+}
