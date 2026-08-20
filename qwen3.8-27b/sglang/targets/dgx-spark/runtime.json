@@ -5,7 +5,7 @@
   "model": "qwen3.8-27b",
   "engine": "sglang",
   "target": "dgx-spark",
-  "status": "candidate",
+  "status": "stable",
   "release_manifest": "release.json",
   "core_compatibility": {
     "api": 2

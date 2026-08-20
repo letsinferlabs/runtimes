@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release": "qwen3.8-27b-sglang-0.1.0-rc.10",
-  "status": "candidate",
+  "status": "stable",
   "target": {
     "id": "dgx-spark",
     "platform": "linux/arm64",
@@ -97,11 +97,25 @@
     }
   ],
   "image": {
-    "distribution": "local-image-id",
-    "reference": "sha256:1c351587826c739778e2e2b170fa0c6b3592a00cff297b201a97962676fcc26e",
+    "distribution": "registry-digest",
+    "reference": "ghcr.io/letsinferlabs/qwen3.8-27b-sglang-image@sha256:8bb11ef34ef5ec3b4aac19701a154559bfc9a65c3615eca15280f6066a768d91",
     "immutable_id": "sha256:1c351587826c739778e2e2b170fa0c6b3592a00cff297b201a97962676fcc26e",
     "base": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
   },
+  "source_artifacts": [
+    {
+      "path": "benchmark.json",
+      "sha256": "72a0ec8f0df41f6acb0839f4d1226adb5f453f2ee2b3f9e101676a7f4e234fe7"
+    },
+    {
+      "path": "evidence/serving/common-results.json",
+      "sha256": "8bae9b0535f27d3008475a17309391c1e38651af52b896920bb9fe5fd4808c33"
+    },
+    {
+      "path": "evidence/serving/engine-results.json",
+      "sha256": "bb429f7699866e67c4bc282f8490e0b29672e88c5b7eed9aa8a0d3b179520321"
+    }
+  ],
   "container": {
     "memory_bytes": 120259084288,
     "shm_bytes": 34359738368,
@@ -142,16 +156,27 @@
     "prewarm": false
   },
   "serving": {
-    "qualified": false,
+    "qualified": true,
     "max_connections": 128,
     "max_active_requests": 10,
     "max_context_tokens": 262144,
     "gate": {
       "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
       "bench_block": "qwen38-sglang-dgx-spark-code-prose-v2",
-      "evidence_directory": "qwen38-code-prose-rc10-pending",
-      "results_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-    },
-    "blocked_by": "code-prose-qualification"
+      "evidence_directory": "evidence/serving",
+      "results_sha256": "bb429f7699866e67c4bc282f8490e0b29672e88c5b7eed9aa8a0d3b179520321",
+      "common": {
+        "contract": "letsinfer-openai-v1-common",
+        "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
+        "evidence_reference": "evidence/serving/common-results.json",
+        "results_sha256": "8bae9b0535f27d3008475a17309391c1e38651af52b896920bb9fe5fd4808c33"
+      },
+      "engine": {
+        "contract": "sglang-radix-v1",
+        "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
+        "evidence_reference": "evidence/serving/engine-results.json",
+        "results_sha256": "bb429f7699866e67c4bc282f8490e0b29672e88c5b7eed9aa8a0d3b179520321"
+      }
+    }
   }
 }
