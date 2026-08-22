@@ -209,6 +209,17 @@ class ManifestToolTests(unittest.TestCase):
             before["models"]["qwen3.8-27b"],
         )
 
+    def test_runtime_release_uses_credential_free_catalog_handoff(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("contents: write", workflow)
+        self.assertIn("gh release create", workflow)
+        self.assertIn("catalog-candidate-$GITHUB_SHA", workflow)
+        self.assertIn("catalog-public-key.pem", workflow)
+        self.assertNotIn("LETSINFER_CATALOG_TOKEN", workflow)
+        self.assertNotIn("git push origin HEAD:main", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -88,9 +88,11 @@ After target qualification is committed, merging the exact revision to the
 4. verifies that every model/target has a qualified recommendation;
 5. signs the generated schema-v4 catalog;
 6. verifies the signature with the public key shipped by core;
-7. atomically publishes `catalog.json` and `catalog.json.sig` to the catalog
-   repository; and
-8. emits build-provenance attestations.
+7. publishes `catalog.json`, its signature, the public key, and a hash-bound
+   metadata record as an immutable prerelease in this repository;
+8. lets the catalog repository independently download, verify, and promote
+   those exact bytes through its own review branch; and
+9. emits build-provenance attestations.
 
 The release fails closed when an Engine digest, model revision, benchmark
 identity, catalog source, signature key, or recommendation is inconsistent.
