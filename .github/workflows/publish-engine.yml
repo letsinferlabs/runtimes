@@ -24,6 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  artifact-metadata: write
   attestations: write
   contents: read
   id-token: write
@@ -261,7 +262,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Attest exact Engine SBOM
-        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ steps.sbom.outputs.subject_name }}
           subject-digest: ${{ steps.sbom.outputs.subject_digest }}
