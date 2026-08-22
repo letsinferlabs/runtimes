@@ -1,0 +1,6 @@
+# Engine SBOMs inventory installed packages. File-by-file hashing is omitted so
+# large accelerator images fit the bounded GitHub runner without weakening the
+# package-level SPDX inventory.
+parallelism: 1
+file:
+  selection: none

@@ -153,6 +153,7 @@ jobs:
           registry-username: ${{ github.actor }}
           registry-password: ${{ github.token }}
           format: spdx-json
+          config: .github/syft-engine.yaml
           artifact-name: engine-sbom-${{ matrix.candidate }}.spdx.json
           output-file: ${{ runner.temp }}/${{ matrix.candidate }}.spdx.json
           upload-artifact: true
