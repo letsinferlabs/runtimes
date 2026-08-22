@@ -169,6 +169,21 @@ jobs:
               "$candidate/catalog-public-key.pem" \
               "$candidate/candidate.json"
           fi
+          release="$RUNNER_TEMP/catalog-candidate-release.json"
+          gh release view "$tag" --json targetCommitish,assets > "$release"
+          python3 - "$release" "$GITHUB_SHA" <<'PY'
+          import json, pathlib, sys
+          value=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          expected={
+              'candidate.json',
+              'catalog-public-key.pem',
+              'catalog.json',
+              'catalog.json.sig',
+          }
+          names={asset.get('name') for asset in value.get('assets', [])}
+          if value.get('targetCommitish') != sys.argv[2] or names != expected:
+              raise SystemExit('catalog candidate release identity or asset set differs')
+          PY
       - name: Attest runtime packs and catalog
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
