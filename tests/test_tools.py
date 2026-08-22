@@ -166,6 +166,11 @@ class ManifestToolTests(unittest.TestCase):
             / "runtime.json"
         )
         runtime = json.loads(source.read_text(encoding="utf-8"))
+        runtime["benchmark"]["record"] = {
+            "path": "benchmark.json",
+            "sha256": "a" * 64,
+            "id": "b" * 64,
+        }
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             runtime_path = root / "runtime.json"
