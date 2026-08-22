@@ -11,6 +11,7 @@ Every candidate is a single top-level directory:
 ```text
 <engine>--<hf-owner>--<hf-model>--<target>/
 ├── runtime.json
+├── README.md      # model links and exact reproduction command
 ├── adapter/       # Engine protocol frontend included in the Engine OCI
 ├── engine/        # pinned engine or kernel source used to build the Engine OCI
 ├── image/         # deterministic Engine OCI recipe
