@@ -268,3 +268,4 @@ jobs:
           subject-digest: ${{ steps.sbom.outputs.subject_digest }}
           sbom-path: ${{ runner.temp }}/${{ matrix.candidate }}.spdx.json
           push-to-registry: true
+          create-storage-record: false

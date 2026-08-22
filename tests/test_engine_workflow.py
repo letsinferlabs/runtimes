@@ -53,6 +53,7 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("actions/attest@", workflow)
         self.assertNotIn("actions/attest-sbom@", workflow)
         self.assertIn("push-to-registry: true", workflow)
+        self.assertIn("create-storage-record: false", workflow)
         self.assertNotIn("anchore/sbom-action", workflow)
 
     def test_every_engine_exports_the_same_inventory_contract(self) -> None:
