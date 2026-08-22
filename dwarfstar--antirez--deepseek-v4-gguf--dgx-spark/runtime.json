@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "id": "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
-  "version": "0.11.0-rc.8",
+  "version": "0.11.0-rc.9",
   "logical_model": "deepseek-v4-flash",
   "status": "candidate",
   "target": {

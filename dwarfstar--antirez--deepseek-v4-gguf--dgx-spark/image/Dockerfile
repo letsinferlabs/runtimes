@@ -75,7 +75,8 @@ FROM ghcr.io/miaai-lab/mia-vllm-gb10-linear-b12x@sha256:19627342e1da2607f4db5074
 ARG LETSINFER_RUNTIME_REVISION=letsinfer-ds4-0.11.0-rc.1
 LABEL org.opencontainers.image.title="DS4 Overdrive for Let's Infer" \
       org.opencontainers.image.licenses="AGPL-3.0-only AND MIT" \
-      org.opencontainers.image.revision="${LETSINFER_RUNTIME_REVISION}"
+      org.opencontainers.image.revision="${LETSINFER_RUNTIME_REVISION}" \
+      ai.letsinfer.build.reproducibility="source-date-epoch-v1"
 
 RUN --mount=from=build,source=/opt/dwarfstar,target=/build-output,ro \
     --mount=from=bridge,source=/opt/letsinfer/lib,target=/bridge-output,ro \
