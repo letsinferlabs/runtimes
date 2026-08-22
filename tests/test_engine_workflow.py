@@ -38,12 +38,22 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("Engine pin review branch", workflow)
         self.assertNotIn("gh pr create", workflow)
 
-    def test_engine_sbom_uses_bounded_installed_package_catalogers(self) -> None:
-        config = (ROOT / ".github/syft-engine.yaml").read_text(encoding="utf-8")
-        self.assertIn("default-catalogers:", config)
-        self.assertIn("dpkg-db-cataloger", config)
-        self.assertIn("python-installed-package-cataloger", config)
-        self.assertIn("selection: none", config)
+    def test_engine_sbom_uses_build_time_package_inventory(self) -> None:
+        workflow = (ROOT / ".github/workflows/publish-engine.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--target letsinfer-engine-inventory", workflow)
+        self.assertIn("tools/engine_sbom.py spdx", workflow)
+        self.assertIn("steps.engine.outputs.immutable_id", workflow)
+        self.assertIn("actions/upload-artifact@", workflow)
+        self.assertNotIn("anchore/sbom-action", workflow)
+
+    def test_every_engine_exports_the_same_inventory_contract(self) -> None:
+        for dockerfile in ROOT.glob("*/image/Dockerfile"):
+            source = dockerfile.read_text(encoding="utf-8")
+            self.assertIn("AS letsinfer-engine-inventory-build", source)
+            self.assertIn("FROM scratch AS letsinfer-engine-inventory", source)
+            self.assertIn("tools/engine_sbom.py", source)
 
 
 if __name__ == "__main__":

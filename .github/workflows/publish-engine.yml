@@ -139,6 +139,7 @@ jobs:
           docker buildx build "$CANDIDATE" \
             --file "$CANDIDATE/image/Dockerfile" \
             --platform linux/arm64 \
+            --build-context letsinfer-tools=. \
             --build-arg SOURCE_DATE_EPOCH=0 \
             --provenance=true --sbom=false \
             --output "type=registry,name=$image,rewrite-timestamp=true" \
@@ -192,19 +193,7 @@ jobs:
             --manifest manifest.json --candidate "$CANDIDATE" --source "$source"
           python3 tools/generate_manifest.py --sources-from manifest.json
           echo "platform_reference=$repository@$platform_digest" >> "$GITHUB_OUTPUT"
-      - name: Generate exact Engine SBOM artifact
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        with:
-          image: ${{ steps.engine.outputs.platform_reference || steps.pinned.outputs.platform_reference }}
-          registry-username: ${{ github.actor }}
-          registry-password: ${{ github.token }}
-          format: spdx-json
-          config: .github/syft-engine.yaml
-          artifact-name: engine-sbom-${{ matrix.candidate }}.spdx.json
-          output-file: ${{ runner.temp }}/${{ matrix.candidate }}.spdx.json
-          upload-artifact: true
-          upload-artifact-retention: 90
-          upload-release-assets: false
+          echo "immutable_id=$image_id" >> "$GITHUB_OUTPUT"
       - name: Publish a requalification review branch when the Engine identity changed
         if: github.event_name != 'workflow_dispatch' || inputs.rebuild
         env:
@@ -224,3 +213,38 @@ jobs:
           git push origin "$branch"
           echo "Engine pin review branch: $branch" >> "$GITHUB_STEP_SUMMARY"
           echo "::notice title=Engine pin ready::Review and merge $branch"
+      - name: Export deterministic Engine package inventory
+        env:
+          CANDIDATE: ${{ matrix.candidate }}
+        run: |
+          set -euo pipefail
+          destination="$RUNNER_TEMP/$CANDIDATE-inventory"
+          rm -rf "$destination"
+          docker buildx build "$CANDIDATE" \
+            --file "$CANDIDATE/image/Dockerfile" \
+            --platform linux/arm64 \
+            --target letsinfer-engine-inventory \
+            --build-context letsinfer-tools=. \
+            --build-arg SOURCE_DATE_EPOCH=0 \
+            --output "type=local,dest=$destination"
+          test -s "$destination/engine-inventory.json"
+      - name: Bind Engine package inventory to exact OCI identity
+        env:
+          CANDIDATE: ${{ matrix.candidate }}
+          ENGINE_CONFIG: ${{ steps.engine.outputs.immutable_id || steps.pinned.outputs.immutable_id }}
+          ENGINE_IMAGE: ${{ steps.engine.outputs.platform_reference || steps.pinned.outputs.platform_reference }}
+        run: |
+          set -euo pipefail
+          python3 tools/engine_sbom.py spdx \
+            --inventory "$RUNNER_TEMP/$CANDIDATE-inventory/engine-inventory.json" \
+            --candidate "$CANDIDATE" \
+            --image "$ENGINE_IMAGE" \
+            --config-digest "$ENGINE_CONFIG" \
+            --output "$RUNNER_TEMP/$CANDIDATE.spdx.json"
+      - name: Upload exact Engine SBOM artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: engine-sbom-${{ matrix.candidate }}.spdx.json
+          path: ${{ runner.temp }}/${{ matrix.candidate }}.spdx.json
+          if-no-files-found: error
+          retention-days: 90

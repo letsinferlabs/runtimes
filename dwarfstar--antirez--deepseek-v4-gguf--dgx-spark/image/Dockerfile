@@ -1,5 +1,15 @@
 ARG SOURCE_DATE_EPOCH=1785594180
 
+FROM ghcr.io/miaai-lab/mia-vllm-gb10-linear-b12x@sha256:19627342e1da2607f4db50745dca30e57d7dd0ebff06062f03fd69b43a252931 AS letsinfer-engine-inventory-build
+
+COPY --from=letsinfer-tools tools/engine_sbom.py /tmp/letsinfer-engine-sbom.py
+RUN python3 /tmp/letsinfer-engine-sbom.py snapshot \
+      --output /tmp/engine-inventory.json
+
+FROM scratch AS letsinfer-engine-inventory
+COPY --from=letsinfer-engine-inventory-build \
+  /tmp/engine-inventory.json /engine-inventory.json
+
 FROM ghcr.io/pyo3/maturin@sha256:b6c8b59a0170b77eb31a35b56034abd39972483ad0ebfff344deaa42a85f3bd3 AS bridge
 
 WORKDIR /build/letsinfer-bridge

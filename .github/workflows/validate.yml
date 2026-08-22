@@ -85,7 +85,7 @@ jobs:
               image=${line#FROM }
               image=${image%% AS *}
               image=${image%% as *}
-              [[ "$image" == *'@sha256:'* ]] || {
+              [[ "$image" == scratch || "$image" == *'@sha256:'* ]] || {
                 echo "unpinned FROM in $dockerfile: $line" >&2
                 exit 1
               }

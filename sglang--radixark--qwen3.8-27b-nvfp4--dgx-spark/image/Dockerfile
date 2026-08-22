@@ -1,3 +1,13 @@
+FROM docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6 AS letsinfer-engine-inventory-build
+
+COPY --from=letsinfer-tools tools/engine_sbom.py /tmp/letsinfer-engine-sbom.py
+RUN python3 /tmp/letsinfer-engine-sbom.py snapshot \
+      --output /tmp/engine-inventory.json
+
+FROM scratch AS letsinfer-engine-inventory
+COPY --from=letsinfer-engine-inventory-build \
+  /tmp/engine-inventory.json /engine-inventory.json
+
 FROM docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6
 
 ARG SOURCE_DATE_EPOCH=0
