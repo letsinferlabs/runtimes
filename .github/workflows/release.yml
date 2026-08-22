@@ -1,0 +1,146 @@
+name: Runtime release
+
+on:
+  push:
+    branches: [release]
+
+concurrency:
+  group: runtime-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: production-runtime-release
+    steps:
+      - name: Check out exact runtime revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out released core contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: letsinferlabs/letsinfer
+          path: .core
+          persist-credentials: false
+      - name: Check out trusted catalog publication repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: letsinferlabs/catalog
+          path: .catalog
+          token: ${{ secrets.LETSINFER_CATALOG_TOKEN }}
+      - name: Validate release inputs
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          git diff --check
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          python3 tools/generate_manifest.py --sources-from manifest.json --check
+          python3 - <<'PY'
+          import json
+          import pathlib
+          catalog = json.loads(pathlib.Path('manifest.json').read_text())
+          for model, model_record in catalog['models'].items():
+              for target, record in model_record['targets'].items():
+                  if record['recommended'] is None:
+                      raise SystemExit(f'{model}/{target} has no qualified recommendation')
+          PY
+      - name: Build deterministic runtime packs and verify planned identities
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/packs" "$RUNNER_TEMP/plans"
+          for runtime in */runtime.json; do
+            candidate=${runtime%/runtime.json}
+            version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")
+            .core/bin/letsinfer pack "$candidate" \
+              --output "$RUNNER_TEMP/packs/$candidate.letsinfer"
+            python3 tools/oci_artifact.py plan \
+              --artifact "$RUNNER_TEMP/packs/$candidate.letsinfer" \
+              --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
+              --candidate "$candidate" --version "$version" \
+              --output "$RUNNER_TEMP/plans/$candidate.json"
+          done
+          python3 - "$RUNNER_TEMP/plans" <<'PY'
+          import json, pathlib, sys
+          catalog=json.loads(pathlib.Path('manifest.json').read_text())
+          advertised={
+              candidate: record['source']
+              for model in catalog['models'].values()
+              for target in model['targets'].values()
+              for candidate, record in target['candidates'].items()
+          }
+          planned={p.stem: json.loads(p.read_text())['source'] for p in pathlib.Path(sys.argv[1]).glob('*.json')}
+          if advertised != planned:
+              for candidate in sorted(set(advertised) | set(planned)):
+                  if advertised.get(candidate) != planned.get(candidate):
+                      print(f'{candidate}: manifest={advertised.get(candidate)} planned={planned.get(candidate)}')
+              raise SystemExit('manifest sources do not match deterministic runtime OCI plans')
+          PY
+      - name: Publish immutable runtime OCI artifacts
+        env:
+          OCI_USERNAME: ${{ github.actor }}
+          OCI_PASSWORD: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for runtime in */runtime.json; do
+            candidate=${runtime%/runtime.json}
+            version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")
+            python3 tools/oci_artifact.py push \
+              --artifact "$RUNNER_TEMP/packs/$candidate.letsinfer" \
+              --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
+              --candidate "$candidate" --version "$version"
+          done
+      - name: Sign the exact generated catalog
+        env:
+          LETSINFER_CATALOG_SIGNING_KEY_B64: ${{ secrets.LETSINFER_CATALOG_SIGNING_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$LETSINFER_CATALOG_SIGNING_KEY_B64"
+          key="$RUNNER_TEMP/catalog-private.pem"
+          public="$RUNNER_TEMP/catalog-public.pem"
+          printf '%s' "$LETSINFER_CATALOG_SIGNING_KEY_B64" | base64 --decode > "$key"
+          chmod 600 "$key"
+          openssl pkey -in "$key" -pubout -out "$public"
+          cmp "$public" .core/core/trust/catalog-public-key.pem
+          cmp "$public" .catalog/catalog-public-key.pem
+          python3 tools/sign_manifest.py --catalog manifest.json \
+            --private-key "$key" --public-key "$public" \
+            --output "$RUNNER_TEMP/manifest.json.sig"
+          rm -f "$key"
+      - name: Verify and publish the trusted catalog atomically
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          cp manifest.json .catalog/catalog.json
+          cp "$RUNNER_TEMP/manifest.json.sig" .catalog/catalog.json.sig
+          PYTHONPATH=.core python3 - <<'PY'
+          from core.runtime_packs import load_catalog
+          catalog = load_catalog('.catalog/catalog.json', public_key='.catalog/catalog-public-key.pem')
+          assert catalog['schema_version'] == 4
+          PY
+          cd .catalog
+          if git diff --quiet -- catalog.json catalog.json.sig; then
+            echo 'Trusted catalog is already current.'
+            exit 0
+          fi
+          git config user.name 'Taimur Ayaz'
+          git config user.email 'timonea.dev@gmail.com'
+          git add catalog.json catalog.json.sig
+          git commit -m "Publish runtime catalog $GITHUB_SHA"
+          git push origin HEAD:main
+      - name: Attest runtime packs and catalog
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: |
+            ${{ runner.temp }}/packs/*.letsinfer
+            manifest.json
+            manifest.json.sig

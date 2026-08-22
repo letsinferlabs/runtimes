@@ -1,0 +1,161 @@
+name: Publish Engine OCI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "*/engine/**"
+      - "*/adapter/**"
+      - "*/image/**"
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact runtime candidate ID
+        required: true
+        type: string
+
+concurrency:
+  group: engine-${{ github.ref }}-${{ inputs.candidate || 'changed' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-24.04
+    outputs:
+      candidates: ${{ steps.changes.outputs.candidates }}
+      count: ${{ steps.changes.outputs.count }}
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Check out released core contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: letsinferlabs/letsinfer
+          path: .core
+          persist-credentials: false
+          persist-credentials: false
+      - name: Resolve changed candidates
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" == workflow_dispatch ]]; then
+            python3 tools/changed_candidates.py --candidate "$CANDIDATE" \
+              --github-output "$GITHUB_OUTPUT"
+          else
+            base="$BEFORE"
+            if [[ "$base" =~ ^0+$ ]]; then base=$(git rev-parse "$GITHUB_SHA^"); fi
+            python3 tools/changed_candidates.py --base "$base" --head "$GITHUB_SHA" \
+              --github-output "$GITHUB_OUTPUT"
+          fi
+  publish:
+    needs: detect
+    if: needs.detect.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate: ${{ fromJSON(needs.detect.outputs.candidates) }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Authenticate to GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Build and publish immutable Engine OCI
+        env:
+          CANDIDATE: ${{ matrix.candidate }}
+        run: |
+          set -euo pipefail
+          repository="ghcr.io/letsinferlabs/engines/$CANDIDATE"
+          image="$repository:$GITHUB_SHA"
+          docker buildx build "$CANDIDATE" \
+            --file "$CANDIDATE/image/Dockerfile" \
+            --platform linux/arm64 \
+            --provenance=true --sbom=true --push \
+            --tag "$image" --metadata-file "$RUNNER_TEMP/engine.json"
+          digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$RUNNER_TEMP/engine.json")
+          docker buildx imagetools inspect "$image@$digest" --raw > "$RUNNER_TEMP/engine-index.json"
+          platform_digest=$(python3 - "$RUNNER_TEMP/engine-index.json" "$digest" <<'PY'
+          import json, pathlib, re, sys
+          value=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          if isinstance(value.get('config'), dict):
+              selected=sys.argv[2]
+          else:
+              matches=[
+                  item['digest']
+                  for item in value.get('manifests', [])
+                  if item.get('platform', {}).get('os') == 'linux'
+                  and item.get('platform', {}).get('architecture') == 'arm64'
+              ]
+              if len(matches) != 1:
+                  raise SystemExit('Engine OCI index does not contain exactly one linux/arm64 image')
+              selected=matches[0]
+          if re.fullmatch(r'sha256:[0-9a-f]{64}', selected) is None:
+              raise SystemExit('Engine OCI platform digest is invalid')
+          print(selected)
+          PY
+          )
+          docker buildx imagetools inspect "$repository@$platform_digest" --raw > "$RUNNER_TEMP/engine-platform.json"
+          image_id=$(python3 - "$RUNNER_TEMP/engine-platform.json" <<'PY'
+          import json, pathlib, re, sys
+          value=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          digest=value.get('config', {}).get('digest')
+          if re.fullmatch(r'sha256:[0-9a-f]{64}', str(digest)) is None:
+              raise SystemExit('Engine OCI configuration digest is invalid')
+          print(digest)
+          PY
+          )
+          python3 tools/pin_engine.py \
+            --runtime "$CANDIDATE/runtime.json" \
+            --reference "$repository@$platform_digest" \
+            --immutable-id "$image_id"
+          version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$CANDIDATE/runtime.json")
+          .core/bin/letsinfer pack "$CANDIDATE" \
+            --output "$RUNNER_TEMP/$CANDIDATE.letsinfer"
+          python3 tools/oci_artifact.py plan \
+            --artifact "$RUNNER_TEMP/$CANDIDATE.letsinfer" \
+            --repository "ghcr.io/letsinferlabs/runtimes/$CANDIDATE" \
+            --candidate "$CANDIDATE" --version "$version" \
+            --output "$RUNNER_TEMP/$CANDIDATE-plan.json"
+          source=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source"])' "$RUNNER_TEMP/$CANDIDATE-plan.json")
+          python3 tools/set_publication_source.py \
+            --manifest manifest.json --candidate "$CANDIDATE" --source "$source"
+          python3 tools/generate_manifest.py --sources-from manifest.json
+      - name: Open requalification PR when the Engine identity changed
+        env:
+          CANDIDATE: ${{ matrix.candidate }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "$CANDIDATE" manifest.json; then
+            echo 'Engine OCI already pinned; no qualification reset required.'
+            exit 0
+          fi
+          branch="automation/engine-${CANDIDATE}-${GITHUB_RUN_ID}"
+          git config user.name 'Taimur Ayaz'
+          git config user.email 'timonea.dev@gmail.com'
+          git switch -c "$branch"
+          git add -A -- "$CANDIDATE" manifest.json
+          git commit -m "Pin $CANDIDATE Engine OCI"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Pin $CANDIDATE Engine OCI" \
+            --body "Pins the independently published Engine OCI and invalidates benchmark qualification because its immutable engine identity changed."

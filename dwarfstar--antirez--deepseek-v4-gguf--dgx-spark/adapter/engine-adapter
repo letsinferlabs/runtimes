@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+"""DwarfStar Engine OCI adapter for Let's Infer protocol v1."""
+
+from __future__ import annotations
+
+import json
+import pathlib
+import sys
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+_root = pathlib.Path(__file__).resolve().parent
+_installed_lib = _root.parent / "lib"
+sys.path.insert(0, str(_installed_lib if _installed_lib.is_dir() else _root))
+
+from engine_frontend import AdapterError, artifact_path, backend_json, expand_arguments, run
+
+
+def build_command(runtime: Mapping[str, Any], port: int) -> Sequence[str]:
+    return [
+        "/opt/dwarfstar/ds4-server",
+        "--model",
+        artifact_path(runtime, runtime["model"]["artifact"]),
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--mem-floor-gb",
+        str(runtime["container"]["runtime_min_available_gib"]),
+        "--no-update-check",
+        *expand_arguments(runtime),
+    ]
+
+
+def build_environment(runtime: Mapping[str, Any]) -> Mapping[str, str]:
+    cache = runtime["cache"]
+    config = cache["config"]
+    if not cache["persistent"]:
+        return {"DS4_LETSINFER_CACHE": "0"}
+    return {
+        "DS4_LETSINFER_CACHE": "1",
+        "DS4_LETSINFER_CACHE_DIR": "/root/.cache/letsinfer-prefix-store/dwarfstar",
+        "DS4_LETSINFER_CACHE_LIB": "/opt/letsinfer/lib/libletsinfer_prefix_capi.so",
+        "DS4_LETSINFER_CACHE_MB": str(int(config["durable_capacity_bytes"]) >> 20),
+        "DS4_LETSINFER_CACHE_TTL_S": str(config["ttl_seconds"]),
+        "DS4_LETSINFER_CACHE_MIN_TOKENS": str(config["min_tokens"]),
+        "DS4_LETSINFER_CACHE_RESIDENT_MB": str(int(config["resident_capacity_bytes"]) >> 20),
+        "DS4_LETSINFER_CACHE_DIRECT": "1" if config["direct_reads"] else "0",
+        "DS4_LETSINFER_CACHE_CAPTURE": "1" if config["capture"] else "0",
+        "DS4_LETSINFER_CACHE_PREFIX": "1" if config["prefix_lookup"] else "0",
+    }
+
+
+def count_tokens(host: str, port: int, body: bytes, model: str) -> int:
+    status, value = backend_json(host, port, "POST", "/v1/token-count", body)
+    count = value.get("prompt_tokens")
+    if status != 200 or value.get("object") != "token_count" or value.get("model") != model:
+        raise AdapterError("DwarfStar exact token count failed")
+    if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+        raise AdapterError("DwarfStar returned an invalid token count")
+    return count
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(run("dwarfstar", build_command, build_environment, count_tokens))
+    except (AdapterError, KeyError, OSError, ValueError) as error:
+        print(f"engine-adapter: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
