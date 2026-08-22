@@ -62,6 +62,14 @@ class EngineWorkflowTests(unittest.TestCase):
             self.assertIn("FROM scratch AS letsinfer-engine-inventory", source)
             self.assertIn("tools/engine_sbom.py", source)
 
+    def test_runtime_release_uses_the_current_attestation_action(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("artifact-metadata: write", workflow)
+        self.assertIn("actions/attest@", workflow)
+        self.assertNotIn("actions/attest-build-provenance@", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
