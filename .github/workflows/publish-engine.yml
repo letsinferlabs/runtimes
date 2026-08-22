@@ -40,7 +40,6 @@ jobs:
           repository: letsinferlabs/letsinfer
           path: .core
           persist-credentials: false
-          persist-credentials: false
       - name: Resolve changed candidates
         id: changes
         env:
