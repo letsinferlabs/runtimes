@@ -3,7 +3,7 @@
   "id": "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
   "version": "0.11.0-rc.9",
   "logical_model": "deepseek-v4-flash",
-  "status": "candidate",
+  "status": "qualified",
   "target": {
     "id": "dgx-spark",
     "platform": "linux/arm64",
@@ -143,7 +143,7 @@
     }
   },
   "serving": {
-    "qualified": false,
+    "qualified": true,
     "max_connections": 128,
     "max_active_requests": 128,
     "max_context_tokens": 557056,
@@ -164,8 +164,7 @@
         "evidence_reference": "evidence/serving/engine-results.json",
         "results_sha256": "f90251553c67ca90a27efeb85699d8a68fe1380cfbbc1a1c2eaa72514c2e44ea"
       }
-    },
-    "blocked_by": "engine-oci-requalification"
+    }
   },
   "benchmark": {
     "contract": {
@@ -236,6 +235,10 @@
         }
       ]
     },
-    "record": null
+    "record": {
+      "path": "benchmark.json",
+      "sha256": "36f8dbd99f480e087c9a2f0c3aa20a8d91520e5f7e2408049d1a86c2adfc6d8c",
+      "id": "c0a66f0935b3887bd76c99f6afe827f70a46003e26ee7498aadb53e0634366da"
+    }
   }
 }
