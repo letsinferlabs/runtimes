@@ -84,13 +84,13 @@ jobs:
           path: .core
           persist-credentials: false
       - name: Authenticate to GHCR
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.6.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Resolve the pinned Engine for a manual SBOM retry
         id: pinned
         if: github.event_name == 'workflow_dispatch' && !inputs.rebuild
@@ -217,7 +217,7 @@ jobs:
           echo "::notice title=Engine pin ready::Download and review engine-pin-$CANDIDATE"
       - name: Upload the deterministic Engine pin review patch
         if: steps.pin_review.outputs.changed == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: engine-pin-${{ matrix.candidate }}
           path: ${{ runner.temp }}/engine-pin-${{ matrix.candidate }}.patch
@@ -255,7 +255,7 @@ jobs:
           echo "subject_name=${ENGINE_IMAGE%@*}" >> "$GITHUB_OUTPUT"
           echo "subject_digest=${ENGINE_IMAGE##*@}" >> "$GITHUB_OUTPUT"
       - name: Upload exact Engine SBOM artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: engine-sbom-${{ matrix.candidate }}.spdx.json
           path: ${{ runner.temp }}/${{ matrix.candidate }}.spdx.json
