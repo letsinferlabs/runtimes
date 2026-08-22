@@ -31,11 +31,14 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("--build-arg SOURCE_DATE_EPOCH=0", workflow)
         self.assertIn("rewrite-timestamp=true", workflow)
 
-    def test_actions_publish_a_review_branch_without_creating_a_pr(self) -> None:
+    def test_actions_publish_a_deterministic_review_patch(self) -> None:
         workflow = (ROOT / ".github/workflows/publish-engine.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Engine pin review branch", workflow)
+        self.assertIn("Prepare the deterministic Engine pin review patch", workflow)
+        self.assertIn("git diff --binary", workflow)
+        self.assertIn("engine-pin-${{ matrix.candidate }}", workflow)
+        self.assertNotIn("git push origin", workflow)
         self.assertNotIn("gh pr create", workflow)
 
     def test_engine_sbom_uses_build_time_package_inventory(self) -> None:
