@@ -77,8 +77,11 @@ byte-identical archives, and verify the deterministic OCI manifest identity.
 ## Publication
 
 Engine sources, adapter, or image changes automatically start the Engine OCI
-workflow after merge. It publishes the image by digest and opens a pinning PR;
-the pinning change resets the candidate to unqualified.
+workflow after merge. It normalizes exported layer timestamps, publishes the
+image by digest, exports a deterministic Debian/Python package inventory,
+binds that inventory to the exact image and configuration identities as SPDX,
+and attaches the SBOM attestation to the OCI. It then opens a pinning PR; the
+pinning change resets the candidate to unqualified.
 
 After target qualification is committed, merging the exact revision to the
 `release` branch:
