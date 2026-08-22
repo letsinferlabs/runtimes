@@ -1,5 +1,15 @@
 ARG SOURCE_DATE_EPOCH=1785594180
 
+FROM ghcr.io/miaai-lab/mia-vllm-gb10-linear-b12x@sha256:19627342e1da2607f4db50745dca30e57d7dd0ebff06062f03fd69b43a252931 AS letsinfer-engine-inventory-build
+
+COPY --from=letsinfer-tools tools/engine_sbom.py /tmp/letsinfer-engine-sbom.py
+RUN python3 /tmp/letsinfer-engine-sbom.py snapshot \
+      --output /tmp/engine-inventory.json
+
+FROM scratch AS letsinfer-engine-inventory
+COPY --from=letsinfer-engine-inventory-build \
+  /tmp/engine-inventory.json /engine-inventory.json
+
 FROM ghcr.io/pyo3/maturin@sha256:b6c8b59a0170b77eb31a35b56034abd39972483ad0ebfff344deaa42a85f3bd3 AS bridge
 
 WORKDIR /build/letsinfer-bridge
@@ -64,7 +74,6 @@ RUN env -u CFLAGS -u CXXFLAGS \
       SOURCE_DATE_EPOCH=1785594180 ZERO_AR_DATE=1 \
       make -j"$(nproc)" cuda CUDA_ARCH=sm_121 CUDA_EXTRA_BINS= \
         DEBUG_FLAGS="-g -frandom-seed=ds4-overdrive-6cd1146" \
-        NVCC_EXTRA_FLAGS="--frandom-seed=1785594180" \
     && strip --strip-debug ds4-server \
     && objcopy --remove-section .note.gnu.build-id ds4-server \
     && install -D -m 0555 ds4-server /opt/dwarfstar/ds4-server \
@@ -75,7 +84,8 @@ FROM ghcr.io/miaai-lab/mia-vllm-gb10-linear-b12x@sha256:19627342e1da2607f4db5074
 ARG LETSINFER_RUNTIME_REVISION=letsinfer-ds4-0.11.0-rc.1
 LABEL org.opencontainers.image.title="DS4 Overdrive for Let's Infer" \
       org.opencontainers.image.licenses="AGPL-3.0-only AND MIT" \
-      org.opencontainers.image.revision="${LETSINFER_RUNTIME_REVISION}"
+      org.opencontainers.image.revision="${LETSINFER_RUNTIME_REVISION}" \
+      ai.letsinfer.build.reproducibility="source-date-epoch-v1"
 
 RUN --mount=from=build,source=/opt/dwarfstar,target=/build-output,ro \
     --mount=from=bridge,source=/opt/letsinfer/lib,target=/bridge-output,ro \

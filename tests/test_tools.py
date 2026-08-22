@@ -82,6 +82,25 @@ class ManifestToolTests(unittest.TestCase):
             },
         )
 
+    def test_every_hugging_face_artifact_requires_its_readme_link(self) -> None:
+        runtime = {
+            "artifacts": [
+                {"uri": "hf://Owner/Primary"},
+                {"uri": "hf://Owner/Drafter"},
+            ]
+        }
+        generate_manifest.validate_model_links(
+            runtime,
+            "https://huggingface.co/Owner/Primary\n"
+            "https://huggingface.co/Owner/Drafter\n",
+        )
+        with self.assertRaisesRegex(
+            generate_manifest.ManifestError, "Owner/Drafter"
+        ):
+            generate_manifest.validate_model_links(
+                runtime, "https://huggingface.co/Owner/Primary\n"
+            )
+
     def test_signature_document_is_ed25519_and_content_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

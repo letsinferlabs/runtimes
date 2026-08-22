@@ -19,8 +19,8 @@ It contains:
 - the Let's Infer server integration and the proven ABI-2 zero-copy cache adapter;
 - a pinned image recipe that reproducibly builds the DGX Spark server;
 - the small DwarfStar-to-Let's Infer cache ABI shim;
-- a declarative standard benchmark contract in `runtime.json` and its sealed
-  machine-readable result in `benchmark.json`;
+- a declarative standard benchmark contract in `runtime.json` and, after
+  qualification, its sealed machine-readable result in `benchmark.json`;
 - license and concise source provenance.
 
 Private development notes, experiment scripts, benchmark runners, materialized
@@ -36,11 +36,11 @@ The production recipe uses multi-request segmented prefill through 32K and the
 single-bank path for deeper prompts. Its immutable image and server binary are
 reproducible from the pinned source. The manifest exposes up to 128 admitted
 requests with memory-aware FIFO queueing and a maximum context of 557,056
-tokens. `benchmark.json` is the structured performance record for the exact
-engine, model, target, serving recipe, and standard workload contract. The
-release manifest is the authority for activation and qualification state.
-Public distribution requires pullable immutable OCI identities for the exact
-image and runtime pack.
+tokens. When qualified, `benchmark.json` is the structured performance record
+for the exact engine, model, target, serving recipe, and standard workload
+contract. The release manifest is the authority for activation and
+qualification state. Public distribution requires pullable immutable OCI
+identities for the exact image and runtime pack.
 
 A fork can change any engine source, kernel, cache adapter, dependency, or
 image-build step and then build and pack that fork with Let's Infer. Build the
@@ -66,20 +66,20 @@ starts every cell with a fresh process and prefix store, collects Watchdog
 telemetry, and validates the resulting JSON:
 
 ```bash
-letsinfer benchmark deepseek-v4-flash --c1 --c2 --c4 --c8
+letsinfer benchmark deepseek-v4-flash --c1
 ```
 
-To run the C16 32K, 64K, and 128K cells:
+To extend that run with the C2, C4, and C8 matrix later:
 
 ```bash
-letsinfer benchmark deepseek-v4-flash \
-  --c16 --32k --64k --128k
+letsinfer benchmark deepseek-v4-flash --c2 --c4 --c8
 ```
 
-The sealed `benchmark.json` contains 24 neutral `ppN,tgN,cN` rows. Metrics that
-are unavailable remain `null` or `-1`; Let's Infer does not invent telemetry.
-Its version-2 telemetry schema records NVMe capacity usage, temperature, and
-read/write throughput directly from Watchdog when the host exposes each value.
+A sealed `benchmark.json` contains neutral `ppN,tgN,cN` rows for the selected
+canonical cells. Metrics that are unavailable remain `null` or `-1`; Let's
+Infer does not invent telemetry. Its version-2 telemetry schema records NVMe
+capacity usage, temperature, and read/write throughput directly from Watchdog
+when the host exposes each value.
 
 ## License
 

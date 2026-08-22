@@ -62,6 +62,24 @@ def normalized_candidate(runtime: dict[str, Any]) -> str:
     return "--".join((engine, match[1].lower(), match[2].lower(), target))
 
 
+def validate_model_links(runtime: dict[str, Any], readme: str) -> None:
+    artifacts = runtime.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise ManifestError("runtime artifacts must be a non-empty array")
+    for artifact in artifacts:
+        uri = artifact.get("uri") if isinstance(artifact, dict) else None
+        match = re.fullmatch(
+            r"hf://([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)", str(uri)
+        )
+        if match is None:
+            raise ManifestError("runtime artifact Hugging Face URI is invalid")
+        link = f"https://huggingface.co/{match[1]}/{match[2]}"
+        if link not in readme:
+            raise ManifestError(
+                f"runtime README is missing Hugging Face artifact link: {link}"
+            )
+
+
 def benchmark_score(record: dict[str, Any]) -> float:
     results = record.get("results")
     if not isinstance(results, list) or not results:
@@ -206,6 +224,14 @@ def candidates(
         if not runtime_path.is_file():
             raise ManifestError(f"top-level runtime directory lacks runtime.json: {directory.name}")
         runtime = read_object(runtime_path)
+        readme_path = directory / "README.md"
+        if readme_path.is_symlink() or not readme_path.is_file():
+            raise ManifestError(f"runtime README is missing: {directory.name}")
+        try:
+            readme = readme_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise ManifestError(f"cannot read {readme_path}: {error}") from error
+        validate_model_links(runtime, readme)
         if runtime.get("schema_version") != RUNTIME_SCHEMA_VERSION:
             raise ManifestError(f"unsupported runtime schema in {directory.name}")
         candidate = normalized_candidate(runtime)
