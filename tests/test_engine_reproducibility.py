@@ -14,6 +14,11 @@ class EngineReproducibilityTests(unittest.TestCase):
         dockerfile = (DEEPSEEK / "image/Dockerfile").read_text(encoding="utf-8")
         self.assertIn("--frandom-seed=$(subst /,_,$@)", makefile)
         self.assertIn("--objdir-as-tempdir", makefile)
+        nvccflags = next(
+            line for line in makefile.splitlines() if line.startswith("NVCCFLAGS ?=")
+        )
+        self.assertNotIn(" -g ", nvccflags)
+        self.assertNotIn("-lineinfo", nvccflags)
         self.assertNotIn('NVCC_EXTRA_FLAGS="--frandom-seed=', dockerfile)
 
 
