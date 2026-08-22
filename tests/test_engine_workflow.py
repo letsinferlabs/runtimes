@@ -46,6 +46,8 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("tools/engine_sbom.py spdx", workflow)
         self.assertIn("steps.engine.outputs.immutable_id", workflow)
         self.assertIn("actions/upload-artifact@", workflow)
+        self.assertIn("actions/attest-sbom@", workflow)
+        self.assertIn("push-to-registry: true", workflow)
         self.assertNotIn("anchore/sbom-action", workflow)
 
     def test_every_engine_exports_the_same_inventory_contract(self) -> None:
