@@ -1,5 +1,14 @@
 # DeepSeek V4 Flash / DwarfStar / DGX Spark
 
+## Hugging Face artifacts
+
+- Primary model: [antirez/deepseek-v4-gguf](https://huggingface.co/antirez/deepseek-v4-gguf)
+- Drafter: [bleysg/DeepSeek-V4-Flash-DSpark-drafter-GGUF](https://huggingface.co/bleysg/DeepSeek-V4-Flash-DSpark-drafter-GGUF)
+
+`runtime.json` pins the exact revision, filename, byte count, and SHA-256 for
+each artifact. These links identify the source repositories; they do not
+replace the immutable runtime pins.
+
 This repository is the complete, forkable source form of one Let's Infer runtime
 target. It is not a thin configuration wrapper around code hidden in Let's Infer.
 It contains:
