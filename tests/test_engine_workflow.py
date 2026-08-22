@@ -38,6 +38,13 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("Engine pin review branch", workflow)
         self.assertNotIn("gh pr create", workflow)
 
+    def test_engine_sbom_uses_bounded_installed_package_catalogers(self) -> None:
+        config = (ROOT / ".github/syft-engine.yaml").read_text(encoding="utf-8")
+        self.assertIn("default-catalogers:", config)
+        self.assertIn("dpkg-db-cataloger", config)
+        self.assertIn("python-installed-package-cataloger", config)
+        self.assertIn("selection: none", config)
+
 
 if __name__ == "__main__":
     unittest.main()
