@@ -88,8 +88,8 @@
       "version": 1
     },
     "oci": {
-      "reference": "ghcr.io/letsinferlabs/engines/dwarfstar--antirez--deepseek-v4-gguf--dgx-spark@sha256:fa63a06a6fb609e469ada8ed1942524afb6ff615d8ffacfea35f9c9bfc2ffc70",
-      "immutable_id": "sha256:30d2dc8bae65b91a6be1728a34298b1de27a379ab5e4ca083726b1457286e72c",
+      "reference": "ghcr.io/letsinferlabs/engines/dwarfstar--antirez--deepseek-v4-gguf--dgx-spark@sha256:139bcffc46198dce9422c484da6e4c4c1bc61ba6dab76a50e731aa9eafd369ff",
+      "immutable_id": "sha256:b4b51f554f9c49564b674d97ec3de6714a2f273e5ee5604098a313c9d4494ac7",
       "base": "ghcr.io/miaai-lab/mia-vllm-gb10-linear-b12x@sha256:19627342e1da2607f4db50745dca30e57d7dd0ebff06062f03fd69b43a252931"
     }
   },
@@ -178,7 +178,7 @@
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
         "model_sha256": "ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0",
-        "engine_image_sha256": "30d2dc8bae65b91a6be1728a34298b1de27a379ab5e4ca083726b1457286e72c",
+        "engine_image_sha256": "b4b51f554f9c49564b674d97ec3de6714a2f273e5ee5604098a313c9d4494ac7",
         "render_contract": "openai-chat-user-v1"
       },
       "request": {
