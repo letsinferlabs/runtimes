@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
   attestations: write
@@ -30,12 +30,6 @@ jobs:
           repository: letsinferlabs/letsinfer
           path: .core
           persist-credentials: false
-      - name: Check out trusted catalog publication repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: letsinferlabs/catalog
-          path: .catalog
-          token: ${{ secrets.LETSINFER_CATALOG_TOKEN }}
       - name: Validate release inputs
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -106,41 +100,81 @@ jobs:
           test -n "$LETSINFER_CATALOG_SIGNING_KEY_B64"
           key="$RUNNER_TEMP/catalog-private.pem"
           public="$RUNNER_TEMP/catalog-public.pem"
+          candidate="$RUNNER_TEMP/catalog-candidate"
+          mkdir "$candidate"
           printf '%s' "$LETSINFER_CATALOG_SIGNING_KEY_B64" | base64 --decode > "$key"
           chmod 600 "$key"
           openssl pkey -in "$key" -pubout -out "$public"
           cmp "$public" .core/core/trust/catalog-public-key.pem
-          cmp "$public" .catalog/catalog-public-key.pem
-          python3 tools/sign_manifest.py --catalog manifest.json \
+          cp manifest.json "$candidate/catalog.json"
+          cp "$public" "$candidate/catalog-public-key.pem"
+          python3 tools/sign_manifest.py --catalog "$candidate/catalog.json" \
             --private-key "$key" --public-key "$public" \
-            --output "$RUNNER_TEMP/manifest.json.sig"
+            --output "$candidate/catalog.json.sig"
           rm -f "$key"
-      - name: Verify and publish the trusted catalog atomically
+      - name: Verify the immutable signed catalog candidate
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
-          cp manifest.json .catalog/catalog.json
-          cp "$RUNNER_TEMP/manifest.json.sig" .catalog/catalog.json.sig
+          candidate="$RUNNER_TEMP/catalog-candidate"
           PYTHONPATH=.core python3 - <<'PY'
           from core.runtime_packs import load_catalog
-          catalog = load_catalog('.catalog/catalog.json', public_key='.catalog/catalog-public-key.pem')
+          import os
+          root = os.environ['RUNNER_TEMP'] + '/catalog-candidate'
+          catalog = load_catalog(root + '/catalog.json', public_key=root + '/catalog-public-key.pem')
           assert catalog['schema_version'] == 4
           PY
-          cd .catalog
-          if git diff --quiet -- catalog.json catalog.json.sig; then
-            echo 'Trusted catalog is already current.'
-            exit 0
+          python3 - "$candidate" "$GITHUB_SHA" <<'PY'
+          import hashlib, json, pathlib, re, sys
+          root=pathlib.Path(sys.argv[1])
+          commit=sys.argv[2]
+          if re.fullmatch(r'[0-9a-f]{40}', commit) is None:
+              raise SystemExit('runtime commit identity is invalid')
+          digest=lambda name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+          value={
+              'schema_version': 1,
+              'runtime_commit': commit,
+              'catalog_sha256': digest('catalog.json'),
+              'signature_sha256': digest('catalog.json.sig'),
+              'public_key_sha256': digest('catalog-public-key.pem'),
+          }
+          (root / 'candidate.json').write_text(
+              json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8',
+          )
+          PY
+      - name: Publish the signed catalog candidate release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          candidate="$RUNNER_TEMP/catalog-candidate"
+          tag="catalog-candidate-$GITHUB_SHA"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            existing="$RUNNER_TEMP/existing-catalog-candidate"
+            mkdir "$existing"
+            gh release download "$tag" --dir "$existing" \
+              --pattern catalog.json --pattern catalog.json.sig \
+              --pattern catalog-public-key.pem --pattern candidate.json
+            for name in catalog.json catalog.json.sig catalog-public-key.pem candidate.json; do
+              cmp "$candidate/$name" "$existing/$name"
+            done
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
+              --title "Catalog candidate $GITHUB_SHA" \
+              --notes "Immutable signed catalog candidate." \
+              "$candidate/catalog.json" \
+              "$candidate/catalog.json.sig" \
+              "$candidate/catalog-public-key.pem" \
+              "$candidate/candidate.json"
           fi
-          git config user.name 'Taimur Ayaz'
-          git config user.email 'timonea.dev@gmail.com'
-          git add catalog.json catalog.json.sig
-          git commit -m "Publish runtime catalog $GITHUB_SHA"
-          git push origin HEAD:main
       - name: Attest runtime packs and catalog
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: |
             ${{ runner.temp }}/packs/*.letsinfer
-            manifest.json
-            manifest.json.sig
+            ${{ runner.temp }}/catalog-candidate/catalog.json
+            ${{ runner.temp }}/catalog-candidate/catalog.json.sig
+            ${{ runner.temp }}/catalog-candidate/catalog-public-key.pem
+            ${{ runner.temp }}/catalog-candidate/candidate.json
