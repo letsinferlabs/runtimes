@@ -13,6 +13,11 @@ on:
         description: Exact runtime candidate ID
         required: true
         type: string
+      rebuild:
+        description: Rebuild the Engine to verify reproducibility instead of retrying its pinned SBOM
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: engine-${{ github.ref }}-${{ inputs.candidate || 'changed' }}
@@ -21,7 +26,6 @@ concurrency:
 permissions:
   contents: write
   packages: write
-  pull-requests: write
 
 jobs:
   detect:
@@ -84,8 +88,48 @@ jobs:
           password: ${{ github.token }}
       - name: Set up Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Resolve the pinned Engine for a manual SBOM retry
+        id: pinned
+        if: github.event_name == 'workflow_dispatch' && !inputs.rebuild
+        env:
+          CANDIDATE: ${{ matrix.candidate }}
+        run: |
+          set -euo pipefail
+          python3 - "$CANDIDATE/runtime.json" "$CANDIDATE" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, re, sys
+          runtime=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          candidate=sys.argv[2]
+          output=pathlib.Path(sys.argv[3])
+          reference=runtime['engine']['oci']['reference']
+          immutable_id=runtime['engine']['oci']['immutable_id']
+          expected=f'ghcr.io/letsinferlabs/engines/{candidate}@'
+          if not reference.startswith(expected) or re.fullmatch(
+              r'ghcr\.io/letsinferlabs/engines/[^@]+@sha256:[0-9a-f]{64}', reference
+          ) is None:
+              raise SystemExit('pinned Engine reference is invalid')
+          if re.fullmatch(r'sha256:[0-9a-f]{64}', immutable_id) is None:
+              raise SystemExit('pinned Engine configuration identity is invalid')
+          with output.open('a', encoding='utf-8') as stream:
+              stream.write(f'platform_reference={reference}\n')
+              stream.write(f'immutable_id={immutable_id}\n')
+          PY
+      - name: Verify the pinned Engine configuration identity
+        if: github.event_name == 'workflow_dispatch' && !inputs.rebuild
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect \
+            "${{ steps.pinned.outputs.platform_reference }}" --raw \
+            > "$RUNNER_TEMP/pinned-engine-platform.json"
+          python3 - "$RUNNER_TEMP/pinned-engine-platform.json" \
+            "${{ steps.pinned.outputs.immutable_id }}" <<'PY'
+          import json, pathlib, sys
+          actual=json.loads(pathlib.Path(sys.argv[1]).read_text())['config']['digest']
+          if actual != sys.argv[2]:
+              raise SystemExit(f'pinned Engine configuration differs: {actual}')
+          PY
       - name: Build and publish immutable Engine OCI
         id: engine
+        if: github.event_name != 'workflow_dispatch' || inputs.rebuild
         env:
           CANDIDATE: ${{ matrix.candidate }}
         run: |
@@ -95,8 +139,10 @@ jobs:
           docker buildx build "$CANDIDATE" \
             --file "$CANDIDATE/image/Dockerfile" \
             --platform linux/arm64 \
-            --provenance=true --sbom=false --push \
-            --tag "$image" --metadata-file "$RUNNER_TEMP/engine.json"
+            --build-arg SOURCE_DATE_EPOCH=0 \
+            --provenance=true --sbom=false \
+            --output "type=registry,name=$image,rewrite-timestamp=true" \
+            --metadata-file "$RUNNER_TEMP/engine.json"
           digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$RUNNER_TEMP/engine.json")
           docker buildx imagetools inspect "$image@$digest" --raw > "$RUNNER_TEMP/engine-index.json"
           platform_digest=$(python3 - "$RUNNER_TEMP/engine-index.json" "$digest" <<'PY'
@@ -149,7 +195,7 @@ jobs:
       - name: Generate exact Engine SBOM artifact
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: ${{ steps.engine.outputs.platform_reference }}
+          image: ${{ steps.engine.outputs.platform_reference || steps.pinned.outputs.platform_reference }}
           registry-username: ${{ github.actor }}
           registry-password: ${{ github.token }}
           format: spdx-json
@@ -159,10 +205,10 @@ jobs:
           upload-artifact: true
           upload-artifact-retention: 90
           upload-release-assets: false
-      - name: Open requalification PR when the Engine identity changed
+      - name: Publish a requalification review branch when the Engine identity changed
+        if: github.event_name != 'workflow_dispatch' || inputs.rebuild
         env:
           CANDIDATE: ${{ matrix.candidate }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if git diff --quiet -- "$CANDIDATE" manifest.json; then
@@ -176,6 +222,5 @@ jobs:
           git add -A -- "$CANDIDATE" manifest.json
           git commit -m "Pin $CANDIDATE Engine OCI"
           git push origin "$branch"
-          gh pr create --base main --head "$branch" \
-            --title "Pin $CANDIDATE Engine OCI" \
-            --body "Pins the independently published Engine OCI and invalidates benchmark qualification because its immutable engine identity changed."
+          echo "Engine pin review branch: $branch" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Engine pin ready::Review and merge $branch"
