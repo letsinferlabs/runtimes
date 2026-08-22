@@ -80,8 +80,8 @@ Engine sources, adapter, or image changes automatically start the Engine OCI
 workflow after merge. It normalizes exported layer timestamps, publishes the
 image by digest, exports a deterministic Debian/Python package inventory,
 binds that inventory to the exact image and configuration identities as SPDX,
-and attaches the SBOM attestation to the OCI. It then opens a pinning PR; the
-pinning change resets the candidate to unqualified.
+and attaches the SBOM attestation to the OCI. It then emits a deterministic
+pin review patch; applying that patch resets the candidate to unqualified.
 
 After target qualification is committed, merging the exact revision to the
 `release` branch:
@@ -95,7 +95,7 @@ After target qualification is committed, merging the exact revision to the
 7. publishes `catalog.json`, its signature, the public key, and a hash-bound
    metadata record as an immutable prerelease in this repository;
 8. lets the catalog repository independently download, verify, and promote
-   those exact bytes through its own review branch; and
+   those exact bytes through its own deterministic review patch; and
 9. emits build-provenance attestations.
 
 The release fails closed when an Engine digest, model revision, benchmark
