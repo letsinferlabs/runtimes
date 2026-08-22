@@ -3,7 +3,7 @@
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
   "version": "0.1.0-rc.11",
   "logical_model": "qwen3.8-27b",
-  "status": "candidate",
+  "status": "qualified",
   "target": {
     "id": "dgx-spark",
     "platform": "linux/arm64",
@@ -122,7 +122,7 @@
     "config": {}
   },
   "serving": {
-    "qualified": false,
+    "qualified": true,
     "max_connections": 128,
     "max_active_requests": 10,
     "max_context_tokens": 262144,
@@ -143,8 +143,7 @@
         "evidence_reference": "evidence/serving/engine-results.json",
         "results_sha256": "bb429f7699866e67c4bc282f8490e0b29672e88c5b7eed9aa8a0d3b179520321"
       }
-    },
-    "blocked_by": "engine-oci-requalification"
+    }
   },
   "benchmark": {
     "contract": {
@@ -215,6 +214,10 @@
         }
       ]
     },
-    "record": null
+    "record": {
+      "path": "benchmark.json",
+      "sha256": "88f45c9de1dfca66d58240f77e571a774cd2103aed076f29adb8d395e26ec7af",
+      "id": "74a6c0af527e1cad825d67bce33a7448838679b4d308ce92201c44351e19ffe1"
+    }
   }
 }
