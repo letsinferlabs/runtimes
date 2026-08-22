@@ -48,7 +48,10 @@ NVCC_ARCH_FLAGS := -arch=$(CUDA_ARCH)
 endif
 endif
 NVCC_EXTRA_FLAGS ?=
-NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math -std=c++17 $(NVCC_ARCH_FLAGS) -Xcompiler $(NATIVE_CPU_FLAG) -Xcompiler -pthread $(NVCC_EXTRA_FLAGS)
+# NVCC requires a distinct stable random seed per input/output to make PTX and
+# object files reproducible. $@ is the target path, so every translation unit
+# and final device link receives a stable, target-specific seed.
+NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math -std=c++17 $(NVCC_ARCH_FLAGS) -Xcompiler $(NATIVE_CPU_FLAG) -Xcompiler -pthread $(NVCC_EXTRA_FLAGS) --frandom-seed=$(subst /,_,$@)
 CUDA_SPARK_FLAGS := -DDS4_CUDA_SPARK_HBM_CACHE=1
 # Include path so cuda/mmq/*.cu can find its sibling vendored headers and
 # the ds4_ggml_stubs shim. The redirected ggml.h / ggml-impl.h / ggml-cuda.h

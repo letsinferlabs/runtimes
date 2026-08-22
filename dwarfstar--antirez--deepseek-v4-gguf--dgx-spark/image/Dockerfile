@@ -74,7 +74,6 @@ RUN env -u CFLAGS -u CXXFLAGS \
       SOURCE_DATE_EPOCH=1785594180 ZERO_AR_DATE=1 \
       make -j"$(nproc)" cuda CUDA_ARCH=sm_121 CUDA_EXTRA_BINS= \
         DEBUG_FLAGS="-g -frandom-seed=ds4-overdrive-6cd1146" \
-        NVCC_EXTRA_FLAGS="--frandom-seed=1785594180" \
     && strip --strip-debug ds4-server \
     && objcopy --remove-section .note.gnu.build-id ds4-server \
     && install -D -m 0555 ds4-server /opt/dwarfstar/ds4-server \
