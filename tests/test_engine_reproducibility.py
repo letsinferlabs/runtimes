@@ -13,6 +13,7 @@ class EngineReproducibilityTests(unittest.TestCase):
         makefile = (DEEPSEEK / "engine/Makefile").read_text(encoding="utf-8")
         dockerfile = (DEEPSEEK / "image/Dockerfile").read_text(encoding="utf-8")
         self.assertIn("--frandom-seed=$(subst /,_,$@)", makefile)
+        self.assertIn("--objdir-as-tempdir", makefile)
         self.assertNotIn('NVCC_EXTRA_FLAGS="--frandom-seed=', dockerfile)
 
 
