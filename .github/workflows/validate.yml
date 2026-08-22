@@ -1,0 +1,97 @@
+name: Runtime candidates
+
+on:
+  pull_request:
+    branches: [main, release]
+  push:
+    branches: [main]
+
+concurrency:
+  group: runtime-candidates-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact runtime revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out released core contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: letsinferlabs/letsinfer
+          path: .core
+          persist-credentials: false
+      - name: Validate flat candidates and generated catalog
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          git diff --check
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          python3 tools/generate_manifest.py --validate-only
+          python3 tools/generate_manifest.py --sources-from manifest.json --check
+      - name: Verify Engine protocol and deterministic runtime packs
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          for runtime in */runtime.json; do
+            candidate=${runtime%/runtime.json}
+            python3 "$candidate/adapter/engine-adapter" verify --protocol 1
+            .core/bin/letsinfer pack "$candidate" \
+              --output "$RUNNER_TEMP/$candidate-a.letsinfer"
+            .core/bin/letsinfer pack "$candidate" \
+              --output "$RUNNER_TEMP/$candidate-b.letsinfer"
+            cmp "$RUNNER_TEMP/$candidate-a.letsinfer" \
+              "$RUNNER_TEMP/$candidate-b.letsinfer"
+            python3 tools/oci_artifact.py plan \
+              --artifact "$RUNNER_TEMP/$candidate-a.letsinfer" \
+              --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
+              --candidate "$candidate" \
+              --version "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")" \
+              --output "$RUNNER_TEMP/$candidate-plan.json"
+          done
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import json, pathlib, sys
+          manifest=json.loads(pathlib.Path('manifest.json').read_text())
+          advertised={
+              candidate: record['source']
+              for model in manifest['models'].values()
+              for target in model['targets'].values()
+              for candidate, record in target['candidates'].items()
+          }
+          planned={
+              path.name.removesuffix('-plan.json'): json.loads(path.read_text())['source']
+              for path in pathlib.Path(sys.argv[1]).glob('*-plan.json')
+          }
+          if advertised != planned:
+              for candidate in sorted(set(advertised) | set(planned)):
+                  if advertised.get(candidate) != planned.get(candidate):
+                      print(f'{candidate}: manifest={advertised.get(candidate)} planned={planned.get(candidate)}')
+              raise SystemExit('manifest sources do not match deterministic runtime OCI plans')
+          PY
+      - name: Audit immutable build inputs
+        run: |
+          set -euo pipefail
+          for dockerfile in */image/Dockerfile; do
+            while IFS= read -r line; do
+              image=${line#FROM }
+              image=${image%% AS *}
+              image=${image%% as *}
+              [[ "$image" == *'@sha256:'* ]] || {
+                echo "unpinned FROM in $dockerfile: $line" >&2
+                exit 1
+              }
+            done < <(grep -E '^FROM ' "$dockerfile")
+          done
+          if find . -name release.json -print -quit | grep -q .; then
+            echo 'legacy release.json is forbidden' >&2
+            exit 1
+          fi
