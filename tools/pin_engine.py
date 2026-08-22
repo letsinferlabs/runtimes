@@ -20,9 +20,9 @@ class PinError(RuntimeError):
     pass
 
 
-def canonical_bytes(value: Any) -> bytes:
+def readable_bytes(value: Any) -> bytes:
     return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        json.dumps(value, indent=2, ensure_ascii=False)
         + "\n"
     ).encode("utf-8")
 
@@ -37,15 +37,22 @@ def update(runtime: dict[str, Any], reference: str, immutable_id: str) -> bool:
     benchmark = runtime.get("benchmark")
     if not all(isinstance(item, dict) for item in (engine, serving, benchmark)):
         raise PinError("runtime engine, serving, or benchmark contract is invalid")
+    contract = benchmark.get("contract")
+    tokenizer = contract.get("tokenizer") if isinstance(contract, dict) else None
+    if not isinstance(tokenizer, dict):
+        raise PinError("runtime benchmark tokenizer identity is invalid")
     oci = engine.get("oci")
     if not isinstance(oci, dict):
         raise PinError("runtime Engine OCI contract is missing")
+    engine_image_sha256 = immutable_id.removeprefix("sha256:")
     changed = (
         oci.get("reference") != reference
         or oci.get("immutable_id") != immutable_id
+        or tokenizer.get("engine_image_sha256") != engine_image_sha256
     )
     oci["reference"] = reference
     oci["immutable_id"] = immutable_id
+    tokenizer["engine_image_sha256"] = engine_image_sha256
     if changed:
         runtime["status"] = "candidate"
         serving["qualified"] = False
@@ -100,7 +107,7 @@ def pin_runtime(
         raise PinError("runtime must contain one JSON object")
     benchmark_path = bound_benchmark_path(path, runtime)
     changed = update(runtime, reference, immutable_id)
-    write_atomic(path, canonical_bytes(runtime))
+    write_atomic(path, readable_bytes(runtime))
     if changed and benchmark_path is not None:
         benchmark_path.unlink()
     return runtime, changed
