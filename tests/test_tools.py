@@ -154,6 +154,10 @@ class ManifestToolTests(unittest.TestCase):
             runtime["serving"]["blocked_by"], "engine-oci-requalification"
         )
         self.assertIsNone(runtime["benchmark"]["record"])
+        self.assertEqual(
+            runtime["benchmark"]["contract"]["tokenizer"]["engine_image_sha256"],
+            "8" * 64,
+        )
 
     def test_pinning_changed_engine_removes_stale_bound_benchmark(self) -> None:
         source = (
@@ -175,8 +179,13 @@ class ManifestToolTests(unittest.TestCase):
             )
             self.assertTrue(changed)
             self.assertFalse(benchmark_path.exists())
+            self.assertTrue(runtime_path.read_text(encoding="utf-8").startswith("{\n  \""))
             pinned = json.loads(runtime_path.read_text(encoding="utf-8"))
             self.assertIsNone(pinned["benchmark"]["record"])
+            self.assertEqual(
+                pinned["benchmark"]["contract"]["tokenizer"]["engine_image_sha256"],
+                "6" * 64,
+            )
 
     def test_runtime_publication_source_replacement_is_exactly_scoped(self) -> None:
         document = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
