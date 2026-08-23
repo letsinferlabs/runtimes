@@ -43,7 +43,12 @@ def update(document: dict[str, Any], candidate: str, source: str) -> None:
                 raise SourceError("manifest candidate map is invalid")
             record = candidates.get(candidate)
             if isinstance(record, dict):
-                matches.append(record)
+                releases = record.get("releases")
+                latest = record.get("latest")
+                if isinstance(releases, dict) and isinstance(releases.get(latest), dict):
+                    matches.append(releases[latest])
+                else:
+                    matches.append(record)
     if len(matches) != 1:
         raise SourceError("candidate must occur exactly once in manifest")
     matches[0]["source"] = source

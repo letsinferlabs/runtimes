@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
           git diff --check
           python3 -m unittest discover -s tests -p 'test_*.py'
-          python3 tools/generate_manifest.py --sources-from manifest.json --check
+          python3 tools/generate_manifest.py --previous manifest.json --check
           python3 - <<'PY'
           import json
           import pathlib
@@ -51,7 +51,7 @@ jobs:
       - name: Build deterministic runtime packs and verify planned identities
         run: |
           set -euo pipefail
-          mkdir "$RUNNER_TEMP/packs" "$RUNNER_TEMP/plans"
+          mkdir "$RUNNER_TEMP/packs" "$RUNNER_TEMP/plans" "$RUNNER_TEMP/benchmark-plans"
           for runtime in */runtime.json; do
             candidate=${runtime%/runtime.json}
             version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")
@@ -62,12 +62,18 @@ jobs:
               --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
               --candidate "$candidate" --version "$version" \
               --output "$RUNNER_TEMP/plans/$candidate.json"
+            python3 -m tools.benchmark_artifact plan \
+              --evidence "$candidate/benchmark.json" \
+              --runtime-plan "$RUNNER_TEMP/plans/$candidate.json" \
+              --repository "ghcr.io/letsinferlabs/benchmarks/$candidate" \
+              --candidate "$candidate" --version "$version" \
+              --output "$RUNNER_TEMP/benchmark-plans/$candidate.json"
           done
           python3 - "$RUNNER_TEMP/plans" <<'PY'
           import json, pathlib, sys
           catalog=json.loads(pathlib.Path('manifest.json').read_text())
           advertised={
-              candidate: record['source']
+              candidate: record['releases'][record['latest']]['source']
               for model in catalog['models'].values()
               for target in model['targets'].values()
               for candidate, record in target['candidates'].items()
@@ -78,6 +84,18 @@ jobs:
                   if advertised.get(candidate) != planned.get(candidate):
                       print(f'{candidate}: manifest={advertised.get(candidate)} planned={planned.get(candidate)}')
               raise SystemExit('manifest sources do not match deterministic runtime OCI plans')
+          evidence={
+              candidate: record['releases'][record['latest']]['benchmark']['evidence']
+              for model in catalog['models'].values()
+              for target in model['targets'].values()
+              for candidate, record in target['candidates'].items()
+          }
+          evidence_planned={
+              p.stem: json.loads(p.read_text())['source']
+              for p in pathlib.Path(sys.argv[1]).parent.joinpath('benchmark-plans').glob('*.json')
+          }
+          if evidence != evidence_planned:
+              raise SystemExit('manifest benchmark evidence does not match deterministic OCI plans')
           PY
       - name: Publish immutable runtime OCI artifacts
         env:
@@ -92,6 +110,11 @@ jobs:
               --artifact "$RUNNER_TEMP/packs/$candidate.letsinfer" \
               --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
               --candidate "$candidate" --version "$version"
+            python3 -m tools.benchmark_artifact push \
+              --evidence "$candidate/benchmark.json" \
+              --runtime-plan "$RUNNER_TEMP/plans/$candidate.json" \
+              --repository "ghcr.io/letsinferlabs/benchmarks/$candidate" \
+              --candidate "$candidate" --version "$version"
           done
       - name: Sign the exact generated catalog
         env:
@@ -101,7 +124,7 @@ jobs:
           test -n "$LETSINFER_CATALOG_SIGNING_KEY_B64"
           key="$RUNNER_TEMP/catalog-private.pem"
           public="$RUNNER_TEMP/catalog-public.pem"
-          candidate="$RUNNER_TEMP/catalog-candidate"
+          candidate="$RUNNER_TEMP/catalog-release"
           mkdir "$candidate"
           printf '%s' "$LETSINFER_CATALOG_SIGNING_KEY_B64" | base64 --decode > "$key"
           chmod 600 "$key"
@@ -113,18 +136,18 @@ jobs:
             --private-key "$key" --public-key "$public" \
             --output "$candidate/catalog.json.sig"
           rm -f "$key"
-      - name: Verify the immutable signed catalog candidate
+      - name: Verify the immutable signed catalog release
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
-          candidate="$RUNNER_TEMP/catalog-candidate"
+          candidate="$RUNNER_TEMP/catalog-release"
           PYTHONPATH=.core python3 - <<'PY'
           from core.runtime_packs import load_catalog
           import os
-          root = os.environ['RUNNER_TEMP'] + '/catalog-candidate'
+          root = os.environ['RUNNER_TEMP'] + '/catalog-release'
           catalog = load_catalog(root + '/catalog.json', public_key=root + '/catalog-public-key.pem')
-          assert catalog['schema_version'] == 4
+          assert catalog['schema_version'] == 5
           PY
           python3 - "$candidate" "$GITHUB_SHA" <<'PY'
           import hashlib, json, pathlib, re, sys
@@ -140,43 +163,43 @@ jobs:
               'signature_sha256': digest('catalog.json.sig'),
               'public_key_sha256': digest('catalog-public-key.pem'),
           }
-          (root / 'candidate.json').write_text(
+          (root / 'catalog-release.json').write_text(
               json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n',
               encoding='utf-8',
           )
           PY
-      - name: Publish the signed catalog candidate release
+      - name: Publish the signed production catalog
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          candidate="$RUNNER_TEMP/catalog-candidate"
-          tag="catalog-candidate-$GITHUB_SHA"
+          candidate="$RUNNER_TEMP/catalog-release"
+          tag="catalog-v5-$GITHUB_SHA"
           if gh release view "$tag" >/dev/null 2>&1; then
-            existing="$RUNNER_TEMP/existing-catalog-candidate"
+            existing="$RUNNER_TEMP/existing-catalog-release"
             mkdir "$existing"
             gh release download "$tag" --dir "$existing" \
               --pattern catalog.json --pattern catalog.json.sig \
-              --pattern catalog-public-key.pem --pattern candidate.json
-            for name in catalog.json catalog.json.sig catalog-public-key.pem candidate.json; do
+              --pattern catalog-public-key.pem --pattern catalog-release.json
+            for name in catalog.json catalog.json.sig catalog-public-key.pem catalog-release.json; do
               cmp "$candidate/$name" "$existing/$name"
             done
           else
-            gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
-              --title "Catalog candidate $GITHUB_SHA" \
-              --notes "Immutable signed catalog candidate." \
+            gh release create "$tag" --target "$GITHUB_SHA" --latest \
+              --title "Let's Infer runtime catalog" \
+              --notes "Signed production runtime catalog." \
               "$candidate/catalog.json" \
               "$candidate/catalog.json.sig" \
               "$candidate/catalog-public-key.pem" \
-              "$candidate/candidate.json"
+              "$candidate/catalog-release.json"
           fi
-          release="$RUNNER_TEMP/catalog-candidate-release.json"
+          release="$RUNNER_TEMP/catalog-release-view.json"
           gh release view "$tag" --json targetCommitish,assets > "$release"
           python3 - "$release" "$GITHUB_SHA" <<'PY'
           import json, pathlib, sys
           value=json.loads(pathlib.Path(sys.argv[1]).read_text())
           expected={
-              'candidate.json',
+              'catalog-release.json',
               'catalog-public-key.pem',
               'catalog.json',
               'catalog.json.sig',
@@ -190,7 +213,9 @@ jobs:
         with:
           subject-path: |
             ${{ runner.temp }}/packs/*.letsinfer
-            ${{ runner.temp }}/catalog-candidate/catalog.json
-            ${{ runner.temp }}/catalog-candidate/catalog.json.sig
-            ${{ runner.temp }}/catalog-candidate/catalog-public-key.pem
-            ${{ runner.temp }}/catalog-candidate/candidate.json
+            ${{ runner.temp }}/benchmark-plans/*.json
+            */benchmark.json
+            ${{ runner.temp }}/catalog-release/catalog.json
+            ${{ runner.temp }}/catalog-release/catalog.json.sig
+            ${{ runner.temp }}/catalog-release/catalog-public-key.pem
+            ${{ runner.temp }}/catalog-release/catalog-release.json
