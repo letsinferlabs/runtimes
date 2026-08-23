@@ -4,6 +4,25 @@ This repository contains reproducible deployment candidates. A candidate binds
 one logical model to an exact Hugging Face artifact, an immutable Engine OCI,
 and one hardware target. Let's Infer core remains engine- and model-agnostic.
 
+## Features
+
+- **Install by model name** — `letsinfer install qwen3.8-27b` resolves the best
+  qualified candidate for your hardware; users never type an engine or target
+  path.
+- **Exact model provenance** — every candidate links its Hugging Face model
+  and pins the immutable revision, required files, sizes, and hashes.
+- **Engine freedom** — each Engine OCI carries one engine version and its
+  matching Let's Infer protocol adapter, independent of core releases.
+- **Target-specific performance** — candidates may include custom kernels,
+  patches, sidecars, caches, and configuration for one exact hardware target.
+- **Complete reproducibility** — runtime packs and Engine images are built from
+  reviewed source, pinned dependencies, and deterministic recipes.
+- **Benchmark-backed selection** — the signed catalog recommends only a
+  qualified model/target candidate and binds that decision to machine-readable
+  benchmark evidence.
+- **Forkable by design** — change any model artifact, kernel, engine source, or
+  serving parameter, then qualify and publish the result as a new candidate.
+
 ## Layout
 
 Every candidate is a single top-level directory:
