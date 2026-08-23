@@ -13,14 +13,23 @@ import sys
 from typing import Any
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 RUNTIME_SCHEMA_VERSION = 3
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 OCI_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
+AUTHOR_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38})")
+LICENSE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,126}")
 CANDIDATE_RE = re.compile(
     r"[a-z0-9][a-z0-9._-]*--[a-z0-9][a-z0-9._-]*--"
     r"[a-z0-9][a-z0-9._-]*--[a-z0-9][a-z0-9._-]*"
 )
+RECOMMENDATION_POLICY = {
+    "id": "letsinfer-throughput-geomean-v1",
+    "benchmark_suite": "letsinfer-code-prose-v1",
+    "metric": "aggregate_tps",
+    "cache": "uncached",
+    "tie_breakers": ["score", "version", "candidate"],
+}
 
 
 class ManifestError(ValueError):
@@ -196,6 +205,9 @@ def sources_from_manifest(path: pathlib.Path) -> dict[str, str]:
             if not isinstance(target, dict) or not isinstance(target.get("candidates"), dict):
                 raise ManifestError("existing manifest candidate map is invalid")
             for candidate, record in target["candidates"].items():
+                if isinstance(record, dict) and isinstance(record.get("releases"), dict):
+                    latest = record.get("latest")
+                    record = record["releases"].get(latest)
                 if (
                     not CANDIDATE_RE.fullmatch(str(candidate))
                     or not isinstance(record, dict)
@@ -207,9 +219,34 @@ def sources_from_manifest(path: pathlib.Path) -> dict[str, str]:
     return sources
 
 
+def evidence_from_manifest(path: pathlib.Path) -> dict[str, str]:
+    document = read_object(path)
+    evidence: dict[str, str] = {}
+    models = document.get("models")
+    if not isinstance(models, dict):
+        raise ManifestError("existing manifest models are invalid")
+    for model in models.values():
+        if not isinstance(model, dict) or not isinstance(model.get("targets"), dict):
+            raise ManifestError("existing manifest target map is invalid")
+        for target in model["targets"].values():
+            if not isinstance(target, dict) or not isinstance(target.get("candidates"), dict):
+                raise ManifestError("existing manifest candidate map is invalid")
+            for candidate, record in target["candidates"].items():
+                if not isinstance(record, dict) or not isinstance(record.get("releases"), dict):
+                    continue
+                latest = record.get("latest")
+                release = record["releases"].get(latest)
+                benchmark = release.get("benchmark") if isinstance(release, dict) else None
+                source = benchmark.get("evidence") if isinstance(benchmark, dict) else None
+                if isinstance(source, str) and OCI_RE.fullmatch(source):
+                    evidence[candidate] = source
+    return evidence
+
+
 def candidates(
     root: pathlib.Path,
     sources: dict[str, str],
+    evidence: dict[str, str] | None = None,
     *,
     require_sources: bool = True,
 ) -> list[dict[str, Any]]:
@@ -217,6 +254,7 @@ def candidates(
     if nested:
         raise ManifestError(f"nested runtime hierarchy is forbidden: {nested[0]}")
     found: list[dict[str, Any]] = []
+    evidence = evidence or {}
     for directory in sorted(path for path in root.iterdir() if path.is_dir()):
         if directory.name.startswith(".") or directory.name in {"tools", "tests"}:
             continue
@@ -237,8 +275,25 @@ def candidates(
         candidate = normalized_candidate(runtime)
         if runtime.get("id") != candidate or directory.name != candidate:
             raise ManifestError(f"candidate directory and runtime.id differ: {directory.name}")
-        if (directory / "release.json").exists():
-            raise ManifestError(f"legacy release.json is forbidden: {candidate}")
+        release_path = directory / "release.json"
+        if release_path.is_symlink() or not release_path.is_file():
+            raise ManifestError(f"runtime release metadata is missing: {candidate}")
+        release_metadata = read_object(release_path)
+        if (
+            set(release_metadata) != {"schema_version", "authors", "license"}
+            or release_metadata.get("schema_version") != 1
+            or not isinstance(release_metadata.get("authors"), list)
+            or not release_metadata["authors"]
+            or len(release_metadata["authors"]) > 32
+            or any(
+                not isinstance(author, str) or not AUTHOR_RE.fullmatch(author)
+                for author in release_metadata["authors"]
+            )
+            or len(release_metadata["authors"])
+            != len(set(release_metadata["authors"]))
+            or not LICENSE_RE.fullmatch(str(release_metadata.get("license")))
+        ):
+            raise ManifestError(f"runtime release metadata is invalid: {candidate}")
         adapter = directory / "adapter" / "engine-adapter"
         dockerfile = directory / "image" / "Dockerfile"
         if not adapter.is_file() or adapter.is_symlink():
@@ -280,6 +335,8 @@ def candidates(
                 "source": sources.get(candidate),
                 "benchmark": benchmark,
                 "score": score,
+                "evidence": evidence.get(candidate),
+                "release_metadata": release_metadata,
             }
         )
     if require_sources and set(sources) != {item["runtime"]["id"] for item in found}:
@@ -289,8 +346,52 @@ def candidates(
     return found
 
 
-def generate(root: pathlib.Path, sources: dict[str, str]) -> dict[str, Any]:
-    items = candidates(root, sources)
+def _previous_releases(previous: dict[str, Any] | None) -> dict[tuple[str, str, str], dict[str, Any]]:
+    if previous is None:
+        return {}
+    if previous.get("schema_version") != SCHEMA_VERSION:
+        return {}
+    result: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for model, model_record in previous.get("models", {}).items():
+        for target_id, target_record in model_record.get("targets", {}).items():
+            for candidate, candidate_record in target_record.get("candidates", {}).items():
+                releases = candidate_record.get("releases")
+                if isinstance(releases, dict):
+                    result[(model, target_id, candidate)] = json.loads(
+                        json.dumps(releases)
+                    )
+    return result
+
+
+def _version_key(value: str) -> tuple[Any, ...]:
+    match = re.fullmatch(
+        r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+        r"(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?",
+        value,
+    )
+    if match is None:
+        raise ManifestError(f"runtime version is not semantic: {value}")
+    prerelease = match[4]
+    pre_key: tuple[Any, ...]
+    if prerelease is None:
+        pre_key = (1,)
+    else:
+        parts: list[tuple[int, Any]] = []
+        for item in prerelease.split("."):
+            parts.append((0, int(item)) if item.isdecimal() else (1, item))
+        pre_key = (0, *parts)
+    return int(match[1]), int(match[2]), int(match[3]), pre_key
+
+
+def generate(
+    root: pathlib.Path,
+    sources: dict[str, str],
+    evidence: dict[str, str] | None = None,
+    previous: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    evidence = evidence or {}
+    items = candidates(root, sources, evidence)
+    history = _previous_releases(previous)
     targets: dict[str, Any] = {}
     models: dict[str, Any] = {}
     for item in items:
@@ -306,40 +407,88 @@ def generate(root: pathlib.Path, sources: dict[str, str]) -> dict[str, Any]:
         )["targets"].setdefault(
             target_id, {"recommended": None, "candidates": {}}
         )
-        model_target["candidates"][candidate] = {
-            "version": runtime["version"],
+        benchmark_record = (
+            None
+            if item["benchmark"] is None
+            else {
+                "id": item["benchmark"]["id"],
+                "suite": runtime["benchmark"]["contract"]["suite"],
+                "score": item["score"],
+                "evidence": item["evidence"],
+            }
+        )
+        if benchmark_record is not None and not OCI_RE.fullmatch(
+            str(benchmark_record["evidence"])
+        ):
+            raise ManifestError(
+                f"published benchmark evidence is missing for {candidate}"
+            )
+        release = {
+            "authors": item["release_metadata"]["authors"],
             "source": item["source"],
             "qualified": runtime["status"] == "qualified",
+            "revoked": False,
             "engine": runtime["engine"]["id"],
             "engine_oci": runtime["engine"]["oci"]["reference"],
             "model_uri": runtime["model"]["uri"],
-            "benchmark": (
-                None
-                if item["benchmark"] is None
-                else {
-                    "id": item["benchmark"]["id"],
-                    "suite": runtime["benchmark"]["contract"]["suite"],
-                    "score": item["score"],
-                }
-            ),
+            "license": item["release_metadata"]["license"],
+            "benchmark": benchmark_record,
+        }
+        releases = history.get((runtime["logical_model"], target_id, candidate), {})
+        existing = releases.get(runtime["version"])
+        if existing is not None and existing != release:
+            metadata_upgrade = (
+                set(existing).issubset(release)
+                and all(release[key] == value for key, value in existing.items())
+                and set(release) - set(existing) <= {"authors", "license"}
+            )
+            if not metadata_upgrade:
+                raise ManifestError(
+                    f"immutable release changed for {candidate}@{runtime['version']}"
+                )
+        releases[runtime["version"]] = release
+        latest = max(releases, key=_version_key)
+        model_target["candidates"][candidate] = {
+            "latest": latest,
+            "releases": dict(sorted(releases.items(), key=lambda item: _version_key(item[0]))),
         }
     for model in models.values():
         for target in model["targets"].values():
             qualified = [
-                (record["benchmark"]["score"], candidate)
+                (
+                    release["benchmark"]["score"],
+                    _version_key(version),
+                    candidate,
+                    version,
+                )
                 for candidate, record in target["candidates"].items()
-                if record["qualified"] and record["benchmark"] is not None
+                for version, release in record["releases"].items()
+                if release["qualified"]
+                and not release["revoked"]
+                and release["benchmark"] is not None
+                and release["benchmark"]["suite"]
+                == RECOMMENDATION_POLICY["benchmark_suite"]
             ]
             if qualified:
-                target["recommended"] = max(qualified)[1]
-    return {"schema_version": SCHEMA_VERSION, "targets": targets, "models": models}
+                _score, _version_sort, candidate, version = max(qualified)
+                target["recommended"] = {
+                    "candidate": candidate,
+                    "version": version,
+                }
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "recommendation_policy": RECOMMENDATION_POLICY,
+        "targets": targets,
+        "models": models,
+    }
 
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser()
     result.add_argument("--root", type=pathlib.Path, default=pathlib.Path(__file__).resolve().parents[1])
     result.add_argument("--source", action="append", default=[])
-    result.add_argument("--sources-from", type=pathlib.Path)
+    result.add_argument("--previous", type=pathlib.Path)
+    result.add_argument("--evidence", action="append", default=[])
     result.add_argument("--output", type=pathlib.Path)
     result.add_argument("--check", action="store_true")
     result.add_argument("--validate-only", action="store_true")
@@ -351,23 +500,22 @@ def main() -> int:
     root = arguments.root.resolve(strict=True)
     if arguments.check and arguments.validate_only:
         raise ManifestError("--check and --validate-only are mutually exclusive")
-    sources = (
-        sources_from_manifest(arguments.sources_from.resolve(strict=True))
-        if arguments.sources_from is not None
-        else {}
+    previous_path = (
+        arguments.previous.resolve(strict=True)
+        if arguments.previous is not None
+        else None
     )
+    previous = read_object(previous_path) if previous_path is not None else None
+    sources = sources_from_manifest(previous_path) if previous_path is not None else {}
+    evidence = evidence_from_manifest(previous_path) if previous_path is not None else {}
     explicit = source_map(arguments.source)
-    overlap = set(sources).intersection(explicit)
-    if overlap:
-        raise ManifestError(
-            "publication source supplied twice: " + ", ".join(sorted(overlap))
-        )
     sources.update(explicit)
+    evidence.update(source_map(arguments.evidence))
     if arguments.validate_only:
-        items = candidates(root, sources, require_sources=False)
+        items = candidates(root, sources, evidence, require_sources=False)
         print(f"VALID candidates={len(items)}")
         return 0
-    document = generate(root, sources)
+    document = generate(root, sources, evidence, previous)
     data = canonical_bytes(document)
     output = arguments.output or root / "manifest.json"
     if arguments.check:

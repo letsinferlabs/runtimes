@@ -79,6 +79,7 @@ class ArtifactPlan:
             "tag": f"{self.registry}/{self.repository}:{self.tag}",
             "source": self.source,
             "manifest_digest": self.manifest_digest,
+            "manifest_bytes": len(self.manifest),
             "config_digest": self.config_digest,
             "layer_digest": self.layer_digest,
             "layer_bytes": self.layer_size,
