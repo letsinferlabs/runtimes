@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.11",
+  "version": "0.1.0-rc.12",
   "logical_model": "qwen3.8-27b",
   "status": "qualified",
   "target": {
@@ -216,8 +216,8 @@
     },
     "record": {
       "path": "benchmark.json",
-      "sha256": "88f45c9de1dfca66d58240f77e571a774cd2103aed076f29adb8d395e26ec7af",
-      "id": "74a6c0af527e1cad825d67bce33a7448838679b4d308ce92201c44351e19ffe1"
+      "sha256": "836333201878059b43233ffe077274d07f3491f243628012f1d2f402f850f10b",
+      "id": "3468067b7b282325d3d13e35b2005eccb2da17388fdf38ea0cb217ee8e729a4c"
     }
   }
 }
