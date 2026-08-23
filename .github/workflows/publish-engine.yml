@@ -191,10 +191,6 @@ jobs:
             --repository "ghcr.io/letsinferlabs/runtimes/$CANDIDATE" \
             --candidate "$CANDIDATE" --version "$version" \
             --output "$RUNNER_TEMP/$CANDIDATE-plan.json"
-          source=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source"])' "$RUNNER_TEMP/$CANDIDATE-plan.json")
-          python3 tools/set_publication_source.py \
-            --manifest manifest.json --candidate "$CANDIDATE" --source "$source"
-          python3 tools/generate_manifest.py --sources-from manifest.json
           echo "platform_reference=$repository@$platform_digest" >> "$GITHUB_OUTPUT"
           echo "immutable_id=$image_id" >> "$GITHUB_OUTPUT"
       - name: Prepare the deterministic Engine pin review patch
@@ -205,12 +201,12 @@ jobs:
         run: |
           set -euo pipefail
           patch="$RUNNER_TEMP/engine-pin-$CANDIDATE.patch"
-          if git diff --quiet -- "$CANDIDATE" manifest.json; then
+          if git diff --quiet -- "$CANDIDATE"; then
             echo 'Engine OCI already pinned; no qualification reset required.'
             echo 'changed=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git diff --binary -- "$CANDIDATE" manifest.json > "$patch"
+          git diff --binary -- "$CANDIDATE" > "$patch"
           test -s "$patch"
           echo 'changed=true' >> "$GITHUB_OUTPUT"
           echo "Engine pin review patch: engine-pin-$CANDIDATE" >> "$GITHUB_STEP_SUMMARY"

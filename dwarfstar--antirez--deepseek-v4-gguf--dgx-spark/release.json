@@ -1,0 +1,9 @@
+{
+  "authors": [
+    "antirez",
+    "Entrpi",
+    "Letsinfer"
+  ],
+  "license": "AGPL-3.0-only",
+  "schema_version": 1
+}

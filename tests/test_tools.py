@@ -12,6 +12,7 @@ import tempfile
 import unittest
 
 from tools import (
+    benchmark_artifact,
     changed_candidates,
     generate_manifest,
     oci_artifact,
@@ -66,11 +67,21 @@ class ManifestToolTests(unittest.TestCase):
         )
 
     def test_committed_manifest_is_the_canonical_candidate_projection(self) -> None:
-        sources = generate_manifest.sources_from_manifest(ROOT / "manifest.json")
+        manifest_path = ROOT / "manifest.json"
+        sources = generate_manifest.sources_from_manifest(manifest_path)
+        evidence = generate_manifest.evidence_from_manifest(manifest_path)
+        previous = generate_manifest.read_object(manifest_path)
         expected = generate_manifest.canonical_bytes(
-            generate_manifest.generate(ROOT, sources)
+            generate_manifest.generate(ROOT, sources, evidence, previous)
         )
-        self.assertEqual((ROOT / "manifest.json").read_bytes(), expected)
+        self.assertEqual(manifest_path.read_bytes(), expected)
+
+    def test_release_metadata_preserves_multiple_runtime_authors(self) -> None:
+        manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
+        qwen = manifest["models"]["qwen3.8-27b"]["targets"]["dgx-spark"]
+        release = next(iter(qwen["candidates"].values()))["releases"]["0.1.0-rc.12"]
+        self.assertEqual(release["authors"], ["MiaAI-Lab", "Letsinfer"])
+        self.assertEqual(release["license"], "AGPL-3.0-only")
 
     def test_every_candidate_validates_without_a_publication_source(self) -> None:
         records = generate_manifest.candidates(ROOT, {}, require_sources=False)
@@ -220,7 +231,7 @@ class ManifestToolTests(unittest.TestCase):
         self.assertNotEqual(document, before)
         self.assertEqual(
             document["models"]["deepseek-v4-flash"]["targets"]["dgx-spark"]
-            ["candidates"][candidate]["source"],
+            ["candidates"][candidate]["releases"]["0.11.0-rc.10"]["source"],
             source,
         )
         self.assertEqual(
@@ -228,13 +239,54 @@ class ManifestToolTests(unittest.TestCase):
             before["models"]["qwen3.8-27b"],
         )
 
-    def test_runtime_release_uses_credential_free_catalog_handoff(self) -> None:
+    def test_benchmark_oci_plan_is_runtime_bound_and_deterministic(self) -> None:
+        candidate = "example--owner--model--target"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            evidence = root / "benchmark.json"
+            evidence.write_text(
+                json.dumps({"id": "1" * 64}), encoding="utf-8"
+            )
+            artifact = root / "runtime.letsinfer"
+            artifact.write_bytes(b"runtime")
+            runtime = oci_artifact.plan(
+                artifact,
+                repository="ghcr.io/letsinferlabs/runtimes/example",
+                candidate=candidate,
+                version="1.2.3",
+            )
+            runtime_plan = root / "runtime-plan.json"
+            runtime_plan.write_text(json.dumps(runtime.document()), encoding="utf-8")
+            first = benchmark_artifact.plan(
+                evidence,
+                repository="ghcr.io/letsinferlabs/benchmarks/example",
+                candidate=candidate,
+                version="1.2.3",
+                runtime_plan=runtime_plan,
+            )
+            second = benchmark_artifact.plan(
+                evidence,
+                repository="ghcr.io/letsinferlabs/benchmarks/example",
+                candidate=candidate,
+                version="1.2.3",
+                runtime_plan=runtime_plan,
+            )
+        self.assertEqual(first.manifest, second.manifest)
+        manifest = json.loads(first.manifest)
+        self.assertEqual(manifest["subject"]["digest"], runtime.manifest_digest)
+        self.assertEqual(
+            manifest["layers"][0]["mediaType"],
+            benchmark_artifact.BENCHMARK_MEDIA_TYPE,
+        )
+
+    def test_runtime_release_publishes_catalog_directly(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn("contents: write", workflow)
         self.assertIn("gh release create", workflow)
-        self.assertIn("catalog-candidate-$GITHUB_SHA", workflow)
+        self.assertIn("catalog-v5-$GITHUB_SHA", workflow)
+        self.assertIn("python3 -m tools.benchmark_artifact push", workflow)
         self.assertIn("catalog-public-key.pem", workflow)
         self.assertNotIn("LETSINFER_CATALOG_TOKEN", workflow)
         self.assertNotIn("git push origin HEAD:main", workflow)
