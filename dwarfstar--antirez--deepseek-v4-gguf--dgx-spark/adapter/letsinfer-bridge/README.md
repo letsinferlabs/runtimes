@@ -1,8 +1,24 @@
-# letsinfer-bridge: Let's Infer persistent prefix cache for ds4-server
+# letsinfer-bridge: persistent prefix cache for DwarfStar
 
-This Let's Infer-core directory gives `ds4-server` access to the engine-neutral
-Let's Infer NVMe prefix store through a thin C ABI. Runtime repositories must not
-copy this directory or the store.
+This runtime-owned bridge gives `ds4-server` access to the engine-neutral Let's
+Infer NVMe prefix store through a thin, versioned C ABI. The runtime carries the
+bridge source and a pinned build snapshot; core remains the owner of the cache
+contract.
+
+## Features
+
+- **Exact restored replay** — opaque named state regions are validated before
+  reuse and corruption is treated as a cache miss.
+- **Crash-safe durability** — page-aligned CRC records commit through temp file,
+  `fsync`, atomic rename, and directory `fsync`.
+- **Bounded storage** — exact-byte LRU capacity, sliding TTL, and a bounded
+  background writer prevent unbounded growth.
+- **Unified-memory aware** — large captures and restores use same-filesystem
+  mappings instead of a second record-sized anonymous allocation.
+- **Optional and fail-open** — DwarfStar continues serving with the persistent
+  cache disabled when the verified bridge is unavailable.
+- **Versioned ABI** — the server checks the C ABI version before using the
+  bridge; the runtime pins and verifies the built artifact.
 
 ```
 ds4_server.c ──> ds4_letsinfer_cache.c ──dlopen──> libletsinfer_prefix_capi.so
@@ -14,14 +30,15 @@ ds4_server.c ──> ds4_letsinfer_cache.c ──dlopen──> libletsinfer_pref
 
 ## Layout
 
-- `capi/` — new crate `letsinfer_prefix_capi`: the C ABI (`letsinfer_prefix_*` symbols),
-  panic-safe, versioned via `letsinfer_prefix_abi_version()`. Built as a cdylib.
+- `capi/` — the `letsinfer_prefix_capi` crate: a panic-safe C ABI
+  (`letsinfer_prefix_*` symbols), versioned through
+  `letsinfer_prefix_abi_version()` and built as a cdylib.
 - `vendor/letsinfer_prefix_store/` — an exact Let's Infer-owned build snapshot of
-  the authoritative `cache/letsinfer_prefix_store` logic. It exists only so
-  the native bridge can be built as a closed, pinned workspace; it is not part
-  of a DwarfStar runtime repository. It provides the pinned region view used
-  by C ABI v2, avoiding a second payload-sized allocation during DwarfStar
-  restore. This is the validated engine-neutral `persistent_prefix` store:
+  the authoritative `cache/letsinfer_prefix_store` logic. It lets this runtime
+  build the native bridge as a closed, pinned workspace and provides the region
+  view used by C ABI v2, avoiding a second payload-sized allocation during
+  DwarfStar restore. This is the validated engine-neutral `persistent_prefix`
+  store:
   CRC'd page-aligned records of opaque named state regions, exact-token
   authority, atomic commits (temp file + fsync + rename + dir fsync),
   exact-byte LRU capacity, sliding TTL, a bounded background writer (one
@@ -67,5 +84,5 @@ the DwarfStar runtime's `ds4_letsinfer_cache.h`.
 cd letsinfer-bridge && cargo test --workspace --release
 ```
 
-runs the Let's Infer store snapshot's validation suite (record round-trips, capacity
-LRU, TTL, corruption-as-miss, writer admission).
+runs the Let's Infer store snapshot's validation suite: record round-trips,
+capacity LRU, TTL, corruption-as-miss, and writer admission.
