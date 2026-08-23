@@ -18,7 +18,8 @@ and one hardware target. Let's Infer core remains engine- and model-agnostic.
 - **Replica-ready by default** — core can run compatible single groups across
   main and child nodes while every node keeps its fastest qualified runtime.
 - **Explicit parallel runtimes** — TP/PP candidates declare and qualify their
-  complete multi-device topology, ranks, interconnect, and Engine recipe.
+  complete multi-device topology, generic launch tasks, interconnect, and
+  Engine recipe while roles and ranks stay private to the runtime.
 - **Complete reproducibility** — runtime packs and Engine images are built from
   reviewed source, pinned dependencies, and deterministic recipes.
 - **Benchmark-backed selection** — the signed catalog recommends only a
@@ -71,6 +72,8 @@ every catalog release and shown by `letsinfer list`. `runtime.json` declares:
 - digest-pinned Engine OCI and image configuration identity;
 - Engine protocol version;
 - target capabilities;
+- an optional bounded, engine-neutral orchestration contract for parallel
+  targets;
 - opaque engine arguments and environment;
 - container, cache, serving, and benchmark contracts.
 
@@ -79,6 +82,13 @@ Let's Infer core may replicate that runtime without changing its bytes. Use
 `parallel` only for a runtime that owns and qualifies the exact TP/PP topology;
 core allocates its declared devices but never invents parallelism from a
 single-device candidate.
+
+A parallel candidate declares one generic task per required node, one endpoint
+owner, phased startup order, shell-free commands, ports, environment, and
+readiness. Core supplies authenticated node IDs, GPU UUIDs, addresses, ports,
+credentials, and verified connection facts. Your Engine OCI privately maps
+each `task-N` to its ranks, stages, collectives, rendezvous, and engine flags.
+Changing those private details does not require a core release.
 
 When you install a runtime, Let's Infer downloads every declared model
 artifact. You do not need to preinstall weights, choose an engine, or supply a
@@ -136,7 +146,7 @@ After qualification, merging the exact revision to the `release` branch:
 1. rebuilds and verifies deterministic runtime packs;
 2. checks that every advertised OCI digest matches the planned artifact;
 3. publishes the immutable runtime-pack OCI artifacts;
-4. preserves previous qualified releases and calculates the best release for
+4. preserves immutable qualified releases and calculates the best release for
    every model/target using the catalog's versioned scoring policy;
 5. verifies that every model/target has a qualified recommendation;
 6. signs the generated schema-v6 catalog and separate revocation ledger;
@@ -166,6 +176,14 @@ token explicitly limited to this repository and those permissions.
 
 The release fails closed when an Engine digest, model revision, benchmark
 identity, catalog source, signature key, or recommendation is inconsistent.
+
+A deliberate no-compatibility schema migration may supersede one prior
+release without rerunning its performance matrix only through the reviewed
+`runtime-contract-migration-v1` ledger. The generator independently verifies
+the sealed benchmark identity and digest, prior version and OCI source, exact
+model revision, Engine image, benchmark contract, and a canonical hash of the
+engine-visible execution contract. Any behavior-bearing change makes the
+migration fail; ordinary releases still require fresh community consensus.
 
 ## Installation
 
