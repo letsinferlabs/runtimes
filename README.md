@@ -30,6 +30,7 @@ Every candidate is a single top-level directory:
 ```text
 <engine>--<hf-owner>--<hf-model>--<target>/
 ├── runtime.json
+├── release.json  # runtime authors and SPDX license
 ├── README.md      # model links and exact reproduction command
 ├── adapter/       # Engine protocol frontend included in the Engine OCI
 ├── engine/        # pinned engine or kernel source used to build the Engine OCI
@@ -48,12 +49,15 @@ The directory name and `runtime.id` must be exactly:
 ```
 
 Nested model/engine/target hierarchies are forbidden. The generated root
-`manifest.json` is the candidate projection consumed by the trusted catalog
-release. It is never edited as an independent source of truth.
+`manifest.json` is the append-only release projection used to produce the
+signed public catalog. It keeps every qualified version and its immutable
+runtime and benchmark references; it is never hand-edited.
 
 ## Runtime contract
 
-`runtime.json` declares:
+`release.json` declares the runtime's one or more authors and SPDX license.
+Those identities are versioned with every catalog release and shown by
+`letsinfer list`. `runtime.json` declares:
 
 - logical model alias;
 - exact `hf://owner/repository` identity and immutable 40-hex revision;
@@ -102,20 +106,27 @@ binds that inventory to the exact image and configuration identities as SPDX,
 and attaches the SBOM attestation to the OCI. It then emits a deterministic
 pin review patch; applying that patch resets the candidate to unqualified.
 
-After target qualification is committed, merging the exact revision to the
-`release` branch:
+Every runtime merged to `main` must already have benchmark evidence verified by
+a Let's Infer maintainer. The merge gate therefore makes every published
+runtime qualified; recommendation is a separate, automatically calculated
+decision. After target qualification is committed, merging the exact revision
+to the `release` branch:
 
 1. rebuilds and verifies deterministic runtime packs;
 2. checks that every advertised OCI digest matches the planned artifact;
 3. publishes the immutable runtime-pack OCI artifacts;
-4. verifies that every model/target has a qualified recommendation;
-5. signs the generated schema-v4 catalog;
-6. verifies the signature with the public key shipped by core;
-7. publishes `catalog.json`, its signature, the public key, and a hash-bound
-   metadata record as an immutable prerelease in this repository;
-8. lets the catalog repository independently download, verify, and promote
-   those exact bytes through its own deterministic review patch; and
-9. emits build-provenance attestations.
+4. publishes each complete `benchmark.json` as an immutable, runtime-bound OCI
+   evidence artifact;
+5. preserves previous qualified releases and calculates the best release for
+   every model/target using the catalog's versioned scoring policy;
+6. verifies that every model/target has a qualified recommendation;
+7. signs the generated schema-v5 catalog;
+8. verifies the signature with the public key shipped by core;
+9. publishes `catalog.json`, its signature, the public key, and a hash-bound
+   metadata record as the latest immutable GitHub Release in this repository;
+   and
+10. emits build-provenance attestations for runtime packs, benchmark evidence,
+    and the signed catalog.
 
 The release fails closed when an Engine digest, model revision, benchmark
 identity, catalog source, signature key, or recommendation is inconsistent.
@@ -131,6 +142,13 @@ letsinfer install qwen3.8-27b
 Let’s Infer detects your target and selects the best qualified candidate from
 the signed catalog. You may pin an exact candidate with `--runtime`; you never
 need to select an engine.
+
+Discover every qualified candidate compatible with the current machine:
+
+```bash
+letsinfer list
+letsinfer list qwen3.8-27b --versions
+```
 
 ## License
 
