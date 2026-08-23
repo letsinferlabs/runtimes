@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
   "version": "0.1.0-rc.13",
   "logical_model": "qwen3.8-27b",
@@ -18,8 +18,7 @@
     },
     "placement": {
       "strategy": "single",
-      "member_count": 1,
-      "engine_strategy": "single-node",
+      "node_count": 1,
       "interconnect": {
         "kind": "any",
         "rdma_required": false,
