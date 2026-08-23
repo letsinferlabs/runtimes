@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -14,7 +15,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 6
-RUNTIME_SCHEMA_VERSION = 4
+RUNTIME_SCHEMA_VERSION = 5
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 OCI_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 LICENSE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,126}")
@@ -30,6 +31,7 @@ RECOMMENDATION_POLICY = {
     "cache": "uncached",
     "tie_breakers": ["score", "version", "candidate"],
 }
+CONTRACT_MIGRATION_METHOD = "runtime-contract-migration-v1"
 
 
 class ManifestError(ValueError):
@@ -88,6 +90,104 @@ def normalized_candidate(runtime: dict[str, Any]) -> str:
     return "--".join((engine, match[1].lower(), match[2].lower(), target))
 
 
+def validate_runtime_execution_contract(runtime: dict[str, Any]) -> None:
+    """Keep repository candidates aligned with core's generic group boundary."""
+    target = runtime.get("target")
+    placement = target.get("placement") if isinstance(target, dict) else None
+    if not isinstance(placement, dict) or set(placement) != {
+        "strategy", "node_count", "interconnect"
+    }:
+        raise ManifestError("runtime target placement must declare strategy, node_count, and interconnect")
+    strategy = placement.get("strategy")
+    node_count = placement.get("node_count")
+    if (
+        strategy not in {"single", "parallel"}
+        or not isinstance(node_count, int)
+        or isinstance(node_count, bool)
+        or node_count not in range(1, 65)
+        or (strategy == "single" and node_count != 1)
+    ):
+        raise ManifestError("runtime target placement strategy or node_count is invalid")
+    interconnect = placement.get("interconnect")
+    if not isinstance(interconnect, dict) or set(interconnect) != {
+        "kind", "rdma_required", "minimum_speed_mbps", "minimum_mtu"
+    }:
+        raise ManifestError("runtime target interconnect contract is invalid")
+    if (
+        interconnect.get("kind") not in {"any", "connectx", "ethernet", "wifi", "other"}
+        or not isinstance(interconnect.get("rdma_required"), bool)
+        or any(
+            not isinstance(interconnect.get(key), int)
+            or isinstance(interconnect.get(key), bool)
+            or interconnect[key] < 0
+            for key in ("minimum_speed_mbps", "minimum_mtu")
+        )
+    ):
+        raise ManifestError("runtime target interconnect values are invalid")
+    contract = runtime.get("orchestration")
+    if strategy == "single":
+        if contract is not None:
+            raise ManifestError("single-node runtime cannot declare orchestration")
+        return
+    required = {
+        "schema_version", "failure_policy", "endpoint_owner", "startup_order", "tasks"
+    }
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != required
+        or contract.get("schema_version") != 3
+        or contract.get("failure_policy") != "whole-group"
+    ):
+        raise ManifestError("parallel runtime orchestration contract is invalid")
+    tasks = contract.get("tasks")
+    if not isinstance(tasks, list) or len(tasks) != node_count:
+        raise ManifestError("parallel runtime must declare one task per required node")
+    task_ids: list[str] = []
+    for index, task in enumerate(tasks):
+        where = f"runtime.orchestration.tasks[{index}]"
+        common = {"task_id", "launcher", "environment", "port_count", "readiness"}
+        if not isinstance(task, dict) or not common.issubset(task):
+            raise ManifestError(f"{where} is incomplete")
+        launcher = task.get("launcher")
+        fields = common if launcher == "manifest" else common | {"command"}
+        if launcher not in {"manifest", "runtime-command"} or set(task) != fields:
+            raise ManifestError(f"{where} has unsupported fields")
+        task_id = f"task-{index}"
+        if task.get("task_id") != task_id:
+            raise ManifestError(f"{where}.task_id must be {task_id}")
+        port_count = task.get("port_count")
+        if (
+            not isinstance(port_count, int)
+            or isinstance(port_count, bool)
+            or port_count not in range(1, 33)
+            or not isinstance(task.get("environment"), dict)
+            or any(str(key).startswith("LETSINFER_") for key in task["environment"])
+        ):
+            raise ManifestError(f"{where} has invalid bounded resources")
+        if launcher == "runtime-command":
+            command = task.get("command")
+            if (
+                not isinstance(command, list)
+                or not command
+                or not isinstance(command[0], str)
+                or not command[0].startswith("/")
+                or command[0] in {"/bin/sh", "/bin/bash", "/usr/bin/env"}
+                or any(not isinstance(argument, str) or not argument for argument in command)
+            ):
+                raise ManifestError(f"{where}.command must be a shell-free argv")
+        task_ids.append(task_id)
+    if contract.get("endpoint_owner") not in task_ids:
+        raise ManifestError("parallel runtime endpoint owner is not a task")
+    phases = contract.get("startup_order")
+    if not isinstance(phases, list) or any(
+        not isinstance(phase, list) or not phase for phase in phases
+    ):
+        raise ManifestError("parallel runtime startup order is invalid")
+    flattened = [task for phase in phases for task in phase]
+    if len(flattened) != len(set(flattened)) or sorted(flattened) != sorted(task_ids):
+        raise ManifestError("parallel runtime startup order must contain every task once")
+
+
 def validate_model_links(runtime: dict[str, Any], readme: str) -> None:
     artifacts = runtime.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
@@ -104,6 +204,33 @@ def validate_model_links(runtime: dict[str, Any], readme: str) -> None:
             raise ManifestError(
                 f"runtime README is missing Hugging Face artifact link: {link}"
             )
+
+
+def runtime_execution_contract(runtime: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the engine-visible contract across manifest/protocol revisions."""
+    value = copy.deepcopy(runtime)
+    for field in ("schema_version", "version", "status"):
+        value.pop(field, None)
+    engine = value.get("engine")
+    if isinstance(engine, dict):
+        engine.pop("protocol", None)
+    target = value.get("target")
+    placement = target.get("placement") if isinstance(target, dict) else None
+    if isinstance(placement, dict):
+        if "member_count" in placement and "node_count" not in placement:
+            placement["node_count"] = placement.pop("member_count")
+        placement.pop("engine_strategy", None)
+    serving = value.get("serving")
+    if isinstance(serving, dict):
+        serving.pop("qualified", None)
+    benchmark = value.get("benchmark")
+    if isinstance(benchmark, dict):
+        benchmark.pop("record", None)
+    return value
+
+
+def runtime_execution_contract_sha256(runtime: dict[str, Any]) -> str:
+    return hashlib.sha256(canonical_bytes(runtime_execution_contract(runtime))).hexdigest()
 
 
 def benchmark_score(record: dict[str, Any]) -> float:
@@ -195,6 +322,200 @@ def validate_benchmark_binding(
     ).hexdigest()
     if record.get("id") != identity:
         raise ManifestError(f"benchmark identity differs: {runtime['id']}")
+
+
+def validate_benchmark_integrity(record: dict[str, Any], where: str) -> None:
+    """Validate a sealed record without rebinding it to a newer runtime version."""
+    subject = record.get("subject")
+    subject_fields = {
+        "candidate_id", "runtime_version", "model_uri", "model_revision",
+        "engine_oci", "target", "target_contract_sha256",
+    }
+    if (
+        record.get("schema_version") != 4
+        or not isinstance(subject, dict)
+        or set(subject) != subject_fields
+        or not SHA256_RE.fullmatch(str(subject.get("target_contract_sha256")))
+        or not SHA256_RE.fullmatch(str(record.get("benchmark_contract_sha256")))
+    ):
+        raise ManifestError(f"benchmark migration record is invalid: {where}")
+    results = record.get("results")
+    if not isinstance(results, list) or not results:
+        raise ManifestError(f"benchmark migration results are unavailable: {where}")
+    results_sha = hashlib.sha256(canonical_bytes(results)).hexdigest()
+    if record.get("results_sha256") != results_sha:
+        raise ManifestError(f"benchmark migration results identity differs: {where}")
+    timestamp_ns = record.get("timestamp_unix_ns")
+    installation_id = record.get("installation_id")
+    if (
+        not isinstance(timestamp_ns, int)
+        or isinstance(timestamp_ns, bool)
+        or timestamp_ns <= 0
+        or not SHA256_RE.fullmatch(str(installation_id))
+    ):
+        raise ManifestError(f"benchmark migration installation identity is invalid: {where}")
+    identity = hashlib.sha256(
+        canonical_bytes(
+            {
+                "benchmark_contract_sha256": record["benchmark_contract_sha256"],
+                "contract": "letsinfer-benchmark-identity-v2",
+                "installation_id": installation_id,
+                "results_sha256": results_sha,
+                "subject": subject,
+                "timestamp_unix_ns": timestamp_ns,
+            }
+        )
+    ).hexdigest()
+    if record.get("id") != identity:
+        raise ManifestError(f"benchmark migration identity differs: {where}")
+
+
+def contract_migration_entries(migration: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    entries = migration.get("contract_migrations")
+    if not isinstance(entries, dict):
+        raise ManifestError("runtime contract migration ledger is invalid")
+    fields = {
+        "from_version",
+        "benchmark_record",
+        "benchmark_record_sha256",
+        "execution_contract_sha256",
+    }
+    for identity, entry in entries.items():
+        candidate, separator, version = str(identity).rpartition("@")
+        if (
+            not separator
+            or not CANDIDATE_RE.fullmatch(candidate)
+            or not VERSION_RE.fullmatch(version)
+            or not isinstance(entry, dict)
+            or set(entry) != fields
+            or not VERSION_RE.fullmatch(str(entry.get("from_version")))
+            or entry["from_version"] == version
+            or entry.get("benchmark_record")
+            != f"{candidate}/benchmark.previous.json"
+            or not SHA256_RE.fullmatch(str(entry.get("benchmark_record_sha256")))
+            or not SHA256_RE.fullmatch(str(entry.get("execution_contract_sha256")))
+        ):
+            raise ManifestError(f"runtime contract migration is invalid: {identity}")
+    return entries
+
+
+def migrated_release(
+    *,
+    root: pathlib.Path,
+    runtime: dict[str, Any],
+    source: str | None,
+    release_metadata: dict[str, Any],
+    old_release: dict[str, Any],
+    entry: dict[str, Any],
+) -> dict[str, Any]:
+    candidate = runtime["id"]
+    version = runtime["version"]
+    from_version = entry["from_version"]
+    identity = f"{candidate}@{version}"
+    if source is None:
+        raise ManifestError(f"published OCI source is missing for {identity}")
+    if _version_key(from_version) >= _version_key(version):
+        raise ManifestError(f"runtime contract migration does not move forward: {identity}")
+    execution_sha = runtime_execution_contract_sha256(runtime)
+    if execution_sha != entry["execution_contract_sha256"]:
+        raise ManifestError(f"runtime execution contract changed during migration: {identity}")
+    benchmark_relative = pathlib.PurePosixPath(entry["benchmark_record"])
+    benchmark_path = root.joinpath(*benchmark_relative.parts)
+    if benchmark_path.is_symlink() or not benchmark_path.is_file():
+        raise ManifestError(f"runtime migration benchmark is missing: {identity}")
+    if sha256_file(benchmark_path) != entry["benchmark_record_sha256"]:
+        raise ManifestError(f"runtime migration benchmark digest differs: {identity}")
+    benchmark = read_object(benchmark_path)
+    validate_benchmark_integrity(benchmark, identity)
+    subject = benchmark["subject"]
+    primary_name = runtime["model"]["artifact"]
+    primary = next(
+        (
+            artifact
+            for artifact in runtime["artifacts"]
+            if artifact.get("name") == primary_name
+        ),
+        None,
+    )
+    if not isinstance(primary, dict):
+        raise ManifestError(f"runtime migration primary artifact is missing: {identity}")
+    expected_subject = {
+        "candidate_id": candidate,
+        "runtime_version": from_version,
+        "model_uri": runtime["model"]["uri"],
+        "model_revision": primary["revision"],
+        "engine_oci": runtime["engine"]["oci"]["reference"],
+        "target": runtime["target"]["id"],
+        # A schema-only target rename changes this historical digest. Its
+        # semantic equivalence is attested by execution_contract_sha256.
+        "target_contract_sha256": subject.get("target_contract_sha256"),
+    }
+    if subject != expected_subject:
+        raise ManifestError(f"runtime migration benchmark subject differs: {identity}")
+    contract_sha = hashlib.sha256(
+        canonical_bytes(runtime["benchmark"]["contract"])
+    ).hexdigest()
+    old_benchmark = old_release.get("benchmark")
+    if (
+        benchmark.get("benchmark_contract_sha256") != contract_sha
+        or not isinstance(old_benchmark, dict)
+        or old_benchmark.get("id") != benchmark.get("id")
+        or old_benchmark.get("suite") != runtime["benchmark"]["contract"]["suite"]
+        or old_benchmark.get("score") != benchmark_score(benchmark)
+        or old_release.get("engine") != runtime["engine"]["id"]
+        or old_release.get("engine_oci") != runtime["engine"]["oci"]["reference"]
+        or old_release.get("model_uri") != runtime["model"]["uri"]
+        or not OCI_RE.fullmatch(str(old_release.get("source")))
+    ):
+        raise ManifestError(f"runtime migration evidence differs from prior release: {identity}")
+    old_provenance = old_release.get("provenance")
+    old_verification = old_release.get("verification")
+    if (
+        not isinstance(old_provenance, dict)
+        or not isinstance(old_verification, dict)
+        or not isinstance(old_verification.get("verifiers"), list)
+    ):
+        raise ManifestError(f"runtime migration qualification is invalid: {identity}")
+    common_provenance = {
+        key: old_provenance.get(key)
+        for key in (
+            "repository",
+            "pull_request",
+            "pull_request_url",
+            "proposal_head_sha",
+            "qualified_commit_sha",
+        )
+    }
+    return {
+        "authors": release_metadata["authors"],
+        "source": source,
+        "engine": runtime["engine"]["id"],
+        "engine_oci": runtime["engine"]["oci"]["reference"],
+        "model_uri": runtime["model"]["uri"],
+        "license": release_metadata["license"],
+        "benchmark": {
+            "id": benchmark["id"],
+            "suite": runtime["benchmark"]["contract"]["suite"],
+            "score": benchmark_score(benchmark),
+        },
+        "provenance": {
+            "method": CONTRACT_MIGRATION_METHOD,
+            **common_provenance,
+            "from_version": from_version,
+            "from_source": old_release["source"],
+            "benchmark_record_sha256": entry["benchmark_record_sha256"],
+            "execution_contract_sha256": execution_sha,
+        },
+        "verification": {
+            "method": CONTRACT_MIGRATION_METHOD,
+            "from_version": from_version,
+            "from_source": old_release["source"],
+            "benchmark_record_path": entry["benchmark_record"],
+            "benchmark_record_sha256": entry["benchmark_record_sha256"],
+            "execution_contract_sha256": execution_sha,
+            "verifiers": old_verification["verifiers"],
+        },
+    }
 
 
 def source_map(values: list[str]) -> dict[tuple[str, str], str]:
@@ -351,6 +672,7 @@ def candidates(
         validate_model_links(runtime, readme)
         if runtime.get("schema_version") != RUNTIME_SCHEMA_VERSION:
             raise ManifestError(f"unsupported runtime schema in {directory.name}")
+        validate_runtime_execution_contract(runtime)
         candidate = normalized_candidate(runtime)
         if runtime.get("id") != candidate or directory.name != candidate:
             raise ManifestError(f"candidate directory and runtime.id differ: {directory.name}")
@@ -505,11 +827,14 @@ def generate(
     migration = read_object(root / "qualification-migration.json")
     migration_releases = migration.get("releases")
     if (
-        migration.get("schema_version") != 1
+        set(migration) != {"schema_version", "method", "releases", "contract_migrations"}
+        or migration.get("schema_version") != 2
         or migration.get("method") != "maintainer-qualified-pre-community-v1"
         or not isinstance(migration_releases, dict)
     ):
         raise ManifestError("pre-community qualification migration is invalid")
+    migration_entries = contract_migration_entries(migration)
+    consumed_migrations: set[str] = set()
     targets: dict[str, Any] = {}
     models: dict[str, Any] = {}
     for item in items:
@@ -568,6 +893,64 @@ def generate(
                 },
             }
         releases = normalized_releases
+        migration_key = f"{candidate}@{runtime['version']}"
+        migration_entry = migration_entries.get(migration_key)
+        if migration_entry is not None:
+            if item["qualified"]:
+                raise ManifestError(
+                    f"runtime cannot use consensus and contract migration together: {migration_key}"
+                )
+            from_version = migration_entry["from_version"]
+            old_release = releases.get(from_version)
+            existing_release = releases.get(runtime["version"])
+            if old_release is None and existing_release is not None:
+                existing_verification = existing_release.get("verification")
+                existing_provenance = existing_release.get("provenance")
+                if not isinstance(existing_verification, dict) or not isinstance(
+                    existing_provenance, dict
+                ):
+                    raise ManifestError(
+                        f"runtime contract migration history is invalid: {migration_key}"
+                    )
+                old_release = {
+                    "source": existing_verification.get("from_source"),
+                    "engine": existing_release.get("engine"),
+                    "engine_oci": existing_release.get("engine_oci"),
+                    "model_uri": existing_release.get("model_uri"),
+                    "benchmark": existing_release.get("benchmark"),
+                    "provenance": {
+                        key: existing_provenance.get(key)
+                        for key in (
+                            "repository",
+                            "pull_request",
+                            "pull_request_url",
+                            "proposal_head_sha",
+                            "qualified_commit_sha",
+                        )
+                    },
+                    "verification": {
+                        "verifiers": existing_verification.get("verifiers")
+                    },
+                }
+            if old_release is None:
+                raise ManifestError(
+                    f"runtime contract migration source release is missing: {migration_key}"
+                )
+            release = migrated_release(
+                root=root,
+                runtime=runtime,
+                source=item["source"],
+                release_metadata=item["release_metadata"],
+                old_release=old_release,
+                entry=migration_entry,
+            )
+            if existing_release is not None and existing_release != release:
+                raise ManifestError(
+                    f"immutable migrated release changed for {migration_key}"
+                )
+            releases[runtime["version"]] = release
+            releases.pop(from_version, None)
+            consumed_migrations.add(migration_key)
         if item["qualified"]:
             consensus = item["consensus"]
             consensus_path = f"{candidate}/benchmark.consensus.json"
@@ -613,6 +996,12 @@ def generate(
             "latest": latest,
             "releases": dict(sorted(releases.items(), key=lambda item: _version_key(item[0]))),
         }
+    unused_migrations = sorted(set(migration_entries) - consumed_migrations)
+    if unused_migrations:
+        raise ManifestError(
+            "runtime contract migration does not identify a current candidate: "
+            + unused_migrations[0]
+        )
     for model in models.values():
         for target in model["targets"].values():
             qualified = [

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, BinaryIO
 
 
-PACK_MEDIA_TYPE = "application/vnd.letsinfer.runtime.v4+tar"
+PACK_MEDIA_TYPE = "application/vnd.letsinfer.runtime.v5+tar"
 CONFIG_MEDIA_TYPE = "application/vnd.letsinfer.runtime.config.v1+json"
 MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
 DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
