@@ -1,9 +1,10 @@
 {
   "authors": [
-    "antirez",
-    "Entrpi",
-    "Letsinfer"
+    {"github_login": "antirez", "github_id": 65632, "github_type": "User"},
+    {"github_login": "Entrpi", "github_id": 133157614, "github_type": "User"},
+    {"github_login": "letsinferlabs", "github_id": 317451145, "github_type": "Organization"}
   ],
   "license": "AGPL-3.0-only",
-  "schema_version": 1
+  "provenance": null,
+  "schema_version": 2
 }
