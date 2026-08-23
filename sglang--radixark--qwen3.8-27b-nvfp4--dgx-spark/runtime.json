@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
   "version": "0.1.0-rc.12",
   "logical_model": "qwen3.8-27b",
@@ -77,7 +77,7 @@
     },
     "id": "sglang",
     "protocol": {
-      "version": 1
+      "version": 2
     },
     "oci": {
       "reference": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:6d800425b8b6e6c6fdc63061af384bffbfed16e6448c5801f867539df0e35b4e",

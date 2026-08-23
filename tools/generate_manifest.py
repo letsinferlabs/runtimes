@@ -13,8 +13,8 @@ import sys
 from typing import Any
 
 
-SCHEMA_VERSION = 5
-RUNTIME_SCHEMA_VERSION = 3
+SCHEMA_VERSION = 6
+RUNTIME_SCHEMA_VERSION = 4
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 OCI_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 AUTHOR_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38})")

@@ -174,7 +174,7 @@ jobs:
         run: |
           set -euo pipefail
           candidate="$RUNNER_TEMP/catalog-release"
-          tag="catalog-v5-$GITHUB_SHA"
+          tag="catalog-v6-$GITHUB_SHA"
           if gh release view "$tag" >/dev/null 2>&1; then
             existing="$RUNNER_TEMP/existing-catalog-release"
             mkdir "$existing"

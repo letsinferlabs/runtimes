@@ -285,7 +285,7 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertIn("contents: write", workflow)
         self.assertIn("gh release create", workflow)
-        self.assertIn("catalog-v5-$GITHUB_SHA", workflow)
+        self.assertIn("catalog-v6-$GITHUB_SHA", workflow)
         self.assertIn("python3 -m tools.benchmark_artifact push", workflow)
         self.assertIn("catalog-public-key.pem", workflow)
         self.assertNotIn("LETSINFER_CATALOG_TOKEN", workflow)

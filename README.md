@@ -15,6 +15,10 @@ and one hardware target. Let's Infer core remains engine- and model-agnostic.
   matching Let's Infer protocol adapter, independent of core releases.
 - **Target-specific performance** — candidates may include custom kernels,
   patches, sidecars, caches, and configuration for one exact hardware target.
+- **Replica-ready by default** — core can run compatible single groups across
+  main and child nodes while every node keeps its fastest qualified runtime.
+- **Explicit parallel runtimes** — TP/PP candidates declare and qualify their
+  complete multi-device topology, ranks, interconnect, and Engine recipe.
 - **Complete reproducibility** — runtime packs and Engine images are built from
   reviewed source, pinned dependencies, and deterministic recipes.
 - **Benchmark-backed selection** — the signed catalog recommends only a
@@ -70,6 +74,12 @@ Those identities are versioned with every catalog release and shown by
 - container, cache, serving, and benchmark contracts;
 - an exact benchmark record when qualified.
 
+For an independent target, declare `target.placement.strategy` as `single`.
+Let's Infer core may replicate that runtime without changing its bytes. Use
+`parallel` only for a runtime that owns and qualifies the exact TP/PP topology;
+core allocates its declared devices but never invents parallelism from a
+single-device candidate.
+
 When you install a runtime, Let's Infer downloads every declared model
 artifact. You do not need to preinstall weights, choose an engine, or supply a
 target path.
@@ -77,7 +87,7 @@ target path.
 ## Engine boundary
 
 The Engine OCI contains the inference engine and its matching adapter. The
-adapter implements Engine protocol v1: lifecycle, health, normalized telemetry,
+adapter implements Engine protocol v2: lifecycle, health, normalized telemetry,
 exact token counting, and authenticated inference proxying. Core does not carry
 per-engine registries, flags, tokenizers, cache plugins, or version shims.
 
@@ -90,7 +100,7 @@ prior qualification evidence.
 ```bash
 python3 tools/generate_manifest.py --validate-only
 python3 -m unittest discover -s tests -p 'test_*.py'
-python3 <candidate>/adapter/engine-adapter verify --protocol 1
+python3 <candidate>/adapter/engine-adapter verify --protocol 2
 letsinfer pack <candidate> --output /tmp/runtime.letsinfer
 ```
 
@@ -120,7 +130,7 @@ to the `release` branch:
 5. preserves previous qualified releases and calculates the best release for
    every model/target using the catalog's versioned scoring policy;
 6. verifies that every model/target has a qualified recommendation;
-7. signs the generated schema-v5 catalog;
+7. signs the generated schema-v6 catalog;
 8. verifies the signature with the public key shipped by core;
 9. publishes `catalog.json`, its signature, the public key, and a hash-bound
    metadata record as the latest immutable GitHub Release in this repository;

@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
   "version": "0.11.0-rc.10",
   "logical_model": "deepseek-v4-flash",
@@ -85,7 +85,7 @@
     },
     "id": "dwarfstar",
     "protocol": {
-      "version": 1
+      "version": 2
     },
     "oci": {
       "reference": "ghcr.io/letsinferlabs/engines/dwarfstar--antirez--deepseek-v4-gguf--dgx-spark@sha256:b988911ca7f97858a20179f1c7ecdab1c68ffd4ee9412189312f1d73aeb19d16",

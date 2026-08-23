@@ -44,7 +44,7 @@ jobs:
           set -euo pipefail
           for runtime in */runtime.json; do
             candidate=${runtime%/runtime.json}
-            python3 "$candidate/adapter/engine-adapter" verify --protocol 1
+            python3 "$candidate/adapter/engine-adapter" verify --protocol 2
             .core/bin/letsinfer pack "$candidate" \
               --output "$RUNNER_TEMP/$candidate-a.letsinfer"
             .core/bin/letsinfer pack "$candidate" \
