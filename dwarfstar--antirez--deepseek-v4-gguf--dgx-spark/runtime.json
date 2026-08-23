@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "id": "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
   "version": "0.11.0-rc.11",
   "logical_model": "deepseek-v4-flash",
@@ -18,8 +18,7 @@
     },
     "placement": {
       "strategy": "single",
-      "member_count": 1,
-      "engine_strategy": "single-node",
+      "node_count": 1,
       "interconnect": {
         "kind": "any",
         "rdma_required": false,

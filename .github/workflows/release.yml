@@ -57,16 +57,28 @@ jobs:
                   if record['recommended'] is None:
                       raise SystemExit(f'{model}/{target} has no qualified recommendation')
           PY
-      - name: Build deterministic qualified runtime packs
+      - name: Build deterministic catalog runtime packs
         id: packs
         run: |
           set -euo pipefail
           shopt -s nullglob
           mkdir "$RUNNER_TEMP/packs" "$RUNNER_TEMP/plans"
-          for consensus in */benchmark.consensus.json; do
-            candidate=${consensus%/benchmark.consensus.json}
-            runtime="$candidate/runtime.json"
+          for runtime in */runtime.json; do
+            candidate=${runtime%/runtime.json}
             version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")
+            python3 - "$candidate" "$version" <<'PY' || continue
+          import json, pathlib, sys
+          candidate, version = sys.argv[1:]
+          catalog=json.loads(pathlib.Path('manifest.json').read_text())
+          found=any(
+              version in record['releases']
+              for model in catalog['models'].values()
+              for target in model['targets'].values()
+              for name, record in target['candidates'].items()
+              if name == candidate
+          )
+          raise SystemExit(0 if found else 1)
+          PY
             .core/bin/letsinfer pack "$candidate" --output "$RUNNER_TEMP/packs/$candidate.letsinfer"
             python3 tools/oci_artifact.py plan \
               --artifact "$RUNNER_TEMP/packs/$candidate.letsinfer" \
@@ -200,9 +212,7 @@ jobs:
         if: steps.packs.outputs.available == 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: |
-            ${{ runner.temp }}/packs/*.letsinfer
-            */benchmark.consensus.json
+          subject-path: ${{ runner.temp }}/packs/*.letsinfer
       - name: Attest signed selection metadata
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

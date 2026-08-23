@@ -78,7 +78,7 @@ class ManifestToolTests(unittest.TestCase):
     def test_release_metadata_preserves_multiple_runtime_authors(self) -> None:
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         qwen = manifest["models"]["qwen3.8-27b"]["targets"]["dgx-spark"]
-        release = next(iter(qwen["candidates"].values()))["releases"]["0.1.0-rc.12"]
+        release = next(iter(qwen["candidates"].values()))["releases"]["0.1.0-rc.13"]
         self.assertEqual(
             release["authors"],
             [
@@ -97,6 +97,135 @@ class ManifestToolTests(unittest.TestCase):
                 "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
             },
         )
+
+    def test_contract_migration_is_bound_to_unchanged_execution_and_sealed_evidence(self) -> None:
+        candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
+        migration = generate_manifest.read_object(ROOT / "qualification-migration.json")
+        entry = migration["contract_migrations"][f"{candidate}@{runtime['version']}"]
+        current = generate_manifest.read_object(ROOT / "manifest.json")["models"][
+            runtime["logical_model"]
+        ]["targets"][runtime["target"]["id"]]["candidates"][candidate]["releases"][
+            runtime["version"]
+        ]
+        old_release = {
+            "source": current["verification"]["from_source"],
+            "engine": current["engine"],
+            "engine_oci": current["engine_oci"],
+            "model_uri": current["model_uri"],
+            "benchmark": current["benchmark"],
+            "provenance": {
+                key: current["provenance"][key]
+                for key in (
+                    "repository",
+                    "pull_request",
+                    "pull_request_url",
+                    "proposal_head_sha",
+                    "qualified_commit_sha",
+                )
+            },
+            "verification": {"verifiers": current["verification"]["verifiers"]},
+        }
+        release = generate_manifest.migrated_release(
+            root=ROOT,
+            runtime=runtime,
+            source=current["source"],
+            release_metadata=generate_manifest.read_object(
+                ROOT / candidate / "release.json"
+            ),
+            old_release=old_release,
+            entry=entry,
+        )
+        self.assertEqual(release, current)
+        changed = copy.deepcopy(runtime)
+        changed["engine"]["environment"]["UNSEALED_CHANGE"] = "1"
+        with self.assertRaisesRegex(
+            generate_manifest.ManifestError, "execution contract changed"
+        ):
+            generate_manifest.migrated_release(
+                root=ROOT,
+                runtime=changed,
+                source=current["source"],
+                release_metadata=generate_manifest.read_object(
+                    ROOT / candidate / "release.json"
+                ),
+                old_release=old_release,
+                entry=entry,
+            )
+        bad_entry = dict(entry, benchmark_record_sha256="0" * 64)
+        with self.assertRaisesRegex(
+            generate_manifest.ManifestError, "benchmark digest differs"
+        ):
+            generate_manifest.migrated_release(
+                root=ROOT,
+                runtime=runtime,
+                source=current["source"],
+                release_metadata=generate_manifest.read_object(
+                    ROOT / candidate / "release.json"
+                ),
+                old_release=old_release,
+                entry=bad_entry,
+            )
+
+    def test_parallel_runtime_contract_keeps_engine_semantics_out_of_core(self) -> None:
+        runtime = json.loads(
+            (
+                ROOT
+                / "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+                / "runtime.json"
+            ).read_text(encoding="utf-8")
+        )
+        runtime["target"]["placement"].update(
+            {
+                "strategy": "parallel",
+                "node_count": 2,
+                "interconnect": {
+                    "kind": "connectx",
+                    "rdma_required": True,
+                    "minimum_speed_mbps": 100000,
+                    "minimum_mtu": 9000,
+                },
+            }
+        )
+        runtime["orchestration"] = {
+            "schema_version": 3,
+            "failure_policy": "whole-group",
+            "endpoint_owner": "task-0",
+            "startup_order": [["task-1"], ["task-0"]],
+            "tasks": [
+                {
+                    "task_id": f"task-{index}",
+                    "launcher": "runtime-command",
+                    "port_count": 4,
+                    "command": ["/opt/runtime/launch", f"task-{index}"],
+                    "environment": {},
+                    "readiness": {
+                        "kind": "exec",
+                        "command": ["/opt/runtime/ready"],
+                        "interval_seconds": 2,
+                        "timeout_seconds": 3,
+                        "retries": 90,
+                    },
+                }
+                for index in range(2)
+            ],
+        }
+        generate_manifest.validate_runtime_execution_contract(runtime)
+        runtime["orchestration"]["tasks"][0]["rank"] = 0
+        with self.assertRaisesRegex(generate_manifest.ManifestError, "unsupported fields"):
+            generate_manifest.validate_runtime_execution_contract(runtime)
+
+    def test_single_runtime_cannot_smuggle_a_parallel_contract(self) -> None:
+        runtime = json.loads(
+            (
+                ROOT
+                / "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark"
+                / "runtime.json"
+            ).read_text(encoding="utf-8")
+        )
+        runtime["orchestration"] = {}
+        with self.assertRaisesRegex(generate_manifest.ManifestError, "single-node"):
+            generate_manifest.validate_runtime_execution_contract(runtime)
 
     def test_every_hugging_face_artifact_requires_its_readme_link(self) -> None:
         runtime = {
@@ -231,7 +360,7 @@ class ManifestToolTests(unittest.TestCase):
         self.assertNotEqual(document, before)
         self.assertEqual(
             document["models"]["deepseek-v4-flash"]["targets"]["dgx-spark"]
-            ["candidates"][candidate]["releases"]["0.11.0-rc.10"]["source"],
+            ["candidates"][candidate]["releases"]["0.11.0-rc.11"]["source"],
             source,
         )
         self.assertEqual(
