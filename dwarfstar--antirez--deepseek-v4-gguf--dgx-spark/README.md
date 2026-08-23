@@ -17,8 +17,8 @@ local OpenAI-compatible API.
   recursive rejection-sampling configuration.
 - **Persistent prefix cache** — exact restored-prefix replay with a 64 GiB
   durable store and engine-neutral Let's Infer cache ABI.
-- **Reproducible evidence** — `benchmark.json` binds canonical code-and-prose
-  results to the exact model, engine, target, cache, and serving recipe.
+- **Reproducible evidence** — the canonical code-and-prose contract binds every
+  verifier result to the exact model, engine, target, cache, and serving recipe.
 
 ## Install
 

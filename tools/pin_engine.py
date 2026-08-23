@@ -33,10 +33,9 @@ def update(runtime: dict[str, Any], reference: str, immutable_id: str) -> bool:
     if IMAGE_ID_RE.fullmatch(immutable_id) is None:
         raise PinError("Engine OCI immutable ID must be a SHA-256 image ID")
     engine = runtime.get("engine")
-    serving = runtime.get("serving")
     benchmark = runtime.get("benchmark")
-    if not all(isinstance(item, dict) for item in (engine, serving, benchmark)):
-        raise PinError("runtime engine, serving, or benchmark contract is invalid")
+    if not all(isinstance(item, dict) for item in (engine, benchmark)):
+        raise PinError("runtime engine or benchmark contract is invalid")
     contract = benchmark.get("contract")
     tokenizer = contract.get("tokenizer") if isinstance(contract, dict) else None
     if not isinstance(tokenizer, dict):
@@ -53,11 +52,6 @@ def update(runtime: dict[str, Any], reference: str, immutable_id: str) -> bool:
     oci["reference"] = reference
     oci["immutable_id"] = immutable_id
     tokenizer["engine_image_sha256"] = engine_image_sha256
-    if changed:
-        runtime["status"] = "candidate"
-        serving["qualified"] = False
-        serving["blocked_by"] = "engine-oci-requalification"
-        benchmark["record"] = None
     return changed
 
 
@@ -76,23 +70,6 @@ def write_atomic(path: pathlib.Path, data: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def bound_benchmark_path(
-    runtime_path: pathlib.Path, runtime: dict[str, Any]
-) -> pathlib.Path | None:
-    record = runtime.get("benchmark", {}).get("record")
-    if record is None:
-        return None
-    if not isinstance(record, dict) or set(record) != {"path", "sha256", "id"}:
-        raise PinError("runtime benchmark record is invalid")
-    relative = pathlib.PurePosixPath(str(record.get("path", "")))
-    if len(relative.parts) != 1 or relative.name != "benchmark.json":
-        raise PinError("runtime benchmark record must be candidate-local benchmark.json")
-    path = runtime_path.parent / relative.name
-    if path.is_symlink() or not path.is_file():
-        raise PinError("bound runtime benchmark record is unavailable")
-    return path
-
-
 def pin_runtime(
     path: pathlib.Path, reference: str, immutable_id: str
 ) -> tuple[dict[str, Any], bool]:
@@ -105,11 +82,20 @@ def pin_runtime(
         raise PinError(f"cannot read runtime: {error}") from error
     if not isinstance(runtime, dict):
         raise PinError("runtime must contain one JSON object")
-    benchmark_path = bound_benchmark_path(path, runtime)
     changed = update(runtime, reference, immutable_id)
     write_atomic(path, readable_bytes(runtime))
-    if changed and benchmark_path is not None:
-        benchmark_path.unlink()
+    if changed:
+        for name in ("benchmark.json", "benchmark.consensus.json"):
+            evidence = path.parent / name
+            if evidence.is_symlink():
+                raise PinError(f"qualification evidence cannot be a symlink: {evidence}")
+            evidence.unlink(missing_ok=True)
+        release_path = path.parent / "release.json"
+        if release_path.is_file() and not release_path.is_symlink():
+            release = json.loads(release_path.read_text(encoding="utf-8"))
+            if isinstance(release, dict) and "provenance" in release:
+                release["provenance"] = None
+                write_atomic(release_path, readable_bytes(release))
     return runtime, changed
 
 

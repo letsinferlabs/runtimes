@@ -69,10 +69,9 @@ class ManifestToolTests(unittest.TestCase):
     def test_committed_manifest_is_the_canonical_candidate_projection(self) -> None:
         manifest_path = ROOT / "manifest.json"
         sources = generate_manifest.sources_from_manifest(manifest_path)
-        evidence = generate_manifest.evidence_from_manifest(manifest_path)
         previous = generate_manifest.read_object(manifest_path)
         expected = generate_manifest.canonical_bytes(
-            generate_manifest.generate(ROOT, sources, evidence, previous)
+            generate_manifest.generate(ROOT, sources, previous)
         )
         self.assertEqual(manifest_path.read_bytes(), expected)
 
@@ -80,7 +79,13 @@ class ManifestToolTests(unittest.TestCase):
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         qwen = manifest["models"]["qwen3.8-27b"]["targets"]["dgx-spark"]
         release = next(iter(qwen["candidates"].values()))["releases"]["0.1.0-rc.12"]
-        self.assertEqual(release["authors"], ["MiaAI-Lab", "Letsinfer"])
+        self.assertEqual(
+            release["authors"],
+            [
+                {"github_login": "MiaAI-Lab", "github_id": 83042094, "github_type": "User"},
+                {"github_login": "letsinferlabs", "github_id": 317451145, "github_type": "Organization"},
+            ],
+        )
         self.assertEqual(release["license"], "AGPL-3.0-only")
 
     def test_every_candidate_validates_without_a_publication_source(self) -> None:
@@ -168,22 +173,15 @@ class ManifestToolTests(unittest.TestCase):
                 / "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark/runtime.json"
             ).read_text(encoding="utf-8")
         )
-        runtime["status"] = "qualified"
-        runtime["serving"]["qualified"] = True
-        runtime["serving"].pop("blocked_by", None)
-        runtime["benchmark"]["record"] = {"path": "x", "sha256": "a", "id": "b"}
         changed = pin_engine.update(
             runtime,
             "ghcr.io/letsinferlabs/engines/example@sha256:" + "9" * 64,
             "sha256:" + "8" * 64,
         )
         self.assertTrue(changed)
-        self.assertEqual(runtime["status"], "candidate")
-        self.assertFalse(runtime["serving"]["qualified"])
-        self.assertEqual(
-            runtime["serving"]["blocked_by"], "engine-oci-requalification"
-        )
-        self.assertIsNone(runtime["benchmark"]["record"])
+        self.assertNotIn("status", runtime)
+        self.assertNotIn("qualified", runtime["serving"])
+        self.assertNotIn("record", runtime["benchmark"])
         self.assertEqual(
             runtime["benchmark"]["contract"]["tokenizer"]["engine_image_sha256"],
             "8" * 64,
@@ -196,17 +194,18 @@ class ManifestToolTests(unittest.TestCase):
             / "runtime.json"
         )
         runtime = json.loads(source.read_text(encoding="utf-8"))
-        runtime["benchmark"]["record"] = {
-            "path": "benchmark.json",
-            "sha256": "a" * 64,
-            "id": "b" * 64,
-        }
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             runtime_path = root / "runtime.json"
             benchmark_path = root / "benchmark.json"
+            consensus_path = root / "benchmark.consensus.json"
+            release_path = root / "release.json"
             runtime_path.write_bytes(generate_manifest.canonical_bytes(runtime))
             benchmark_path.write_text("sealed evidence\n", encoding="utf-8")
+            consensus_path.write_text("sealed consensus\n", encoding="utf-8")
+            release_path.write_text(
+                json.dumps({"provenance": {"qualified": True}}), encoding="utf-8"
+            )
             _, changed = pin_engine.pin_runtime(
                 runtime_path,
                 "ghcr.io/letsinferlabs/engines/example@sha256:" + "7" * 64,
@@ -214,9 +213,10 @@ class ManifestToolTests(unittest.TestCase):
             )
             self.assertTrue(changed)
             self.assertFalse(benchmark_path.exists())
+            self.assertFalse(consensus_path.exists())
             self.assertTrue(runtime_path.read_text(encoding="utf-8").startswith("{\n  \""))
             pinned = json.loads(runtime_path.read_text(encoding="utf-8"))
-            self.assertIsNone(pinned["benchmark"]["record"])
+            self.assertIsNone(json.loads(release_path.read_text())["provenance"])
             self.assertEqual(
                 pinned["benchmark"]["contract"]["tokenizer"]["engine_image_sha256"],
                 "6" * 64,
@@ -285,8 +285,9 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertIn("contents: write", workflow)
         self.assertIn("gh release create", workflow)
-        self.assertIn("catalog-v5-$GITHUB_SHA", workflow)
-        self.assertIn("python3 -m tools.benchmark_artifact push", workflow)
+        self.assertIn("catalog-v6-$GITHUB_SHA", workflow)
+        self.assertIn("revocations.json.sig", workflow)
+        self.assertNotIn("tools.benchmark_artifact push", workflow)
         self.assertIn("catalog-public-key.pem", workflow)
         self.assertNotIn("LETSINFER_CATALOG_TOKEN", workflow)
         self.assertNotIn("git push origin HEAD:main", workflow)

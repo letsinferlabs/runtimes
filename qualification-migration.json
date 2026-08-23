@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "method": "maintainer-qualified-pre-community-v1",
+  "releases": {
+    "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark@0.11.0-rc.10": {
+      "repository": "letsinferlabs/runtimes",
+      "pull_request": 18,
+      "pull_request_url": "https://github.com/letsinferlabs/runtimes/pull/18",
+      "proposal_head_sha": "1a6b132c626c98fbf5617ed1a17899a556f00d4d",
+      "qualified_commit_sha": "cc056f050d21058d0ae0fd452beee2edfa5c0187"
+    },
+    "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@0.1.0-rc.12": {
+      "repository": "letsinferlabs/runtimes",
+      "pull_request": 18,
+      "pull_request_url": "https://github.com/letsinferlabs/runtimes/pull/18",
+      "proposal_head_sha": "1a6b132c626c98fbf5617ed1a17899a556f00d4d",
+      "qualified_commit_sha": "cc056f050d21058d0ae0fd452beee2edfa5c0187"
+    }
+  }
+}

@@ -22,13 +22,68 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Require immutable released core contract
+        env:
+          CORE_SHA: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$CORE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "LETSINFER_VERIFICATION_CORE_SHA must be an immutable commit" >&2
+            exit 1
+          }
       - name: Check out released core contract
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: letsinferlabs/letsinfer
+          ref: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
           path: .core
           persist-credentials: false
-      - name: Validate flat candidates and generated catalog
+      - name: Protect bot-owned qualification files
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BOT_LOGIN: ${{ vars.LETSINFER_VERIFICATION_BOT_LOGIN }}
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD -- \
+            '*/benchmark.consensus.json' '*/release.json' 'manifest.json')
+          test -z "$changed" && exit 0
+          protected=false
+          if printf '%s\n' "$changed" | grep -Eq 'benchmark\.consensus\.json$'; then
+            protected=true
+          fi
+          if python3 - "$BASE_SHA" <<'PY'
+          import json, pathlib, subprocess, sys
+          base = sys.argv[1]
+          changed = subprocess.check_output(
+              ['git', 'diff', '--name-only', f'{base}...HEAD', '--', '*/release.json'],
+              text=True,
+          ).splitlines()
+          for name in changed:
+              head = json.loads(pathlib.Path(name).read_text())
+              try:
+                  old = json.loads(subprocess.check_output(
+                      ['git', 'show', f'{base}:{name}'], text=True,
+                  ))
+              except subprocess.CalledProcessError:
+                  old = {}
+              if head.get('provenance') is not None or old.get('provenance') is not None:
+                  raise SystemExit(0)
+          raise SystemExit(1)
+          PY
+          then
+            protected=true
+          fi
+          if test "$protected" = true; then
+            test "$HEAD_REPOSITORY" = "letsinferlabs/runtimes"
+            test -n "$BOT_LOGIN"
+            test "${GITHUB_ACTOR,,}" = "${BOT_LOGIN,,}" || {
+              echo "qualification evidence and provenance are GitHub App owned" >&2
+              exit 1
+            }
+          fi
+      - name: Validate schemas and generated catalog
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
@@ -42,60 +97,37 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
+          mkdir "$RUNNER_TEMP/packs" "$RUNNER_TEMP/plans"
           for runtime in */runtime.json; do
             candidate=${runtime%/runtime.json}
-            python3 "$candidate/adapter/engine-adapter" verify --protocol 1
-            .core/bin/letsinfer pack "$candidate" \
-              --output "$RUNNER_TEMP/$candidate-a.letsinfer"
-            .core/bin/letsinfer pack "$candidate" \
-              --output "$RUNNER_TEMP/$candidate-b.letsinfer"
-            cmp "$RUNNER_TEMP/$candidate-a.letsinfer" \
-              "$RUNNER_TEMP/$candidate-b.letsinfer"
+            version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")
+            python3 "$candidate/adapter/engine-adapter" verify --protocol 2
+            .core/bin/letsinfer pack "$candidate" --output "$RUNNER_TEMP/packs/$candidate-a.letsinfer"
+            .core/bin/letsinfer pack "$candidate" --output "$RUNNER_TEMP/packs/$candidate-b.letsinfer"
+            cmp "$RUNNER_TEMP/packs/$candidate-a.letsinfer" "$RUNNER_TEMP/packs/$candidate-b.letsinfer"
             python3 tools/oci_artifact.py plan \
-              --artifact "$RUNNER_TEMP/$candidate-a.letsinfer" \
+              --artifact "$RUNNER_TEMP/packs/$candidate-a.letsinfer" \
               --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
-              --candidate "$candidate" \
-              --version "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")" \
-              --output "$RUNNER_TEMP/$candidate-plan.json"
-            python3 -m tools.benchmark_artifact plan \
-              --evidence "$candidate/benchmark.json" \
-              --runtime-plan "$RUNNER_TEMP/$candidate-plan.json" \
-              --repository "ghcr.io/letsinferlabs/benchmarks/$candidate" \
-              --candidate "$candidate" \
-              --version "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")" \
-              --output "$RUNNER_TEMP/$candidate-benchmark-plan.json"
+              --candidate "$candidate" --version "$version" \
+              --output "$RUNNER_TEMP/plans/$candidate.json"
           done
-          python3 - "$RUNNER_TEMP" <<'PY'
+          python3 - "$RUNNER_TEMP/plans" <<'PY'
           import json, pathlib, sys
-          manifest=json.loads(pathlib.Path('manifest.json').read_text())
+          catalog=json.loads(pathlib.Path('manifest.json').read_text())
           advertised={
-              candidate: record['releases'][record['latest']]['source']
-              for model in manifest['models'].values()
+              (candidate, version): release['source']
+              for model in catalog['models'].values()
               for target in model['targets'].values()
               for candidate, record in target['candidates'].items()
+              for version, release in record['releases'].items()
           }
-          planned={
-              path.name.removesuffix('-plan.json'): json.loads(path.read_text())['source']
-              for path in pathlib.Path(sys.argv[1]).glob('*-plan.json')
-              if not path.name.endswith('-benchmark-plan.json')
+          current={
+              (p.stem, json.loads(p.read_text())['version']): json.loads(p.read_text())['source']
+              for p in pathlib.Path(sys.argv[1]).glob('*.json')
           }
-          if advertised != planned:
-              for candidate in sorted(set(advertised) | set(planned)):
-                  if advertised.get(candidate) != planned.get(candidate):
-                      print(f'{candidate}: manifest={advertised.get(candidate)} planned={planned.get(candidate)}')
-              raise SystemExit('manifest sources do not match deterministic runtime OCI plans')
-          evidence={
-              candidate: record['releases'][record['latest']]['benchmark']['evidence']
-              for model in manifest['models'].values()
-              for target in model['targets'].values()
-              for candidate, record in target['candidates'].items()
-          }
-          evidence_planned={
-              path.name.removesuffix('-benchmark-plan.json'): json.loads(path.read_text())['source']
-              for path in pathlib.Path(sys.argv[1]).glob('*-benchmark-plan.json')
-          }
-          if evidence != evidence_planned:
-              raise SystemExit('manifest benchmark evidence does not match deterministic OCI plans')
+          for key in sorted(set(advertised) & set(current)):
+              if advertised[key] != current[key]:
+                  raise SystemExit(f'catalog source differs from deterministic pack: {key}')
           PY
       - name: Audit immutable build inputs
         run: |
@@ -113,11 +145,7 @@ jobs:
           done
           python3 - <<'PY'
           import pathlib
-          invalid = [
-              str(path)
-              for path in pathlib.Path('.').rglob('release.json')
-              if path.parent.parent != pathlib.Path('.')
-          ]
+          invalid=[str(path) for path in pathlib.Path('.').rglob('release.json') if path.parent.parent != pathlib.Path('.')]
           if invalid:
               raise SystemExit(f'release metadata must live at candidate root: {invalid}')
           PY

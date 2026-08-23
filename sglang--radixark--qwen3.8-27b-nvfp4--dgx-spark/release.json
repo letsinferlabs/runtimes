@@ -1,8 +1,9 @@
 {
   "authors": [
-    "MiaAI-Lab",
-    "Letsinfer"
+    {"github_login": "MiaAI-Lab", "github_id": 83042094, "github_type": "User"},
+    {"github_login": "letsinferlabs", "github_id": 317451145, "github_type": "Organization"}
   ],
   "license": "AGPL-3.0-only",
-  "schema_version": 1
+  "provenance": null,
+  "schema_version": 2
 }
