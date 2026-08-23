@@ -25,10 +25,20 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Require immutable released core contract
+        env:
+          CORE_SHA: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$CORE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "LETSINFER_VERIFICATION_CORE_SHA must be an immutable commit" >&2
+            exit 1
+          }
       - name: Check out released core contract
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: letsinferlabs/letsinfer
+          ref: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
           path: .core
           persist-credentials: false
       - name: Validate release inputs
@@ -40,83 +50,66 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_*.py'
           python3 tools/generate_manifest.py --previous manifest.json --check
           python3 - <<'PY'
-          import json
-          import pathlib
-          catalog = json.loads(pathlib.Path('manifest.json').read_text())
+          import json, pathlib
+          catalog=json.loads(pathlib.Path('manifest.json').read_text())
           for model, model_record in catalog['models'].items():
               for target, record in model_record['targets'].items():
                   if record['recommended'] is None:
                       raise SystemExit(f'{model}/{target} has no qualified recommendation')
           PY
-      - name: Build deterministic runtime packs and verify planned identities
+      - name: Build deterministic qualified runtime packs
+        id: packs
         run: |
           set -euo pipefail
-          mkdir "$RUNNER_TEMP/packs" "$RUNNER_TEMP/plans" "$RUNNER_TEMP/benchmark-plans"
-          for runtime in */runtime.json; do
-            candidate=${runtime%/runtime.json}
+          shopt -s nullglob
+          mkdir "$RUNNER_TEMP/packs" "$RUNNER_TEMP/plans"
+          for consensus in */benchmark.consensus.json; do
+            candidate=${consensus%/benchmark.consensus.json}
+            runtime="$candidate/runtime.json"
             version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")
-            .core/bin/letsinfer pack "$candidate" \
-              --output "$RUNNER_TEMP/packs/$candidate.letsinfer"
+            .core/bin/letsinfer pack "$candidate" --output "$RUNNER_TEMP/packs/$candidate.letsinfer"
             python3 tools/oci_artifact.py plan \
               --artifact "$RUNNER_TEMP/packs/$candidate.letsinfer" \
               --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
               --candidate "$candidate" --version "$version" \
               --output "$RUNNER_TEMP/plans/$candidate.json"
-            python3 -m tools.benchmark_artifact plan \
-              --evidence "$candidate/benchmark.json" \
-              --runtime-plan "$RUNNER_TEMP/plans/$candidate.json" \
-              --repository "ghcr.io/letsinferlabs/benchmarks/$candidate" \
-              --candidate "$candidate" --version "$version" \
-              --output "$RUNNER_TEMP/benchmark-plans/$candidate.json"
           done
           python3 - "$RUNNER_TEMP/plans" <<'PY'
           import json, pathlib, sys
           catalog=json.loads(pathlib.Path('manifest.json').read_text())
           advertised={
-              candidate: record['releases'][record['latest']]['source']
+              (candidate, version): release['source']
               for model in catalog['models'].values()
               for target in model['targets'].values()
               for candidate, record in target['candidates'].items()
+              for version, release in record['releases'].items()
           }
-          planned={p.stem: json.loads(p.read_text())['source'] for p in pathlib.Path(sys.argv[1]).glob('*.json')}
-          if advertised != planned:
-              for candidate in sorted(set(advertised) | set(planned)):
-                  if advertised.get(candidate) != planned.get(candidate):
-                      print(f'{candidate}: manifest={advertised.get(candidate)} planned={planned.get(candidate)}')
-              raise SystemExit('manifest sources do not match deterministic runtime OCI plans')
-          evidence={
-              candidate: record['releases'][record['latest']]['benchmark']['evidence']
-              for model in catalog['models'].values()
-              for target in model['targets'].values()
-              for candidate, record in target['candidates'].items()
+          planned={
+              (p.stem, json.loads(p.read_text())['version']): json.loads(p.read_text())['source']
+              for p in pathlib.Path(sys.argv[1]).glob('*.json')
           }
-          evidence_planned={
-              p.stem: json.loads(p.read_text())['source']
-              for p in pathlib.Path(sys.argv[1]).parent.joinpath('benchmark-plans').glob('*.json')
-          }
-          if evidence != evidence_planned:
-              raise SystemExit('manifest benchmark evidence does not match deterministic OCI plans')
+          for key, source in planned.items():
+              if advertised.get(key) != source:
+                  raise SystemExit(f'qualified catalog source differs from deterministic pack: {key}')
           PY
+          plans=("$RUNNER_TEMP"/plans/*.json)
+          if ((${#plans[@]})); then echo "available=true" >> "$GITHUB_OUTPUT"; else echo "available=false" >> "$GITHUB_OUTPUT"; fi
       - name: Publish immutable runtime OCI artifacts
         env:
           OCI_USERNAME: ${{ github.actor }}
           OCI_PASSWORD: ${{ github.token }}
         run: |
           set -euo pipefail
-          for runtime in */runtime.json; do
-            candidate=${runtime%/runtime.json}
-            version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")
+          shopt -s nullglob
+          for plan in "$RUNNER_TEMP"/plans/*.json; do
+            candidate=$(basename "$plan" .json)
+            version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$plan")
             python3 tools/oci_artifact.py push \
               --artifact "$RUNNER_TEMP/packs/$candidate.letsinfer" \
               --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
               --candidate "$candidate" --version "$version"
-            python3 -m tools.benchmark_artifact push \
-              --evidence "$candidate/benchmark.json" \
-              --runtime-plan "$RUNNER_TEMP/plans/$candidate.json" \
-              --repository "ghcr.io/letsinferlabs/benchmarks/$candidate" \
-              --candidate "$candidate" --version "$version"
           done
-      - name: Sign the exact generated catalog
+      - name: Sign catalog and revocation ledger
         env:
           LETSINFER_CATALOG_SIGNING_KEY_B64: ${{ secrets.LETSINFER_CATALOG_SIGNING_KEY_B64 }}
         run: |
@@ -131,91 +124,92 @@ jobs:
           openssl pkey -in "$key" -pubout -out "$public"
           cmp "$public" .core/core/trust/catalog-public-key.pem
           cp manifest.json "$candidate/catalog.json"
+          cp revocations.json "$candidate/revocations.json"
           cp "$public" "$candidate/catalog-public-key.pem"
           python3 tools/sign_manifest.py --catalog "$candidate/catalog.json" \
             --private-key "$key" --public-key "$public" \
             --output "$candidate/catalog.json.sig"
+          python3 tools/sign_document.py --document "$candidate/revocations.json" \
+            --kind letsinfer.revocations --private-key "$key" --public-key "$public" \
+            --output "$candidate/revocations.json.sig"
           rm -f "$key"
-      - name: Verify the immutable signed catalog release
+      - name: Verify exact signed release
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
           candidate="$RUNNER_TEMP/catalog-release"
           PYTHONPATH=.core python3 - <<'PY'
+          import os, pathlib
           from core.runtime_packs import load_catalog
-          import os
-          root = os.environ['RUNNER_TEMP'] + '/catalog-release'
-          catalog = load_catalog(root + '/catalog.json', public_key=root + '/catalog-public-key.pem')
-          assert catalog['schema_version'] == 5
+          from core.revocations import load_ledger
+          root=pathlib.Path(os.environ['RUNNER_TEMP']) / 'catalog-release'
+          catalog=load_catalog(str(root / 'catalog.json'), public_key=str(root / 'catalog-public-key.pem'))
+          ledger, _data, _signature=load_ledger(str(root / 'revocations.json'), public_key=root / 'catalog-public-key.pem')
+          assert catalog['schema_version'] == 6 and ledger['schema_version'] == 1
           PY
           python3 - "$candidate" "$GITHUB_SHA" <<'PY'
           import hashlib, json, pathlib, re, sys
-          root=pathlib.Path(sys.argv[1])
-          commit=sys.argv[2]
+          root=pathlib.Path(sys.argv[1]); commit=sys.argv[2]
           if re.fullmatch(r'[0-9a-f]{40}', commit) is None:
               raise SystemExit('runtime commit identity is invalid')
           digest=lambda name: hashlib.sha256((root / name).read_bytes()).hexdigest()
           value={
-              'schema_version': 1,
+              'schema_version': 2,
               'runtime_commit': commit,
               'catalog_sha256': digest('catalog.json'),
-              'signature_sha256': digest('catalog.json.sig'),
+              'catalog_signature_sha256': digest('catalog.json.sig'),
+              'revocations_sha256': digest('revocations.json'),
+              'revocations_signature_sha256': digest('revocations.json.sig'),
               'public_key_sha256': digest('catalog-public-key.pem'),
           }
-          (root / 'catalog-release.json').write_text(
-              json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n',
-              encoding='utf-8',
-          )
+          (root / 'catalog-release.json').write_text(json.dumps(value, sort_keys=True, separators=(',', ':'))+'\n')
           PY
-      - name: Publish the signed production catalog
+      - name: Publish signed production catalog
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           candidate="$RUNNER_TEMP/catalog-release"
-          tag="catalog-v5-$GITHUB_SHA"
+          tag="catalog-v6-$GITHUB_SHA"
+          assets=(catalog.json catalog.json.sig revocations.json revocations.json.sig catalog-public-key.pem catalog-release.json)
           if gh release view "$tag" >/dev/null 2>&1; then
             existing="$RUNNER_TEMP/existing-catalog-release"
             mkdir "$existing"
-            gh release download "$tag" --dir "$existing" \
-              --pattern catalog.json --pattern catalog.json.sig \
-              --pattern catalog-public-key.pem --pattern catalog-release.json
-            for name in catalog.json catalog.json.sig catalog-public-key.pem catalog-release.json; do
-              cmp "$candidate/$name" "$existing/$name"
-            done
+            for name in "${assets[@]}"; do gh release download "$tag" --dir "$existing" --pattern "$name"; done
+            for name in "${assets[@]}"; do cmp "$candidate/$name" "$existing/$name"; done
           else
+            qualified_assets=()
+            for name in "${assets[@]}"; do qualified_assets+=("$candidate/$name"); done
             gh release create "$tag" --target "$GITHUB_SHA" --latest \
               --title "Let's Infer runtime catalog" \
-              --notes "Signed production runtime catalog." \
-              "$candidate/catalog.json" \
-              "$candidate/catalog.json.sig" \
-              "$candidate/catalog-public-key.pem" \
-              "$candidate/catalog-release.json"
+              --notes "Signed production runtime catalog and revocation ledger." \
+              "${qualified_assets[@]}"
           fi
           release="$RUNNER_TEMP/catalog-release-view.json"
           gh release view "$tag" --json targetCommitish,assets > "$release"
           python3 - "$release" "$GITHUB_SHA" <<'PY'
           import json, pathlib, sys
           value=json.loads(pathlib.Path(sys.argv[1]).read_text())
-          expected={
-              'catalog-release.json',
-              'catalog-public-key.pem',
-              'catalog.json',
-              'catalog.json.sig',
-          }
+          expected={'catalog.json','catalog.json.sig','revocations.json','revocations.json.sig','catalog-public-key.pem','catalog-release.json'}
           names={asset.get('name') for asset in value.get('assets', [])}
           if value.get('targetCommitish') != sys.argv[2] or names != expected:
-              raise SystemExit('catalog candidate release identity or asset set differs')
+              raise SystemExit('catalog release commit or exact asset set differs')
           PY
-      - name: Attest runtime packs and catalog
+      - name: Attest qualified runtime packs
+        if: steps.packs.outputs.available == 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             ${{ runner.temp }}/packs/*.letsinfer
-            ${{ runner.temp }}/benchmark-plans/*.json
-            */benchmark.json
+            */benchmark.consensus.json
+      - name: Attest signed selection metadata
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
             ${{ runner.temp }}/catalog-release/catalog.json
             ${{ runner.temp }}/catalog-release/catalog.json.sig
+            ${{ runner.temp }}/catalog-release/revocations.json
+            ${{ runner.temp }}/catalog-release/revocations.json.sig
             ${{ runner.temp }}/catalog-release/catalog-public-key.pem
             ${{ runner.temp }}/catalog-release/catalog-release.json

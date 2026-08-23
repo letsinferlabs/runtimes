@@ -29,7 +29,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 MAX_CONTROL_RESPONSE_BYTES = 64 * 1024 * 1024
 HOP_HEADERS = {
@@ -73,7 +73,7 @@ def load_runtime(expected_engine: str) -> dict[str, Any]:
     runtime = _load_object(path)
     engine = runtime.get("engine")
     if (
-        runtime.get("schema_version") != 3
+        runtime.get("schema_version") != 4
         or not isinstance(engine, dict)
         or engine.get("id") != expected_engine
         or engine.get("protocol") != {"version": PROTOCOL_VERSION}

@@ -1,0 +1,70 @@
+name: Community verification
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [synchronize, reopened, closed]
+
+concurrency:
+  group: runtime-verification-pr-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  process:
+    if: >-
+      github.repository == 'letsinferlabs/runtimes' && (
+        github.event_name == 'pull_request_target' || (
+          github.event.issue.pull_request != null &&
+          contains(github.event.comment.body, '<!-- letsinfer-verification:v1')
+        )
+      )
+    runs-on: ubuntu-24.04
+    environment: runtime-verification-bot
+    steps:
+      - name: Check out trusted default-branch bot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Require immutable released core contract
+        env:
+          CORE_SHA: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$CORE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "LETSINFER_VERIFICATION_CORE_SHA must be an immutable commit" >&2
+            exit 1
+          }
+      - name: Check out trusted released core contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: letsinferlabs/letsinfer
+          ref: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
+          path: .core
+          persist-credentials: false
+      - name: Mint repository-scoped GitHub App token
+        id: app
+        env:
+          APP_ID: ${{ vars.LETSINFER_VERIFICATION_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.LETSINFER_VERIFICATION_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_ID" && test -n "$APP_PRIVATE_KEY"
+          key="$RUNNER_TEMP/github-app.pem"
+          printf '%s' "$APP_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          python3 tools/github_app_token.py --app-id "$APP_ID" \
+            --private-key "$key" --github-output "$GITHUB_OUTPUT"
+          rm -f "$key"
+      - name: Validate submission and update consensus
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          LETSINFER_CORE_ROOT: .core
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          python3 tools/verification_bot.py --event "$GITHUB_EVENT_PATH"
