@@ -30,7 +30,7 @@ Every candidate is a single top-level directory:
 ```text
 <engine>--<hf-owner>--<hf-model>--<target>/
 ├── runtime.json
-├── release.json  # runtime authors and SPDX license
+├── release.json  # structured authors, SPDX license, bot-owned provenance
 ├── README.md      # model links and exact reproduction command
 ├── adapter/       # Engine protocol frontend included in the Engine OCI
 ├── engine/        # pinned engine or kernel source used to build the Engine OCI
@@ -39,7 +39,7 @@ Every candidate is a single top-level directory:
 ├── patches/       # optional auditable source patches
 ├── scripts/       # optional build or qualification helpers
 ├── tests/         # candidate-specific gates
-└── benchmark.json # present only when qualified
+└── benchmark.consensus.json # bot-generated after independent verification
 ```
 
 The directory name and `runtime.id` must be exactly:
@@ -50,14 +50,15 @@ The directory name and `runtime.id` must be exactly:
 
 Nested model/engine/target hierarchies are forbidden. The generated root
 `manifest.json` is the append-only release projection used to produce the
-signed public catalog. It keeps every qualified version and its immutable
-runtime and benchmark references; it is never hand-edited.
+signed public catalog. It keeps every qualified version, immutable runtime,
+structured verifiers, score, and consensus digest; it is never hand-edited.
 
 ## Runtime contract
 
-`release.json` declares the runtime's one or more authors and SPDX license.
-Those identities are versioned with every catalog release and shown by
-`letsinfer list`. `runtime.json` declares:
+`release.json` declares one or more structured GitHub authors and the SPDX
+license. It begins with `provenance: null`; qualification automation owns the
+eventual PR/execution/consensus provenance. Those identities are versioned with
+every catalog release and shown by `letsinfer list`. `runtime.json` declares:
 
 - logical model alias;
 - exact `hf://owner/repository` identity and immutable 40-hex revision;
@@ -67,8 +68,7 @@ Those identities are versioned with every catalog release and shown by
 - Engine protocol version;
 - target capabilities;
 - opaque engine arguments and environment;
-- container, cache, serving, and benchmark contracts;
-- an exact benchmark record when qualified.
+- container, cache, serving, and benchmark contracts.
 
 When you install a runtime, Let's Infer downloads every declared model
 artifact. You do not need to preinstall weights, choose an engine, or supply a
@@ -106,27 +106,53 @@ binds that inventory to the exact image and configuration identities as SPDX,
 and attaches the SBOM attestation to the OCI. It then emits a deterministic
 pin review patch; applying that patch resets the candidate to unqualified.
 
-Every runtime merged to `main` must already have benchmark evidence verified by
-a Let's Infer maintainer. The merge gate therefore makes every published
-runtime qualified; recommendation is a separate, automatically calculated
-decision. After target qualification is committed, merging the exact revision
-to the `release` branch:
+Every runtime proposal must first pass source and supply-chain review. Once its
+PR is labeled `benchmark-ready`, independent users run:
+
+```bash
+letsinfer benchmark verify https://github.com/letsinferlabs/runtimes/pull/123
+```
+
+Let's Infer runs a paired baseline/candidate benchmark, restores the verifier's
+runtime, and posts complete signed evidence. Three agreeing non-author users on
+distinct device identities qualify the exact execution subject. A trusted
+GitHub App validates comments, posts canonical copies and a sticky tally,
+updates the required check, and owns `benchmark.consensus.json`, provenance,
+and the generated manifest projection. Merge is the qualification boundary;
+recommendation remains a separate calculated choice.
+
+After qualification, merging the exact revision to the `release` branch:
 
 1. rebuilds and verifies deterministic runtime packs;
 2. checks that every advertised OCI digest matches the planned artifact;
 3. publishes the immutable runtime-pack OCI artifacts;
-4. publishes each complete `benchmark.json` as an immutable, runtime-bound OCI
-   evidence artifact;
-5. preserves previous qualified releases and calculates the best release for
+4. preserves previous qualified releases and calculates the best release for
    every model/target using the catalog's versioned scoring policy;
-6. verifies that every model/target has a qualified recommendation;
-7. signs the generated schema-v5 catalog;
-8. verifies the signature with the public key shipped by core;
-9. publishes `catalog.json`, its signature, the public key, and a hash-bound
+5. verifies that every model/target has a qualified recommendation;
+6. signs the generated schema-v6 catalog and separate revocation ledger;
+7. verifies both signatures with the public key shipped by core;
+8. publishes the catalog, ledger, signatures, public key, and hash-bound
    metadata record as the latest immutable GitHub Release in this repository;
    and
-10. emits build-provenance attestations for runtime packs, benchmark evidence,
-    and the signed catalog.
+9. emits build-provenance attestations for runtime packs and signed selection
+   metadata.
+
+Complete community evidence is not copied into an OCI. Canonical bot comments
+and `benchmark.consensus.json` retain every accepted full record. The signed
+catalog carries a compact verifier/score/digest projection. Post-release
+invalidations enter `revocations.json`; immutable releases never acquire a
+`revoked` or `disputed` status field.
+
+The repository owner configures the verifier once with a GitHub App installed
+only on `letsinferlabs/runtimes`. Its minimum repository permissions are
+Contents, Issues, Pull requests, and Checks (read/write), plus Metadata (read).
+The `runtime-verification-bot` environment stores
+`LETSINFER_VERIFICATION_APP_PRIVATE_KEY`; repository variables store the App ID
+and bot login as `LETSINFER_VERIFICATION_APP_ID` and
+`LETSINFER_VERIFICATION_BOT_LOGIN`. All three workflows also require
+`LETSINFER_VERIFICATION_CORE_SHA`, pinned to the exact 40-character commit of
+the released core verification contract. The workflow mints a short-lived
+token explicitly limited to this repository and those permissions.
 
 The release fails closed when an Engine digest, model revision, benchmark
 identity, catalog source, signature key, or recommendation is inconsistent.

@@ -1,9 +1,8 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.12",
+  "version": "0.1.0-rc.13",
   "logical_model": "qwen3.8-27b",
-  "status": "qualified",
   "target": {
     "id": "dgx-spark",
     "platform": "linux/arm64",
@@ -122,7 +121,6 @@
     "config": {}
   },
   "serving": {
-    "qualified": true,
     "max_connections": 128,
     "max_active_requests": 10,
     "max_context_tokens": 262144,
@@ -213,11 +211,6 @@
           ]
         }
       ]
-    },
-    "record": {
-      "path": "benchmark.json",
-      "sha256": "836333201878059b43233ffe077274d07f3491f243628012f1d2f402f850f10b",
-      "id": "3468067b7b282325d3d13e35b2005eccb2da17388fdf38ea0cb217ee8e729a4c"
     }
   }
 }

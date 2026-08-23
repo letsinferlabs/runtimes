@@ -13,12 +13,12 @@ import sys
 from typing import Any
 
 
-SCHEMA_VERSION = 5
-RUNTIME_SCHEMA_VERSION = 3
+SCHEMA_VERSION = 6
+RUNTIME_SCHEMA_VERSION = 4
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 OCI_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
-AUTHOR_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38})")
 LICENSE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,126}")
+VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?")
 CANDIDATE_RE = re.compile(
     r"[a-z0-9][a-z0-9._-]*--[a-z0-9][a-z0-9._-]*--"
     r"[a-z0-9][a-z0-9._-]*--[a-z0-9][a-z0-9._-]*"
@@ -58,6 +58,23 @@ def read_object(path: pathlib.Path) -> dict[str, Any]:
         raise ManifestError(f"cannot read {path}: {error}") from error
     if not isinstance(value, dict):
         raise ManifestError(f"{path} must contain a JSON object")
+    return value
+
+
+def github_identity(value: Any, where: str, *, allow_organization: bool) -> dict[str, Any]:
+    account_types = {"User", "Organization"} if allow_organization else {"User"}
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"github_login", "github_id", "github_type"}
+        or not isinstance(value.get("github_login"), str)
+        or re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", value["github_login"])
+        is None
+        or not isinstance(value.get("github_id"), int)
+        or isinstance(value.get("github_id"), bool)
+        or value["github_id"] <= 0
+        or value.get("github_type") not in account_types
+    ):
+        raise ManifestError(f"{where} must identify a GitHub account")
     return value
 
 
@@ -180,21 +197,31 @@ def validate_benchmark_binding(
         raise ManifestError(f"benchmark identity differs: {runtime['id']}")
 
 
-def source_map(values: list[str]) -> dict[str, str]:
-    result: dict[str, str] = {}
+def source_map(values: list[str]) -> dict[tuple[str, str], str]:
+    result: dict[tuple[str, str], str] = {}
     for value in values:
-        candidate, separator, source = value.partition("=")
-        if not separator or not CANDIDATE_RE.fullmatch(candidate) or not OCI_RE.fullmatch(source):
-            raise ManifestError("--source must be CANDIDATE=digest-pinned-OCI")
-        if candidate in result:
-            raise ManifestError(f"duplicate runtime publication source: {candidate}")
-        result[candidate] = source
+        identity, separator, source = value.partition("=")
+        candidate, version_separator, version = identity.rpartition("@")
+        key = (candidate, version)
+        if (
+            not separator
+            or not version_separator
+            or not CANDIDATE_RE.fullmatch(candidate)
+            or not re.fullmatch(VERSION_RE.pattern, version)
+            or not OCI_RE.fullmatch(source)
+        ):
+            raise ManifestError(
+                "--source must be CANDIDATE@VERSION=digest-pinned-OCI"
+            )
+        if key in result:
+            raise ManifestError(f"duplicate runtime publication source: {identity}")
+        result[key] = source
     return result
 
 
-def sources_from_manifest(path: pathlib.Path) -> dict[str, str]:
+def sources_from_manifest(path: pathlib.Path) -> dict[tuple[str, str], str]:
     document = read_object(path)
-    sources: dict[str, str] = {}
+    sources: dict[tuple[str, str], str] = {}
     models = document.get("models")
     if not isinstance(models, dict):
         raise ManifestError("existing manifest models are invalid")
@@ -205,48 +232,101 @@ def sources_from_manifest(path: pathlib.Path) -> dict[str, str]:
             if not isinstance(target, dict) or not isinstance(target.get("candidates"), dict):
                 raise ManifestError("existing manifest candidate map is invalid")
             for candidate, record in target["candidates"].items():
-                if isinstance(record, dict) and isinstance(record.get("releases"), dict):
-                    latest = record.get("latest")
-                    record = record["releases"].get(latest)
-                if (
-                    not CANDIDATE_RE.fullmatch(str(candidate))
-                    or not isinstance(record, dict)
-                    or not OCI_RE.fullmatch(str(record.get("source")))
-                    or candidate in sources
-                ):
+                releases = record.get("releases") if isinstance(record, dict) else None
+                if not CANDIDATE_RE.fullmatch(str(candidate)) or not isinstance(releases, dict):
                     raise ManifestError("existing manifest publication source is invalid")
-                sources[candidate] = record["source"]
+                for version, release in releases.items():
+                    key = (candidate, version)
+                    if (
+                        not isinstance(release, dict)
+                        or not OCI_RE.fullmatch(str(release.get("source")))
+                        or key in sources
+                    ):
+                        raise ManifestError("existing manifest publication source is invalid")
+                    sources[key] = release["source"]
     return sources
 
 
-def evidence_from_manifest(path: pathlib.Path) -> dict[str, str]:
-    document = read_object(path)
-    evidence: dict[str, str] = {}
-    models = document.get("models")
-    if not isinstance(models, dict):
-        raise ManifestError("existing manifest models are invalid")
-    for model in models.values():
-        if not isinstance(model, dict) or not isinstance(model.get("targets"), dict):
-            raise ManifestError("existing manifest target map is invalid")
-        for target in model["targets"].values():
-            if not isinstance(target, dict) or not isinstance(target.get("candidates"), dict):
-                raise ManifestError("existing manifest candidate map is invalid")
-            for candidate, record in target["candidates"].items():
-                if not isinstance(record, dict) or not isinstance(record.get("releases"), dict):
-                    continue
-                latest = record.get("latest")
-                release = record["releases"].get(latest)
-                benchmark = release.get("benchmark") if isinstance(release, dict) else None
-                source = benchmark.get("evidence") if isinstance(benchmark, dict) else None
-                if isinstance(source, str) and OCI_RE.fullmatch(source):
-                    evidence[candidate] = source
-    return evidence
+def validate_consensus_binding(
+    runtime: dict[str, Any], consensus: dict[str, Any]
+) -> None:
+    candidate = runtime["id"]
+    if (
+        consensus.get("schema_version") != 1
+        or consensus.get("candidate_id") != candidate
+        or consensus.get("runtime_version") != runtime["version"]
+        or consensus.get("qualification", {}).get("passed") is not True
+        or not isinstance(consensus.get("verifications"), list)
+        or len(consensus["verifications"]) < 3
+        or not isinstance(consensus.get("verifiers"), list)
+        or not consensus["verifiers"]
+    ):
+        raise ManifestError(f"runtime consensus is not qualified: {candidate}")
+    subject = consensus.get("subject")
+    if not isinstance(subject, dict):
+        raise ManifestError(f"runtime consensus subject is invalid: {candidate}")
+    if (
+        subject.get("candidate_id") != candidate
+        or subject.get("runtime_version") != runtime["version"]
+        or subject.get("engine_oci_manifest_digest")
+        != runtime["engine"]["oci"]["reference"].rsplit("@", 1)[-1]
+        or subject.get("benchmark_contract_sha256")
+        != hashlib.sha256(canonical_bytes(runtime["benchmark"]["contract"])).hexdigest()
+        or subject.get("target_contract_sha256")
+        != hashlib.sha256(canonical_bytes(runtime["target"])).hexdigest()
+    ):
+        raise ManifestError(f"runtime consensus execution binding differs: {candidate}")
+    verifier_ids: list[int] = []
+    for index, verifier in enumerate(consensus["verifiers"]):
+        github_identity(
+            verifier, f"{candidate}.verifiers[{index}]", allow_organization=False
+        )
+        verifier_ids.append(verifier["github_id"])
+    if len(verifier_ids) != len(set(verifier_ids)):
+        raise ManifestError(f"runtime consensus repeats a verifier: {candidate}")
+    consensus_id = consensus.get("consensus_id")
+    unsigned = dict(consensus)
+    unsigned.pop("consensus_id", None)
+    if (
+        not SHA256_RE.fullmatch(str(consensus_id))
+        or hashlib.sha256(canonical_bytes(unsigned)).hexdigest() != consensus_id
+    ):
+        raise ManifestError(f"runtime consensus identity differs: {candidate}")
+
+
+def validate_provenance(
+    candidate: str, provenance: Any, consensus: dict[str, Any]
+) -> None:
+    fields = {
+        "repository",
+        "pull_request",
+        "pull_request_url",
+        "proposal_head_sha",
+        "execution_sha256",
+        "qualified_commit_sha",
+        "consensus_sha256",
+    }
+    if (
+        not isinstance(provenance, dict)
+        or set(provenance) != fields
+        or provenance.get("repository") != "letsinferlabs/runtimes"
+        or provenance.get("pull_request") != consensus.get("pull_request")
+        or provenance.get("pull_request_url") != consensus.get("pull_request_url")
+        or provenance.get("proposal_head_sha")
+        != consensus.get("proposal_head_sha")
+        or not re.fullmatch(r"[0-9a-f]{40}", str(provenance.get("proposal_head_sha")))
+        or provenance.get("execution_sha256")
+        != consensus.get("subject", {}).get("execution_sha256")
+        or not re.fullmatch(r"[0-9a-f]{40}", str(provenance.get("qualified_commit_sha")))
+        or provenance.get("consensus_sha256")
+        != hashlib.sha256(canonical_bytes(consensus)).hexdigest()
+    ):
+        raise ManifestError(f"runtime bot provenance is invalid: {candidate}")
 
 
 def candidates(
     root: pathlib.Path,
-    sources: dict[str, str],
-    evidence: dict[str, str] | None = None,
+    sources: dict[tuple[str, str], str],
     *,
     require_sources: bool = True,
 ) -> list[dict[str, Any]]:
@@ -254,7 +334,6 @@ def candidates(
     if nested:
         raise ManifestError(f"nested runtime hierarchy is forbidden: {nested[0]}")
     found: list[dict[str, Any]] = []
-    evidence = evidence or {}
     for directory in sorted(path for path in root.iterdir() if path.is_dir()):
         if directory.name.startswith(".") or directory.name in {"tools", "tests"}:
             continue
@@ -280,49 +359,47 @@ def candidates(
             raise ManifestError(f"runtime release metadata is missing: {candidate}")
         release_metadata = read_object(release_path)
         if (
-            set(release_metadata) != {"schema_version", "authors", "license"}
-            or release_metadata.get("schema_version") != 1
+            set(release_metadata) != {"schema_version", "authors", "license", "provenance"}
+            or release_metadata.get("schema_version") != 2
             or not isinstance(release_metadata.get("authors"), list)
             or not release_metadata["authors"]
             or len(release_metadata["authors"]) > 32
-            or any(
-                not isinstance(author, str) or not AUTHOR_RE.fullmatch(author)
-                for author in release_metadata["authors"]
-            )
-            or len(release_metadata["authors"])
-            != len(set(release_metadata["authors"]))
             or not LICENSE_RE.fullmatch(str(release_metadata.get("license")))
         ):
             raise ManifestError(f"runtime release metadata is invalid: {candidate}")
+        for index, author in enumerate(release_metadata["authors"]):
+            github_identity(author, f"{candidate}.authors[{index}]", allow_organization=True)
+        author_ids = [author["github_id"] for author in release_metadata["authors"]]
+        if len(author_ids) != len(set(author_ids)):
+            raise ManifestError(f"runtime authors contain duplicate accounts: {candidate}")
         adapter = directory / "adapter" / "engine-adapter"
         dockerfile = directory / "image" / "Dockerfile"
         if not adapter.is_file() or adapter.is_symlink():
             raise ManifestError(f"Engine protocol adapter is missing: {candidate}")
         if not dockerfile.is_file() or dockerfile.is_symlink():
             raise ManifestError(f"Engine OCI Dockerfile is missing: {candidate}")
-        if require_sources and candidate not in sources:
-            raise ManifestError(f"published OCI source is missing for {candidate}")
-        benchmark_ref = runtime.get("benchmark", {}).get("record")
-        benchmark = None
-        score = None
-        if benchmark_ref is None:
-            if runtime.get("status") == "qualified":
-                raise ManifestError(
-                    f"qualified runtime benchmark reference is missing: {candidate}"
-                )
-        elif isinstance(benchmark_ref, dict):
-            benchmark_path = directory / str(benchmark_ref.get("path"))
-            if not benchmark_path.is_file() or benchmark_path.parent != directory:
-                raise ManifestError(f"runtime benchmark record is missing: {candidate}")
-            if sha256_file(benchmark_path) != benchmark_ref.get("sha256"):
-                raise ManifestError(f"runtime benchmark record hash differs: {candidate}")
-            benchmark = read_object(benchmark_path)
-            if benchmark.get("id") != benchmark_ref.get("id") or not SHA256_RE.fullmatch(str(benchmark.get("id"))):
-                raise ManifestError(f"runtime benchmark identity differs: {candidate}")
+        benchmark_path = directory / "benchmark.json"
+        benchmark = read_object(benchmark_path) if benchmark_path.is_file() else None
+        if benchmark is not None:
+            # A proposal may carry a fresh author run, but it must identify the
+            # exact executable runtime if present.
             validate_benchmark_binding(runtime, benchmark)
-            score = benchmark_score(benchmark)
-        else:
-            raise ManifestError(f"runtime benchmark reference is invalid: {candidate}")
+        consensus_path = directory / "benchmark.consensus.json"
+        consensus = read_object(consensus_path) if consensus_path.is_file() else None
+        provenance = release_metadata["provenance"]
+        if (consensus is None) != (provenance is None):
+            raise ManifestError(
+                f"consensus and bot-owned provenance must appear together: {candidate}"
+            )
+        qualified = consensus is not None
+        if qualified:
+            validate_consensus_binding(runtime, consensus)
+            validate_provenance(candidate, provenance, consensus)
+        source_key = (candidate, runtime["version"])
+        if qualified and require_sources and source_key not in sources:
+            raise ManifestError(
+                f"published OCI source is missing for {candidate}@{runtime['version']}"
+            )
         engine_oci = runtime.get("engine", {}).get("oci", {}).get("reference")
         if not OCI_RE.fullmatch(str(engine_oci)):
             raise ManifestError(f"Engine OCI is not digest-pinned: {candidate}")
@@ -332,15 +409,13 @@ def candidates(
         found.append(
             {
                 "runtime": runtime,
-                "source": sources.get(candidate),
+                "source": sources.get(source_key),
                 "benchmark": benchmark,
-                "score": score,
-                "evidence": evidence.get(candidate),
+                "consensus": consensus,
+                "qualified": qualified,
                 "release_metadata": release_metadata,
             }
         )
-    if require_sources and set(sources) != {item["runtime"]["id"] for item in found}:
-        raise ManifestError("publication sources contain unknown runtime candidates")
     if not found:
         raise ManifestError("repository contains no runtime candidates")
     return found
@@ -349,7 +424,7 @@ def candidates(
 def _previous_releases(previous: dict[str, Any] | None) -> dict[tuple[str, str, str], dict[str, Any]]:
     if previous is None:
         return {}
-    if previous.get("schema_version") != SCHEMA_VERSION:
+    if previous.get("schema_version") not in {5, SCHEMA_VERSION}:
         return {}
     result: dict[tuple[str, str, str], dict[str, Any]] = {}
     for model, model_record in previous.get("models", {}).items():
@@ -383,15 +458,58 @@ def _version_key(value: str) -> tuple[Any, ...]:
     return int(match[1]), int(match[2]), int(match[3]), pre_key
 
 
+def revocation_identities(root: pathlib.Path) -> set[tuple[str, str]]:
+    value = read_object(root / "revocations.json")
+    if (
+        set(value) != {"schema_version", "sequence", "generated_at_unix", "revocations"}
+        or value.get("schema_version") != 1
+        or not isinstance(value.get("sequence"), int)
+        or isinstance(value.get("sequence"), bool)
+        or value["sequence"] < 0
+        or not isinstance(value.get("generated_at_unix"), int)
+        or isinstance(value.get("generated_at_unix"), bool)
+        or value["generated_at_unix"] < 0
+        or not isinstance(value.get("revocations"), list)
+    ):
+        raise ManifestError("revocation ledger schema is invalid")
+    result: set[tuple[str, str]] = set()
+    previous: tuple[str, str] | None = None
+    for entry in value["revocations"]:
+        identity = (
+            entry.get("runtime_oci_digest") if isinstance(entry, dict) else None,
+            entry.get("consensus_sha256") if isinstance(entry, dict) else None,
+        )
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(identity[0], str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", identity[0]) is None
+            or not isinstance(identity[1], str)
+            or SHA256_RE.fullmatch(identity[1]) is None
+            or identity in result
+            or (previous is not None and identity < previous)
+        ):
+            raise ManifestError("revocation ledger release identity is invalid")
+        result.add(identity)
+        previous = identity
+    return result
+
+
 def generate(
     root: pathlib.Path,
-    sources: dict[str, str],
-    evidence: dict[str, str] | None = None,
+    sources: dict[tuple[str, str], str],
     previous: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    evidence = evidence or {}
-    items = candidates(root, sources, evidence)
+    items = candidates(root, sources)
+    revoked = revocation_identities(root)
     history = _previous_releases(previous)
+    migration = read_object(root / "qualification-migration.json")
+    migration_releases = migration.get("releases")
+    if (
+        migration.get("schema_version") != 1
+        or migration.get("method") != "maintainer-qualified-pre-community-v1"
+        or not isinstance(migration_releases, dict)
+    ):
+        raise ManifestError("pre-community qualification migration is invalid")
     targets: dict[str, Any] = {}
     models: dict[str, Any] = {}
     for item in items:
@@ -407,46 +525,89 @@ def generate(
         )["targets"].setdefault(
             target_id, {"recommended": None, "candidates": {}}
         )
-        benchmark_record = (
-            None
-            if item["benchmark"] is None
-            else {
-                "id": item["benchmark"]["id"],
-                "suite": runtime["benchmark"]["contract"]["suite"],
-                "score": item["score"],
-                "evidence": item["evidence"],
-            }
-        )
-        if benchmark_record is not None and not OCI_RE.fullmatch(
-            str(benchmark_record["evidence"])
-        ):
-            raise ManifestError(
-                f"published benchmark evidence is missing for {candidate}"
-            )
-        release = {
-            "authors": item["release_metadata"]["authors"],
-            "source": item["source"],
-            "qualified": runtime["status"] == "qualified",
-            "revoked": False,
-            "engine": runtime["engine"]["id"],
-            "engine_oci": runtime["engine"]["oci"]["reference"],
-            "model_uri": runtime["model"]["uri"],
-            "license": item["release_metadata"]["license"],
-            "benchmark": benchmark_record,
-        }
         releases = history.get((runtime["logical_model"], target_id, candidate), {})
-        existing = releases.get(runtime["version"])
-        if existing is not None and existing != release:
-            metadata_upgrade = (
-                set(existing).issubset(release)
-                and all(release[key] == value for key, value in existing.items())
-                and set(release) - set(existing) <= {"authors", "license"}
-            )
-            if not metadata_upgrade:
+        normalized_releases: dict[str, Any] = {}
+        for version, old_release in releases.items():
+            if "qualified" not in old_release:
+                normalized_releases[version] = old_release
+                continue
+            migration_key = f"{candidate}@{version}"
+            provenance = migration_releases.get(migration_key)
+            if (
+                old_release.get("qualified") is not True
+                or old_release.get("revoked") is not False
+                or not isinstance(provenance, dict)
+            ):
+                raise ManifestError(
+                    f"legacy release lacks explicit qualification migration: {migration_key}"
+                )
+            benchmark = old_release.get("benchmark")
+            normalized_releases[version] = {
+                "authors": item["release_metadata"]["authors"],
+                "source": old_release["source"],
+                "engine": old_release["engine"],
+                "engine_oci": old_release["engine_oci"],
+                "model_uri": old_release["model_uri"],
+                "license": old_release["license"],
+                "benchmark": (
+                    None
+                    if benchmark is None
+                    else {
+                        "id": benchmark["id"],
+                        "suite": benchmark["suite"],
+                        "score": benchmark["score"],
+                    }
+                ),
+                "provenance": {
+                    "method": migration["method"],
+                    **provenance,
+                },
+                "verification": {
+                    "method": migration["method"],
+                    "verifiers": [],
+                },
+            }
+        releases = normalized_releases
+        if item["qualified"]:
+            consensus = item["consensus"]
+            consensus_path = f"{candidate}/benchmark.consensus.json"
+            release = {
+                "authors": item["release_metadata"]["authors"],
+                "source": item["source"],
+                "engine": runtime["engine"]["id"],
+                "engine_oci": runtime["engine"]["oci"]["reference"],
+                "model_uri": runtime["model"]["uri"],
+                "license": item["release_metadata"]["license"],
+                "benchmark": {
+                    "id": consensus["consensus_id"],
+                    "suite": runtime["benchmark"]["contract"]["suite"],
+                    "score": consensus["score"]["aggregate_tps"],
+                },
+                "provenance": item["release_metadata"]["provenance"],
+                "verification": {
+                    "method": "community-consensus-v1",
+                    "consensus_path": consensus_path,
+                    "consensus_sha256": sha256_file(root / consensus_path),
+                    "verifiers": consensus["verifiers"],
+                },
+            }
+            existing = releases.get(runtime["version"])
+            if existing is not None and existing != release:
                 raise ManifestError(
                     f"immutable release changed for {candidate}@{runtime['version']}"
                 )
-        releases[runtime["version"]] = release
+            releases[runtime["version"]] = release
+        releases = {
+            version: release
+            for version, release in releases.items()
+            if (
+                release["source"].rsplit("@", 1)[-1],
+                release.get("verification", {}).get("consensus_sha256"),
+            )
+            not in revoked
+        }
+        if not releases:
+            continue
         latest = max(releases, key=_version_key)
         model_target["candidates"][candidate] = {
             "latest": latest,
@@ -463,9 +624,7 @@ def generate(
                 )
                 for candidate, record in target["candidates"].items()
                 for version, release in record["releases"].items()
-                if release["qualified"]
-                and not release["revoked"]
-                and release["benchmark"] is not None
+                if release["benchmark"] is not None
                 and release["benchmark"]["suite"]
                 == RECOMMENDATION_POLICY["benchmark_suite"]
             ]
@@ -488,7 +647,6 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--root", type=pathlib.Path, default=pathlib.Path(__file__).resolve().parents[1])
     result.add_argument("--source", action="append", default=[])
     result.add_argument("--previous", type=pathlib.Path)
-    result.add_argument("--evidence", action="append", default=[])
     result.add_argument("--output", type=pathlib.Path)
     result.add_argument("--check", action="store_true")
     result.add_argument("--validate-only", action="store_true")
@@ -507,15 +665,13 @@ def main() -> int:
     )
     previous = read_object(previous_path) if previous_path is not None else None
     sources = sources_from_manifest(previous_path) if previous_path is not None else {}
-    evidence = evidence_from_manifest(previous_path) if previous_path is not None else {}
     explicit = source_map(arguments.source)
     sources.update(explicit)
-    evidence.update(source_map(arguments.evidence))
     if arguments.validate_only:
-        items = candidates(root, sources, evidence, require_sources=False)
+        items = candidates(root, sources, require_sources=False)
         print(f"VALID candidates={len(items)}")
         return 0
-    document = generate(root, sources, evidence, previous)
+    document = generate(root, sources, previous)
     data = canonical_bytes(document)
     output = arguments.output or root / "manifest.json"
     if arguments.check:

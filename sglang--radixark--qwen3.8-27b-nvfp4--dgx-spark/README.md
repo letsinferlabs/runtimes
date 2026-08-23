@@ -15,8 +15,8 @@ OpenAI-compatible API.
 - **DGX Spark tuning** — FlashInfer attention, FP8 KV cache, chunked prefill,
   Mamba cache policy, and target-specific Engine configuration are sealed in
   the candidate.
-- **Reproducible evidence** — the checked-in `benchmark.json` binds canonical
-  code-and-prose results to the exact model, engine, target, and serving recipe.
+- **Reproducible evidence** — the canonical code-and-prose contract binds every
+  verifier result to the exact model, engine, target, and serving recipe.
 
 ## Hugging Face artifacts
 
@@ -31,7 +31,7 @@ repositories; they do not replace those immutable pins.
 This directory is the complete source form of one Let's Infer runtime
 candidate. It binds that checkpoint to one digest-pinned SGLang Engine OCI and
 the DGX Spark target. The adapter, Engine source closure, image recipe,
-benchmark contract, qualification evidence, and target-specific settings live
+benchmark contract, qualification source, and target-specific settings live
 beside `runtime.json`; generic gateway, Watchdog, prompt, and benchmark-runner
 code stays in Let's Infer core.
 
