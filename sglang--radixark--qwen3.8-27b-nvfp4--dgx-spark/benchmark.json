@@ -1,6 +1,6 @@
 {
   "benchmark_contract_sha256": "3d4505387f4138ea45d2d0463a1752d19bcc1fff903b3b64ddeae6feb9bd64ba",
-  "id": "74a6c0af527e1cad825d67bce33a7448838679b4d308ce92201c44351e19ffe1",
+  "id": "3468067b7b282325d3d13e35b2005eccb2da17388fdf38ea0cb217ee8e729a4c",
   "installation_id": "2754c2fd78f878dc6007a5a9d12fc5cbdf3dfbbf3cc22eecd6fb2b2e90f90cfa",
   "results": [
     {
@@ -1541,7 +1541,7 @@
     "engine_oci": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:6d800425b8b6e6c6fdc63061af384bffbfed16e6448c5801f867539df0e35b4e",
     "model_revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4",
     "model_uri": "hf://RadixArk/Qwen3.8-27B-NVFP4",
-    "runtime_version": "0.1.0-rc.11",
+    "runtime_version": "0.1.0-rc.12",
     "target": "dgx-spark",
     "target_contract_sha256": "76c0232d5ced031af44bb3ad3a8cac4a5dcad9f7383a607e8303bbf4ff253363"
   },

@@ -1,6 +1,6 @@
 {
   "benchmark_contract_sha256": "af73b99d35f246db5296e0709cc3bbce3cf2af49fce575e1fbcf29d1c8f92179",
-  "id": "c0a66f0935b3887bd76c99f6afe827f70a46003e26ee7498aadb53e0634366da",
+  "id": "2f5d6f7ae1821798686aa210e66ae09b673f585a7472753ce97ea67c6ccb9060",
   "installation_id": "57dd78dd8f3f63e6eb17382ce2a26728a1af16e25831cfb50d9613112700297f",
   "results": [
     {
@@ -1427,7 +1427,7 @@
     "engine_oci": "ghcr.io/letsinferlabs/engines/dwarfstar--antirez--deepseek-v4-gguf--dgx-spark@sha256:b988911ca7f97858a20179f1c7ecdab1c68ffd4ee9412189312f1d73aeb19d16",
     "model_revision": "1cd7b564460821938add0475a60b942c409295e0",
     "model_uri": "hf://antirez/deepseek-v4-gguf",
-    "runtime_version": "0.11.0-rc.9",
+    "runtime_version": "0.11.0-rc.10",
     "target": "dgx-spark",
     "target_contract_sha256": "76c0232d5ced031af44bb3ad3a8cac4a5dcad9f7383a607e8303bbf4ff253363"
   },
