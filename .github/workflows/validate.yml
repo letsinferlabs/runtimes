@@ -92,6 +92,14 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_*.py'
           python3 tools/generate_manifest.py --validate-only
           python3 tools/generate_manifest.py --previous manifest.json --check
+      - name: Require Let's Infer onboarding in changed runtime READMEs
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          python3 tools/readme_onboarding.py --base "$BASE_SHA" --head HEAD
       - name: Verify Engine protocol and deterministic runtime packs
         env:
           PYTHONDONTWRITEBYTECODE: "1"

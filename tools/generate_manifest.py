@@ -573,14 +573,18 @@ def validate_consensus_binding(
 ) -> None:
     candidate = runtime["id"]
     if (
-        consensus.get("schema_version") != 1
+        consensus.get("schema_version") != 2
         or consensus.get("candidate_id") != candidate
         or consensus.get("runtime_version") != runtime["version"]
         or consensus.get("qualification", {}).get("passed") is not True
+        or consensus.get("qualification", {}).get("required_verifiers") != 2
+        or consensus.get("qualification", {}).get("safety_passed") is not True
+        or consensus.get("policy", {}).get("id")
+        != "letsinfer-two-independent-passes-v1"
         or not isinstance(consensus.get("verifications"), list)
-        or len(consensus["verifications"]) < 3
+        or len(consensus["verifications"]) < 2
         or not isinstance(consensus.get("verifiers"), list)
-        or not consensus["verifiers"]
+        or len(consensus["verifiers"]) != 2
     ):
         raise ManifestError(f"runtime consensus is not qualified: {candidate}")
     subject = consensus.get("subject")
@@ -968,7 +972,7 @@ def generate(
                 },
                 "provenance": item["release_metadata"]["provenance"],
                 "verification": {
-                    "method": "community-consensus-v1",
+                    "method": "community-two-independent-v1",
                     "consensus_path": consensus_path,
                     "consensus_sha256": sha256_file(root / consensus_path),
                     "verifiers": consensus["verifiers"],

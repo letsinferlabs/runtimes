@@ -36,7 +36,7 @@ Every candidate is a single top-level directory:
 <engine>--<hf-owner>--<hf-model>--<target>/
 ├── runtime.json
 ├── release.json  # structured authors, SPDX license, bot-owned provenance
-├── README.md      # model links and exact reproduction command
+├── README.md      # Let's Infer install block, model links, reproduction
 ├── adapter/       # Engine protocol frontend included in the Engine OCI
 ├── engine/        # pinned engine or kernel source used to build the Engine OCI
 ├── image/         # deterministic Engine OCI recipe
@@ -57,6 +57,18 @@ Nested model/engine/target hierarchies are forbidden. The generated root
 `manifest.json` is the append-only release projection used to produce the
 signed public catalog. It keeps every qualified version, immutable runtime,
 structured verifiers, score, and consensus digest; it is never hand-edited.
+
+Every candidate README begins with a link to
+[Let's Infer](https://letsinfer.ai/), the canonical installer command, and
+`letsinfer install LOGICAL_MODEL` derived from `runtime.json`. Add the block
+without replacing an existing README:
+
+```bash
+python3 tools/readme_onboarding.py --candidate <candidate> --write
+```
+
+Pull-request validation requires the block whenever a new or existing
+candidate is changed.
 
 ## Runtime contract
 
@@ -139,8 +151,11 @@ letsinfer benchmark verify https://github.com/letsinferlabs/runtimes/pull/123
 ```
 
 Let's Infer runs a paired baseline/candidate benchmark, restores the verifier's
-runtime, and posts complete signed evidence. Three agreeing non-author users on
-distinct device identities qualify the exact execution subject. A trusted
+runtime, and posts complete signed evidence. Two successful non-author users
+on distinct account and device identities qualify the exact execution
+subject. One user occupies one slot even after a rerun. A correctness, safety,
+or restoration failure blocks that subject; performance differences remain
+visible evidence but do not expand the quorum or become a vote. A trusted
 GitHub App validates comments, posts canonical copies and a sticky tally,
 updates the required check, and owns `benchmark.consensus.json`, provenance,
 and the generated manifest projection. Merge is the qualification boundary;

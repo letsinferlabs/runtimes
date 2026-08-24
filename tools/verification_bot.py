@@ -408,10 +408,6 @@ def update_check(
         status = "completed"
         conclusion = "failure"
         title = "Safety or correctness verification failed"
-    elif not qualification["agreement_passed"]:
-        status = "completed"
-        conclusion = "neutral"
-        title = "More independent measurements are needed"
     else:
         status = "in_progress"
         conclusion = None
@@ -659,13 +655,13 @@ def empty_consensus(
         "qualification": {
             "passed": False,
             "independent_verifiers": 0,
-            "required_verifiers": community_verification.POLICY["initial_verifiers"],
-            "agreement_passed": True,
+            "required_verifiers": community_verification.POLICY["required_verifiers"],
             "safety_passed": True,
+            "blocking_failures": [],
         },
         "verifications": [],
         "score": {
-            "policy": "letsinfer-throughput-geomean-of-consensus-means-v1",
+            "policy": "letsinfer-throughput-geomean-of-verifier-means-v1",
             "aggregate_tps": None,
         },
     }

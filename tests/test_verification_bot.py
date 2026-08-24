@@ -69,15 +69,26 @@ class VerificationBotTests(unittest.TestCase):
             "qualification": {
                 "passed": False,
                 "safety_passed": True,
-                "agreement_passed": True,
-                "independent_verifiers": 2,
-                "required_verifiers": 3,
+                "blocking_failures": [],
+                "independent_verifiers": 1,
+                "required_verifiers": 2,
             },
         }
         with mock.patch.object(bot, "api", side_effect=fake_api):
             bot.update_check({"head": {"sha": "a" * 40}}, consensus, "https://example")
         self.assertEqual(calls[0]["status"], "in_progress")
         self.assertNotIn("conclusion", calls[0])
+
+    def test_empty_consensus_uses_two_independent_passes(self) -> None:
+        document = bot.empty_consensus(
+            candidate="engine--owner--model--target",
+            version="1.2.3",
+            subject={"execution_sha256": "a" * 64},
+            proposal="b" * 40,
+        )
+        self.assertEqual(document["schema_version"], 2)
+        self.assertEqual(document["qualification"]["required_verifiers"], 2)
+        self.assertNotIn("agreement_passed", document["qualification"])
 
     def test_unchanged_content_does_not_create_a_commit(self) -> None:
         data = b"same\n"
