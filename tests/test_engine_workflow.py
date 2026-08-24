@@ -74,10 +74,31 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("without executing proposal code", workflow)
         self.assertIn("tools/verifier_bundle.py finalize", workflow)
         self.assertIn("engine-pin-pr-", workflow)
+        self.assertIn("engine-pin-request.json", workflow)
+        self.assertIn("Attest deterministic Engine pin request", workflow)
         self.assertIn("runtime/verifier-bundle", workflow)
         self.assertIn('run.get("head_branch") != "main"', workflow)
         self.assertIn("actions/attest@", workflow)
         self.assertNotIn("working-directory: proposal", workflow)
+
+    def test_engine_pin_updater_preserves_the_trust_boundary(self) -> None:
+        workflow = (ROOT / ".github/workflows/auto-pin-engine.yml").read_text(
+            encoding="utf-8"
+        )
+        updater = (ROOT / "tools/engine_pin_updater.py").read_text(encoding="utf-8")
+        self.assertIn("workflows: [Finalize verifier artifact]", workflow)
+        self.assertIn("attestations: read", workflow)
+        self.assertIn("runtime-verification-bot", workflow)
+        self.assertIn("engine-pin-pr-", workflow)
+        self.assertIn("gh attestation verify", workflow)
+        self.assertIn("same_repository == 'true'", workflow)
+        self.assertIn("same_repository == 'false'", workflow)
+        self.assertNotIn("path: proposal", workflow)
+        self.assertNotIn("packages: write", workflow)
+        self.assertNotIn("contents: write", workflow)
+        self.assertIn("expectedHeadOid", updater)
+        self.assertIn("createCommitOnBranch", updater)
+        self.assertIn("runtime.json", updater)
 
     def test_shipit_is_the_only_engine_registry_publisher(self) -> None:
         self.assertFalse((ROOT / ".github/workflows/publish-engine.yml").exists())

@@ -166,9 +166,19 @@ payloads, and uploads one immutable artifact named
 
 For a changed Engine, `runtime.json` must already pin the future production
 manifest and configuration digests. If local authoring did not pin them, the
-finalizer uploads a deterministic `engine-pin-pr-*` patch and refuses to make
-the head benchmarkable. Apply that patch and push; the next head receives a
-new bundle. No registry write is needed during local development or PR build.
+finalizer attests a deterministic `engine-pin-pr-*` request and refuses to make
+the unpinned head benchmarkable. For an eligible branch in this repository, a
+separate trusted updater reconstructs only the three Engine identity fields,
+creates one GitHub App commit with the attested head as its atomic expected
+parent, and lets that commit trigger exact-head verification. Duplicate
+delivery is a no-op and an advanced or protected branch fails closed. The
+updater never publishes an image; `/shipit` remains the only publisher.
+
+Forks never receive the base repository's credential. A fork author downloads
+the attested artifact, runs `git apply engine-pin.patch`, and pushes the fork;
+the updater check prints the exact command. `reuse-engine` proposals and
+ordinary runtime installers need no pin handoff. No registry write is needed
+during local development or PR build.
 
 Every runtime proposal must first pass source and supply-chain review. The bot
 automatically adds the `runtime` label when a PR directly changes a runtime
