@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-  "version": "0.1.0-rc.33",
+  "version": "0.1.0-rc.34",
   "logical_model": "deepseek-v4-flash",
   "target": {
     "id": "dgx-spark",
@@ -113,11 +113,11 @@
   },
   "benchmark": {
     "contract": {
-      "schema_version": 5,
+      "schema_version": 6,
       "suite": "letsinfer-code-prose-v1",
       "generator": {
         "id": "letsinfer-code-prose",
-        "version": 5
+        "version": 6
       },
       "domains": ["code"],
       "execution": {
@@ -132,6 +132,11 @@
           "prose"
         ],
         "prompt_tokens": 256,
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
         "request": {
           "output_tokens": 512,
           "min_completion_tokens": 512,

@@ -37,10 +37,10 @@ letsinfer install deepseek-v4-flash \
 letsinfer benchmark deepseek-v4-flash
 ```
 
-The schema-5 contract first runs one fixed short-code C1 and one fixed
-short-prose C1 workload with 512-token completions. It then runs the canonical
-code workload once at C1, C2, and C4 for 32K, 64K, 128K, and a 260,000-token
-prompt under the 262,144-token cap: 14 cells total. One fresh process/store
+The schema-6 contract first runs fixed short-code and short-prose workloads at
+C1, C2, and C4 with 512-token completions. It then runs the canonical code
+workload once at C1, C2, and C4 for 32K, 64K, 128K, and a 260,000-token prompt
+under the 262,144-token cap: 18 cells total. One fresh process/store
 serves the complete matrix and intentionally retains prefix state between
 cells. Each long context runs C1, C2, then C4 while all four distinct streams
 share the complete ledger prefix, so the matrix measures real prefix-cache
