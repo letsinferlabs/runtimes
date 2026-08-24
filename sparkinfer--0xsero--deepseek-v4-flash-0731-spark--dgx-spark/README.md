@@ -30,9 +30,9 @@ reads. Its resident and native tiers are both zero bytes on unified memory.
 Only the final 2,048-token prefill boundary is captured, avoiding a durable
 write at every earlier chunk while leaving at most one chunk to recompute
 after a restart.
-The runtime disables PyTorch expandable CUDA segments because vLLM rejects
-that remappable allocator whenever a KV connector is active; ordinary stable
-CUDA allocations are required for the connector-owned cache views.
+The runtime enables vLLM's CuMem allocator for KV allocations so connector
+cache views stay on stable physical pages while SparkInfer retains its
+qualified expandable allocator for unified-memory model loading.
 
 ## Reproduce
 

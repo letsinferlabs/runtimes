@@ -35,6 +35,7 @@
       "1024",
       "--kv-cache-memory-bytes",
       "4500000000",
+      "--enable-cumem-allocator",
       "--seed",
       "42042"
     ],
@@ -64,8 +65,7 @@
       "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS": "0",
       "DEFAULT_CHAT_TEMPLATE_KWARGS_THINKING": "false",
       "DEFAULT_CHAT_TEMPLATE_KWARGS_EFFORT": "max",
-      "OMP_NUM_THREADS": "16",
-      "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False"
+      "OMP_NUM_THREADS": "16"
     },
     "id": "sparkinfer",
     "protocol": {
