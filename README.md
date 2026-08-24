@@ -126,8 +126,13 @@ binds that inventory to the exact image and configuration identities as SPDX,
 and attaches the SBOM attestation to the OCI. It then emits a deterministic
 pin review patch; applying that patch resets the candidate to unqualified.
 
-Every runtime proposal must first pass source and supply-chain review. Once its
-PR is labeled `benchmark-ready`, independent users run:
+Every runtime proposal must first pass source and supply-chain review. The bot
+automatically adds the `runtime` label when a PR directly changes a runtime
+candidate. Only those PRs enter community benchmark verification; shared
+tooling, workflow, and documentation PRs receive a not-applicable check and
+continue through ordinary validation and review.
+
+After a runtime PR is labeled `benchmark-ready`, independent users run:
 
 ```bash
 letsinfer benchmark verify https://github.com/letsinferlabs/runtimes/pull/123

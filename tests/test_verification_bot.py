@@ -11,6 +11,52 @@ from tools import verification_bot as bot
 
 
 class VerificationBotTests(unittest.TestCase):
+    def test_runtime_candidate_names_use_changed_paths(self) -> None:
+        current = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        new = "engine--owner--model--target"
+        self.assertEqual(
+            bot.runtime_candidate_names([
+                {"filename": "README.md"},
+                {"filename": f"{current}/engine/config.json"},
+            ]),
+            [current],
+        )
+        self.assertEqual(
+            bot.runtime_candidate_names([
+                {"filename": f"{new}/runtime.json"},
+                {"filename": f"{new}/README.md"},
+            ]),
+            [new],
+        )
+
+    def test_non_runtime_pr_satisfies_verification_check(self) -> None:
+        pull = {
+            "number": 17,
+            "head": {"sha": "a" * 40},
+            "labels": [],
+        }
+        with (
+            mock.patch.object(bot, "changed_runtime_candidates", return_value=[]),
+            mock.patch.object(bot, "sync_runtime_label") as sync,
+            mock.patch.object(bot, "publish_classification_check") as publish,
+            mock.patch.object(bot, "process_pull_request") as process,
+        ):
+            result = bot.process({"action": "opened", "pull_request": pull})
+        self.assertEqual(result, {"processed": True, "runtime_proposal": False})
+        sync.assert_called_once_with(pull, runtime=False)
+        publish.assert_called_once_with(pull, runtime_pending=False)
+        process.assert_not_called()
+
+    def test_non_runtime_check_does_not_claim_qualification(self) -> None:
+        pull = {
+            "head": {"sha": "a" * 40},
+        }
+        with mock.patch.object(bot, "api", return_value={}) as api:
+            bot.publish_classification_check(pull, runtime_pending=False)
+        value = api.call_args.kwargs["value"]
+        self.assertEqual(value["conclusion"], "success")
+        self.assertIn("No runtime candidate changed", value["output"]["summary"])
+
     def test_pending_check_remains_in_progress(self) -> None:
         calls: list[dict] = []
 
@@ -75,11 +121,26 @@ class VerificationBotTests(unittest.TestCase):
     def test_pull_request_waits_for_benchmark_ready_without_api_work(self) -> None:
         event = {
             "action": "synchronize",
-            "pull_request": {"number": 17, "labels": []},
+            "pull_request": {
+                "number": 17,
+                "head": {"sha": "a" * 40},
+                "labels": [],
+            },
         }
-        with mock.patch.object(bot, "process_pull_request") as process:
+        with (
+            mock.patch.object(
+                bot, "changed_runtime_candidates", return_value=["candidate"]
+            ),
+            mock.patch.object(bot, "sync_runtime_label") as sync,
+            mock.patch.object(bot, "publish_classification_check") as publish,
+            mock.patch.object(bot, "process_pull_request") as process,
+        ):
             result = bot.process(event)
         self.assertFalse(result["processed"])
+        sync.assert_called_once_with(event["pull_request"], runtime=True)
+        publish.assert_called_once_with(
+            event["pull_request"], runtime_pending=True
+        )
         process.assert_not_called()
 
     def test_closed_pull_request_cancels_the_check(self) -> None:
