@@ -7,10 +7,10 @@ one NVIDIA DGX Spark through Let's Infer's local OpenAI-compatible API.
 
 This candidate turns MiaAI-Lab's single-Spark recipe into an immutable Engine
 OCI and runtime pack. It preserves the REAP-K216 quant, losslessly coalesces
-the rank-sliced checkpoint to TP1, builds the K64 DSpark drafter, and serves
+the rank-sliced checkpoint to TP1, builds the K176 DSpark drafter, and serves
 with SparkInfer's SM121 kernels. Native 432-byte NVFP4 MLA cache records,
-DSpark K5, prefix caching, a 8,224-token prefill workspace, and CUDA graph
-sizes 6/12/24 are fixed in `runtime.json`.
+DSpark K6, prefix caching, a 4,096-token prefill workspace, and CUDA graph
+size 7 are fixed in `runtime.json`.
 
 The runtime includes Mia's native-NVFP4 dual-cache and DSpark writer fixes,
 her cross-device coalescer and default-thinking integration, plus the
@@ -22,7 +22,7 @@ an exact arm64 wheel pinned by its release hash instead of a boot-time upgrade.
 
 The context ceiling is exactly 262,144 tokens. The production recipe admits
 one active request; the gateway queues additional connections. Let’s Infer
-persists the downloaded source checkpoint, coalesced TP1 checkpoint, K64
+persists the downloaded source checkpoint, coalesced TP1 checkpoint, K176
 draft, and compilation caches. vLLM prefix-cache entries are intentionally
 declared non-persistent because this Engine does not implement Let's Infer's
 portable persistent-prefix connector.

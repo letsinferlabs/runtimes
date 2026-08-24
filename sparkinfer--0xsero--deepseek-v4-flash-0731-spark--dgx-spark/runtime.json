@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-  "version": "0.1.0-rc.28",
+  "version": "0.1.0-rc.30",
   "logical_model": "deepseek-v4-flash",
   "target": {
     "id": "dgx-spark",
@@ -51,9 +51,9 @@
       "DSPARK_CAPACITY": "0",
       "DSPARK_DYNAMIC_DRAFT_DEPTH": "0",
       "DSPARK_DYNAMIC_DRAFT_DEPTH_WINDOW": "8",
-      "DSPARK_DRAFT_EXPERTS": "160",
+      "DSPARK_DRAFT_EXPERTS": "176",
       "DSPARK_STRUCTURED_EXPERTS_PER_CATEGORY": "32",
-      "SPEC_MODEL_PATH": "/root/models/dspark-draft-k160-hybrid",
+      "SPEC_MODEL_PATH": "/root/models/dspark-draft-k176-hybrid",
       "DSPARK_FP8_DRAFT_HEAD": "1",
       "SPARKINFER_MICRO_DYNAMIC_CUTOVER_PAIRS": "32",
       "DSPARK_DRAFT_ATTENTION_BACKEND": "B12X_MLA_SPARSE",
