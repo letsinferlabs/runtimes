@@ -133,6 +133,11 @@ PR is labeled `benchmark-ready`, independent users run:
 letsinfer benchmark verify https://github.com/letsinferlabs/runtimes/pull/123
 ```
 
+Trusted maintainers may receive a repository-maintenance bypass for the merge
+check. A bypass never creates benchmark consensus, qualification provenance,
+or a qualified runtime recommendation; changed runtime bytes still require the
+normal independent evidence before publication.
+
 Let's Infer runs a paired baseline/candidate benchmark, restores the verifier's
 runtime, and posts complete signed evidence. Three agreeing non-author users on
 distinct device identities qualify the exact execution subject. A trusted

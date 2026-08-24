@@ -29,6 +29,7 @@ CHECK_NAME = "runtime/community-verification"
 SUBMISSION_MARKER = "<!-- letsinfer-verification:v1\n"
 TALLY_MARKER = "<!-- letsinfer-verification-tally:v1 -->"
 REJECTION_MARKER = "letsinfer-verification-rejected"
+BYPASS_LOGINS_ENV = "LETSINFER_VERIFICATION_BYPASS_LOGINS"
 
 
 class BotError(RuntimeError):
@@ -73,6 +74,43 @@ def canonical_bytes(value: Any) -> bytes:
         json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         + "\n"
     ).encode("utf-8")
+
+
+def maintainer_bypass(pull: Mapping[str, Any]) -> bool:
+    configured = {
+        login.strip().casefold()
+        for login in os.environ.get(BYPASS_LOGINS_ENV, "").split(",")
+        if login.strip()
+    }
+    author = pull.get("user")
+    login = author.get("login") if isinstance(author, Mapping) else None
+    return isinstance(login, str) and login.casefold() in configured
+
+
+def publish_maintainer_bypass(pull: Mapping[str, Any]) -> None:
+    head = pull.get("head")
+    author = pull.get("user")
+    head_sha = head.get("sha") if isinstance(head, Mapping) else None
+    login = author.get("login") if isinstance(author, Mapping) else None
+    if not isinstance(head_sha, str) or not isinstance(login, str):
+        raise BotError("maintainer pull request identity is invalid")
+    api(
+        f"repos/{REPOSITORY}/check-runs",
+        method="POST",
+        value={
+            "name": CHECK_NAME,
+            "head_sha": head_sha,
+            "status": "completed",
+            "conclusion": "success",
+            "output": {
+                "title": "Maintainer verification bypass",
+                "summary": (
+                    f"Repository-maintenance bypass granted to @{login}. "
+                    "This does not create benchmark consensus or qualify runtime bytes."
+                ),
+            },
+        },
+    )
 
 
 def _core() -> tuple[Any, Any]:
@@ -664,6 +702,9 @@ def process(event: Mapping[str, Any]) -> dict[str, Any]:
         if event.get("action") == "closed":
             cancel_check(pull)
             return {"processed": True, "closed": True}
+        if maintainer_bypass(pull):
+            publish_maintainer_bypass(pull)
+            return {"processed": True, "maintainer_bypass": True}
         labels = {
             item.get("name")
             for item in pull.get("labels", [])

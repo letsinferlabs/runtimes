@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import unittest
 from unittest import mock
 
@@ -11,6 +12,38 @@ from tools import verification_bot as bot
 
 
 class VerificationBotTests(unittest.TestCase):
+    def test_configured_maintainer_bypasses_benchmark_gate(self) -> None:
+        pull = {
+            "number": 17,
+            "head": {"sha": "a" * 40},
+            "user": {"login": "TaimurAyaz"},
+            "labels": [],
+        }
+        with (
+            mock.patch.dict(
+                os.environ,
+                {bot.BYPASS_LOGINS_ENV: "other, taimurayaz"},
+                clear=False,
+            ),
+            mock.patch.object(bot, "publish_maintainer_bypass") as publish,
+            mock.patch.object(bot, "process_pull_request") as process,
+        ):
+            result = bot.process({"action": "opened", "pull_request": pull})
+        self.assertEqual(result, {"processed": True, "maintainer_bypass": True})
+        publish.assert_called_once_with(pull)
+        process.assert_not_called()
+
+    def test_maintainer_bypass_check_does_not_claim_qualification(self) -> None:
+        pull = {
+            "head": {"sha": "a" * 40},
+            "user": {"login": "TaimurAyaz"},
+        }
+        with mock.patch.object(bot, "api", return_value={}) as api:
+            bot.publish_maintainer_bypass(pull)
+        value = api.call_args.kwargs["value"]
+        self.assertEqual(value["conclusion"], "success")
+        self.assertIn("does not create benchmark consensus", value["output"]["summary"])
+
     def test_pending_check_remains_in_progress(self) -> None:
         calls: list[dict] = []
 
