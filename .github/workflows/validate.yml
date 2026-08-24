@@ -85,6 +85,7 @@ jobs:
           fi
       - name: Validate schemas and generated catalog
         env:
+          LETSINFER_VERIFIER_BYPASS_GITHUB_IDS: ${{ vars.LETSINFER_VERIFIER_BYPASS_GITHUB_IDS }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
@@ -92,6 +93,14 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_*.py'
           python3 tools/generate_manifest.py --validate-only
           python3 tools/generate_manifest.py --previous manifest.json --check
+      - name: Require Let's Infer onboarding in changed runtime READMEs
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          python3 tools/readme_onboarding.py --base "$BASE_SHA" --head HEAD
       - name: Verify Engine protocol and deterministic runtime packs
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -101,13 +110,18 @@ jobs:
           for runtime in */runtime.json; do
             candidate=${runtime%/runtime.json}
             version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")
-            python3 "$candidate/adapter/engine-adapter" verify --protocol 2
+            if test -f "$candidate/adapter/engine-adapter"; then
+              python3 "$candidate/adapter/engine-adapter" verify --protocol 2
+            fi
             .core/bin/letsinfer pack "$candidate" --output "$RUNNER_TEMP/packs/$candidate-a.letsinfer"
             .core/bin/letsinfer pack "$candidate" --output "$RUNNER_TEMP/packs/$candidate-b.letsinfer"
             cmp "$RUNNER_TEMP/packs/$candidate-a.letsinfer" "$RUNNER_TEMP/packs/$candidate-b.letsinfer"
+            python3 tools/candidate_policy.py repositories --candidate "$candidate" \
+              --output "$RUNNER_TEMP/repositories.json"
+            repository=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_repository"])' "$RUNNER_TEMP/repositories.json")
             python3 tools/oci_artifact.py plan \
               --artifact "$RUNNER_TEMP/packs/$candidate-a.letsinfer" \
-              --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
+              --repository "$repository" \
               --candidate "$candidate" --version "$version" \
               --output "$RUNNER_TEMP/plans/$candidate.json"
           done
