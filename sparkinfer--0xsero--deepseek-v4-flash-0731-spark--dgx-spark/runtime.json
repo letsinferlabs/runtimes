@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-  "version": "0.1.0-rc.31",
+  "version": "0.1.0-rc.32",
   "logical_model": "deepseek-v4-flash",
   "target": {
     "id": "dgx-spark",
@@ -113,17 +113,18 @@
   },
   "benchmark": {
     "contract": {
-      "schema_version": 3,
+      "schema_version": 4,
       "suite": "letsinfer-code-prose-v1",
       "generator": {
         "id": "letsinfer-code-prose",
-        "version": 3
+        "version": 4
       },
       "domains": ["code"],
       "execution": {
         "isolation": "fresh-matrix",
         "prefix_state": "shared",
-        "samples_per_cell": 1
+        "samples_per_cell": 1,
+        "stream_prefix": "shared-body"
       },
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
