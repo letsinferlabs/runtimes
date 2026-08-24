@@ -1,0 +1,154 @@
+{
+  "schema_version": 5,
+  "id": "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
+  "version": "0.1.0-rc.1",
+  "logical_model": "deepseek-v4-flash",
+  "target": {
+    "id": "dgx-spark",
+    "platform": "linux/arm64",
+    "accelerator": {
+      "vendor": "nvidia",
+      "architecture": "sm_121",
+      "count": 1,
+      "partitioning": "full-device"
+    },
+    "memory": {
+      "topology": "unified",
+      "minimum_total_gib": 118
+    },
+    "placement": {
+      "strategy": "single",
+      "node_count": 1,
+      "interconnect": {
+        "kind": "any",
+        "rdma_required": false,
+        "minimum_speed_mbps": 0,
+        "minimum_mtu": 0
+      }
+    }
+  },
+  "engine": {
+    "model_format": "huggingface-snapshot",
+    "cache_provider": "sparkinfer-vllm-prefix-v1",
+    "arguments": [
+      "--long-prefill-token-threshold",
+      "1024",
+      "--seed",
+      "42042"
+    ],
+    "environment": {
+      "COALESCE_WORKERS": "1",
+      "VERIFY_MODEL_CHECKSUMS": "1",
+      "MAX_MODEL_LEN": "262144",
+      "MAX_NUM_SEQS": "1",
+      "MAX_NUM_BATCHED_TOKENS": "8224",
+      "GPU_MEMORY_UTILIZATION": "0.94",
+      "VLLM_DSV4_PADDED_NVFP4": "0",
+      "KV_FP8_ROPE": "0",
+      "DSPARK_TOKENS": "5",
+      "DSPARK_CAPACITY": "0",
+      "DSPARK_DYNAMIC_DRAFT_DEPTH": "0",
+      "DSPARK_DYNAMIC_DRAFT_DEPTH_WINDOW": "8",
+      "DSPARK_DRAFT_EXPERTS": "64",
+      "DSPARK_STRUCTURED_EXPERTS_PER_CATEGORY": "32",
+      "DSPARK_DRAFT_ATTENTION_BACKEND": "B12X_MLA_SPARSE",
+      "DRAFT_SAMPLE_METHOD": "probabilistic",
+      "MAX_CUDAGRAPH_CAPTURE_SIZE": "24",
+      "CUDAGRAPH_CAPTURE_SIZES": "6,12,24",
+      "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS": "0",
+      "DEFAULT_CHAT_TEMPLATE_KWARGS_THINKING": "true",
+      "DEFAULT_CHAT_TEMPLATE_KWARGS_EFFORT": "max",
+      "OMP_NUM_THREADS": "16"
+    },
+    "id": "sparkinfer",
+    "protocol": {
+      "version": 2
+    },
+    "oci": {
+      "reference": "ghcr.io/0xsero/deepseek-v4-flash-0731-spark-sparkinfer@sha256:2e077489a83a0360952828051fe7f7a32c1801e5ce8436d85f7267583d614ff4",
+      "immutable_id": "sha256:3324f96434a2076e80e6a6bc4fbd187e5dd31e80ed85620961f9cff5dbdc3791",
+      "base": "ghcr.io/0xsero/deepseek-v4-flash-0731-spark-sparkinfer@sha256:2e077489a83a0360952828051fe7f7a32c1801e5ce8436d85f7267583d614ff4"
+    }
+  },
+  "model": {
+    "uri": "hf://0xSero/deepseek-v4-flash-0731-spark",
+    "artifact": "model",
+    "acquisition": {
+      "image": "ghcr.io/0xsero/deepseek-v4-flash-0731-spark-sparkinfer@sha256:2e077489a83a0360952828051fe7f7a32c1801e5ce8436d85f7267583d614ff4"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "model",
+      "format": "huggingface-snapshot",
+      "revision": "22f28d32b9b29b4352eaa380ff8c2c170b2847ab",
+      "uri": "hf://0xSero/deepseek-v4-flash-0731-spark"
+    }
+  ],
+  "container": {
+    "memory_bytes": 128849018880,
+    "shm_bytes": 17179869184,
+    "min_available_gib": 115,
+    "runtime_min_available_gib": 4,
+    "startup_timeout_seconds": 7200
+  },
+  "cache": {
+    "provider": "sparkinfer-vllm-prefix-v1",
+    "persistent": false,
+    "prewarm": false,
+    "replay_output_policy": null,
+    "config": {}
+  },
+  "serving": {
+    "max_connections": 128,
+    "max_active_requests": 1,
+    "max_context_tokens": 262144,
+    "gate": null
+  },
+  "benchmark": {
+    "contract": {
+      "schema_version": 2,
+      "suite": "letsinfer-code-prose-v1",
+      "generator": {
+        "id": "letsinfer-code-prose",
+        "version": 2
+      },
+      "tokenizer": {
+        "capability": "engine-rendered-chat-count-v1",
+        "model_sha256": "a307a57164e5e934a4d092f5d8b34a236e08ecdd6282420a3bf2b5e15239874d",
+        "engine_image_sha256": "3324f96434a2076e80e6a6bc4fbd187e5dd31e80ed85620961f9cff5dbdc3791",
+        "render_contract": "openai-chat-user-v1"
+      },
+      "request": {
+        "output_tokens": 128,
+        "min_completion_tokens": 128,
+        "require_natural_stop": false,
+        "temperature": 0,
+        "seed": 42042
+      },
+      "sample_interval_seconds": 5,
+      "cases": [
+        {
+          "id": "32k",
+          "prompt_tokens": 32768,
+          "concurrencies": [1, 2, 4, 8, 16]
+        },
+        {
+          "id": "64k",
+          "prompt_tokens": 65536,
+          "concurrencies": [1, 2, 4, 8, 16]
+        },
+        {
+          "id": "128k",
+          "prompt_tokens": 131072,
+          "concurrencies": [1, 2, 4, 8, 16]
+        },
+        {
+          "id": "256k",
+          "prompt_tokens": 260000,
+          "concurrencies": [1, 2, 4, 8, 16]
+        }
+      ]
+    }
+  }
+}

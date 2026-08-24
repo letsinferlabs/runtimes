@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "base_image": "ghcr.io/0xsero/deepseek-v4-flash-0731-spark-sparkinfer@sha256:2e077489a83a0360952828051fe7f7a32c1801e5ce8436d85f7267583d614ff4",
+  "base_image_id": "sha256:3324f96434a2076e80e6a6bc4fbd187e5dd31e80ed85620961f9cff5dbdc3791",
+  "recipe_repository": "MiaAI-Lab/DeepSeek-v4-Flash-One-DGX-Spark",
+  "recipe_commit": "76c51c7defffd01025c75daaf241ea323dda4734",
+  "kernel_repository": "local-inference-lab/b12x",
+  "kernel_base_commit": "272a84bd97ce791a1e92d1f3a0da3dd5f3c6565f",
+  "method": "verified-base-patch-overlay",
+  "runtime_fixes": [
+    "native-nvfp4-prefill-dispatch",
+    "native-nvfp4-dual-cache-prefill",
+    "preallocate-w4a16-route-histograms",
+    "keep-graphed-inactive-routes-in-range",
+    "native-nvfp4-dspark-context-writer",
+    "default-thinking-template-kwargs",
+    "cross-device-coalescer",
+    "hash-pinned-xgrammar-0.2.4-tool-calling-fix"
+  ]
+}
