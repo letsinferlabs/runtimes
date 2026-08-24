@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 from collections.abc import Mapping, Sequence
@@ -27,8 +28,71 @@ def build_command(runtime: Mapping[str, Any], port: int) -> Sequence[str]:
     ]
 
 
-def build_environment(_runtime: Mapping[str, Any]) -> Mapping[str, str]:
-    return {}
+def build_environment(runtime: Mapping[str, Any]) -> Mapping[str, str]:
+    cache = runtime.get("cache")
+    if (
+        not isinstance(cache, Mapping)
+        or cache.get("provider") != "sparkinfer-letsinfer-prefix-v1"
+        or cache.get("persistent") is not True
+        or cache.get("prewarm") is not False
+        or cache.get("replay_output_policy") != "restored-repeat-exact"
+    ):
+        raise AdapterError("SparkInfer persistent cache contract is invalid")
+    config = cache.get("config")
+    required = {
+        "durable_capacity_bytes",
+        "resident_capacity_bytes",
+        "ttl_seconds",
+        "min_tokens",
+        "direct_reads",
+        "native_capacity_bytes",
+        "capture_tail_tokens",
+        "exact_capsules",
+    }
+    if not isinstance(config, Mapping) or set(config) != required:
+        raise AdapterError("SparkInfer persistent cache config is invalid")
+    for field in (
+        "durable_capacity_bytes",
+        "ttl_seconds",
+        "min_tokens",
+        "capture_tail_tokens",
+    ):
+        value = config.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise AdapterError(f"SparkInfer cache {field} must be positive")
+    for field in ("resident_capacity_bytes", "native_capacity_bytes"):
+        value = config.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise AdapterError(f"SparkInfer cache {field} must be non-negative")
+    if config.get("resident_capacity_bytes") != 0:
+        raise AdapterError("SparkInfer cache resident capacity must be zero on unified memory")
+    if config.get("native_capacity_bytes") != 0:
+        raise AdapterError("SparkInfer native cache capacity must be zero")
+    if config.get("direct_reads") is not True:
+        raise AdapterError("SparkInfer cache direct reads must be enabled")
+    if config.get("exact_capsules") is not False:
+        raise AdapterError("SparkInfer dspark cache capsules must be disabled")
+    transfer = {
+        "kv_connector": "LetsInferPrefixConnector",
+        "kv_role": "kv_both",
+        "kv_connector_module_path": "letsinfer_prefix_connector.connector",
+        "kv_connector_extra_config": {
+            "store_root": "/root/.cache/letsinfer-prefix-store/sparkinfer",
+            "capacity_bytes": config["durable_capacity_bytes"],
+            "resident_capacity_bytes": config["resident_capacity_bytes"],
+            "ttl_seconds": config["ttl_seconds"],
+            "min_tokens": config["min_tokens"],
+            "direct_reads": config["direct_reads"],
+            "native_capacity_bytes": config["native_capacity_bytes"],
+            "capture_tail_tokens": config["capture_tail_tokens"],
+            "exact_capsules": config["exact_capsules"],
+        },
+    }
+    return {
+        "LETSINFER_KV_TRANSFER_CONFIG": json.dumps(
+            transfer, sort_keys=True, separators=(",", ":")
+        )
+    }
 
 
 def count_tokens(host: str, port: int, body: bytes, _model: str) -> int:

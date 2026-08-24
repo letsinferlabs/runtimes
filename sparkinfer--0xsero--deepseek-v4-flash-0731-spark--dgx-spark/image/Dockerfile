@@ -1,6 +1,19 @@
+ARG SOURCE_DATE_EPOCH=0
+
+FROM ghcr.io/pyo3/maturin@sha256:b6c8b59a0170b77eb31a35b56034abd39972483ad0ebfff344deaa42a85f3bd3 AS letsinfer-prefix-store-build
+
+ARG SOURCE_DATE_EPOCH
+WORKDIR /build/letsinfer-prefix-store
+COPY adapter/letsinfer_prefix_store/ ./
+RUN SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
+    cargo build --release --locked --features python && \
+    strip --strip-debug target/release/libletsinfer_prefix_store.so && \
+    install -D -m 0555 target/release/libletsinfer_prefix_store.so \
+      /opt/letsinfer/python/letsinfer_prefix_store.so
+
 FROM ghcr.io/0xsero/deepseek-v4-flash-0731-spark-sparkinfer@sha256:2e077489a83a0360952828051fe7f7a32c1801e5ce8436d85f7267583d614ff4 AS letsinfer-engine
 
-ARG SOURCE_DATE_EPOCH=0
+ARG SOURCE_DATE_EPOCH
 
 COPY engine/base-files.sha256 /tmp/letsinfer-base-files.sha256
 RUN cd / && sha256sum -c /tmp/letsinfer-base-files.sha256
@@ -38,8 +51,23 @@ RUN /opt/runtime-venv/bin/pip install --no-cache-dir --no-deps \
 COPY scripts/prepare-and-serve.sh /opt/letsinfer/bin/sparkinfer-serve
 COPY adapter/engine_frontend.py /opt/letsinfer/lib/engine_frontend.py
 COPY adapter/engine-adapter /opt/letsinfer/bin/engine-adapter
+COPY --from=letsinfer-prefix-store-build \
+  /opt/letsinfer/python/letsinfer_prefix_store.so \
+  /opt/runtime-venv/lib/python3.12/site-packages/letsinfer_prefix_store.so
+COPY adapter/letsinfer_prefix_connector/__init__.py \
+  /opt/runtime-venv/lib/python3.12/site-packages/letsinfer_prefix_connector/__init__.py
+COPY adapter/letsinfer_prefix_connector/connector.py \
+  /opt/runtime-venv/lib/python3.12/site-packages/letsinfer_prefix_connector/connector.py
 RUN chmod 0555 /opt/letsinfer/bin/engine-adapter /opt/letsinfer/bin/sparkinfer-serve && \
-    chmod 0444 /opt/letsinfer/lib/engine_frontend.py
+    chmod 0444 \
+      /opt/letsinfer/lib/engine_frontend.py \
+      /opt/runtime-venv/lib/python3.12/site-packages/letsinfer_prefix_connector/__init__.py \
+      /opt/runtime-venv/lib/python3.12/site-packages/letsinfer_prefix_connector/connector.py && \
+    /opt/runtime-venv/bin/python -c \
+      'from letsinfer_prefix_store import PrefixStore; from letsinfer_prefix_connector import LetsInferPrefixConnector; store = PrefixStore("/tmp/letsinfer-prefix-store-selftest", 1048576, 60, 4, 0, True); assert store is not None; assert LetsInferPrefixConnector.__name__ == "LetsInferPrefixConnector"' && \
+    rm -rf /tmp/letsinfer-prefix-store-selftest && \
+    /opt/runtime-venv/bin/python -m compileall --invalidation-mode checked-hash -q \
+      /opt/runtime-venv/lib/python3.12/site-packages/letsinfer_prefix_connector
 
 LABEL org.opencontainers.image.source="https://github.com/letsinferlabs/runtimes" \
       ai.letsinfer.runtime="sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark" \

@@ -69,4 +69,9 @@ export VLLM_USE_BREAKABLE_CUDAGRAPH=0
 export VLLM_USE_B12X_WO_PROJECTION=1
 export XDG_CACHE_HOME=/root/.cache
 
-exec /opt/vllm/serve-ds4-flash.sh "$@"
+cache_args=()
+if [[ -n "${LETSINFER_KV_TRANSFER_CONFIG:-}" ]]; then
+  cache_args+=(--kv-transfer-config "${LETSINFER_KV_TRANSFER_CONFIG}")
+fi
+
+exec /opt/vllm/serve-ds4-flash.sh "${cache_args[@]}" "$@"

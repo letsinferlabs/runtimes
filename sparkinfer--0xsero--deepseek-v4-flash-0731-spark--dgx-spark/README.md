@@ -9,7 +9,7 @@ This candidate turns MiaAI-Lab's single-Spark recipe into an immutable Engine
 OCI and runtime pack. It preserves the REAP-K216 quant, losslessly coalesces
 the rank-sliced checkpoint to TP1, builds the K176 DSpark drafter, and serves
 with SparkInfer's SM121 kernels. Native 432-byte NVFP4 MLA cache records,
-DSpark K6, prefix caching, a 4,096-token prefill workspace, and CUDA graph
+DSpark K6, prefix caching, a 2,048-token prefill workspace, and CUDA graph
 size 7 are fixed in `runtime.json`.
 
 The runtime includes Mia's native-NVFP4 dual-cache and DSpark writer fixes,
@@ -23,9 +23,13 @@ an exact arm64 wheel pinned by its release hash instead of a boot-time upgrade.
 The context ceiling is exactly 262,144 tokens. The production recipe admits
 one active request; the gateway queues additional connections. Let’s Infer
 persists the downloaded source checkpoint, coalesced TP1 checkpoint, K176
-draft, and compilation caches. vLLM prefix-cache entries are intentionally
-declared non-persistent because this Engine does not implement Let's Infer's
-portable persistent-prefix connector.
+draft, compilation caches, and exact-token prefix records. The out-of-tree
+vLLM connector uses Let’s Infer PrefixStore with a 64 GiB NVMe byte-LRU, a
+seven-day TTL, CRC-verified page-aligned records, atomic commits, and direct
+reads. Its resident and native tiers are both zero bytes on unified memory.
+Only the final 2,048-token prefill boundary is captured, avoiding a durable
+write at every earlier chunk while leaving at most one chunk to recompute
+after a restart.
 
 ## Reproduce
 
@@ -37,10 +41,13 @@ letsinfer install deepseek-v4-flash \
 letsinfer benchmark deepseek-v4-flash
 ```
 
-The schema-6 contract first runs fixed short-code and short-prose workloads at
+The schema-7 contract first runs fixed short-code and short-prose workloads at
 C1, C2, and C4 with 512-token completions. It then runs the canonical code
 workload once at C1, C2, and C4 for 32K, 64K, 128K, and a 260,000-token prompt
-under the 262,144-token cap: 18 cells total. One fresh process/store
+under the 262,144-token cap. A final exact-repeat TTFT check loads one unique
+64K code prompt with a one-token response budget and immediately reloads the
+same bytes. There are 20 execution phases and 18 comparable throughput rows.
+One fresh process/store
 serves the complete matrix and intentionally retains prefix state between
 cells. Each long context runs C1, C2, then C4 while all four distinct streams
 share the complete ledger prefix, so the matrix measures real prefix-cache

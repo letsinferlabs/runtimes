@@ -9,6 +9,8 @@ patched upstream components retain their original licenses:
   `272a84bd97ce791a1e92d1f3a0da3dd5f3c6565f`: Apache-2.0.
 - vLLM source contained in the pinned base image: Apache-2.0.
 - xgrammar 0.2.4 arm64 wheel: Apache-2.0.
+- PyO3/maturin and the Rust PrefixStore dependencies (`anyhow`, `crc32fast`,
+  `libc`, and `parking_lot`): their MIT or Apache-2.0 upstream licenses.
 
 The model checkpoint and the pinned Engine base are acquired separately and
 remain subject to their upstream license terms. Exact identities and the

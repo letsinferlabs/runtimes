@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-  "version": "0.1.0-rc.34",
+  "version": "0.1.0-rc.35",
   "logical_model": "deepseek-v4-flash",
   "target": {
     "id": "dgx-spark",
@@ -29,7 +29,7 @@
   },
   "engine": {
     "model_format": "huggingface-snapshot",
-    "cache_provider": "sparkinfer-vllm-prefix-v1",
+    "cache_provider": "sparkinfer-letsinfer-prefix-v1",
     "arguments": [
       "--long-prefill-token-threshold",
       "1024",
@@ -43,7 +43,7 @@
       "VERIFY_MODEL_CHECKSUMS": "1",
       "MAX_MODEL_LEN": "262144",
       "MAX_NUM_SEQS": "1",
-      "MAX_NUM_BATCHED_TOKENS": "4096",
+      "MAX_NUM_BATCHED_TOKENS": "2048",
       "GPU_MEMORY_UTILIZATION": "0.94",
       "VLLM_DSV4_PADDED_NVFP4": "0",
       "KV_FP8_ROPE": "0",
@@ -99,11 +99,20 @@
     "startup_timeout_seconds": 7200
   },
   "cache": {
-    "provider": "sparkinfer-vllm-prefix-v1",
-    "persistent": false,
+    "provider": "sparkinfer-letsinfer-prefix-v1",
+    "persistent": true,
     "prewarm": false,
-    "replay_output_policy": null,
-    "config": {}
+    "replay_output_policy": "restored-repeat-exact",
+    "config": {
+      "durable_capacity_bytes": 68719476736,
+      "resident_capacity_bytes": 0,
+      "ttl_seconds": 604800,
+      "min_tokens": 4096,
+      "direct_reads": true,
+      "native_capacity_bytes": 0,
+      "capture_tail_tokens": 2048,
+      "exact_capsules": false
+    }
   },
   "serving": {
     "max_connections": 128,
@@ -113,11 +122,11 @@
   },
   "benchmark": {
     "contract": {
-      "schema_version": 6,
+      "schema_version": 7,
       "suite": "letsinfer-code-prose-v1",
       "generator": {
         "id": "letsinfer-code-prose",
-        "version": 6
+        "version": 7
       },
       "domains": ["code"],
       "execution": {
@@ -140,6 +149,18 @@
         "request": {
           "output_tokens": 512,
           "min_completion_tokens": 512,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      },
+      "ttft_cache": {
+        "prompt_tokens": 64000,
+        "prompt_domain": "code",
+        "repetitions": 2,
+        "request": {
+          "output_tokens": 1,
+          "min_completion_tokens": 1,
           "require_natural_stop": false,
           "temperature": 0,
           "seed": 42042
