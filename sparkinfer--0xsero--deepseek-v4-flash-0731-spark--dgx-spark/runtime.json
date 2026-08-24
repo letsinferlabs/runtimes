@@ -64,7 +64,8 @@
       "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS": "0",
       "DEFAULT_CHAT_TEMPLATE_KWARGS_THINKING": "false",
       "DEFAULT_CHAT_TEMPLATE_KWARGS_EFFORT": "max",
-      "OMP_NUM_THREADS": "16"
+      "OMP_NUM_THREADS": "16",
+      "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False"
     },
     "id": "sparkinfer",
     "protocol": {
