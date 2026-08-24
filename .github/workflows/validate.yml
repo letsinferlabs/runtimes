@@ -132,17 +132,7 @@ jobs:
       - name: Audit immutable build inputs
         run: |
           set -euo pipefail
-          for dockerfile in */image/Dockerfile; do
-            while IFS= read -r line; do
-              image=${line#FROM }
-              image=${image%% AS *}
-              image=${image%% as *}
-              [[ "$image" == scratch || "$image" == *'@sha256:'* ]] || {
-                echo "unpinned FROM in $dockerfile: $line" >&2
-                exit 1
-              }
-            done < <(grep -E '^FROM ' "$dockerfile")
-          done
+          python3 tools/audit_dockerfile.py */image/Dockerfile
           python3 - <<'PY'
           import pathlib
           invalid=[str(path) for path in pathlib.Path('.').rglob('release.json') if path.parent.parent != pathlib.Path('.')]
