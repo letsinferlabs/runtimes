@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import copy
 import json
 import pathlib
 import tempfile
@@ -15,13 +14,13 @@ CANDIDATE = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
 
 
 def fixture() -> tuple[dict, bytes, bytes]:
-    before = json.loads((ROOT / CANDIDATE / "runtime.json").read_text(encoding="utf-8"))
-    after = copy.deepcopy(before)
+    before_bytes = (ROOT / CANDIDATE / "runtime.json").read_bytes()
     reference = "ghcr.io/letsinferlabs/engine-images@sha256:" + "1" * 64
     immutable = "sha256:" + "2" * 64
-    pin_engine.update(after, reference, immutable)
-    before_bytes = pin_engine.readable_bytes(before)
-    after_bytes = pin_engine.readable_bytes(after)
+    _, changed, after_bytes = pin_engine.update_bytes(
+        before_bytes, reference, immutable
+    )
+    assert changed
     value = {
         "schema_version": 1,
         "repository": "letsinferlabs/runtimes",
@@ -114,6 +113,32 @@ class EnginePinUpdaterTests(unittest.TestCase):
         self.assertEqual([item["path"] for item in additions], [f"{CANDIDATE}/runtime.json"])
         self.assertEqual(base64.b64decode(additions[0]["contents"]), after)
         self.assertIn(request["request_key"], value["message"]["body"])
+
+    def test_update_preserves_unrelated_runtime_bytes(self) -> None:
+        request, before, after = fixture()
+        marker = b'"schema_version": 5,'
+        compact = b'"schema_version" : 5,'
+        self.assertIn(marker, before)
+        irregular = before.replace(marker, compact, 1)
+        request["runtime_blob_sha_before"] = engine_pin_updater.git_blob_sha(irregular)
+        request["runtime_sha256_before"] = engine_pin_updater.sha256_digest(irregular)
+        _, changed, expected = pin_engine.update_bytes(
+            irregular,
+            request["engine_reference"],
+            request["engine_config_digest"],
+        )
+        self.assertTrue(changed)
+        request["runtime_blob_sha_after"] = engine_pin_updater.git_blob_sha(expected)
+        request["runtime_sha256_after"] = engine_pin_updater.sha256_digest(expected)
+        request["request_key"] = engine_pin_updater._request_key(request)
+        github = FakeGitHub(request, irregular, expected)
+
+        engine_pin_updater.apply_request(request, github)
+
+        addition = github.variables["input"]["fileChanges"]["additions"][0]
+        pinned = base64.b64decode(addition["contents"])
+        self.assertEqual(pinned, expected)
+        self.assertIn(compact, pinned)
 
     def test_duplicate_delivery_is_a_noop(self) -> None:
         request, before, after = fixture()

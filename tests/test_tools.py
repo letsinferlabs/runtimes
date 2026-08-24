@@ -367,7 +367,15 @@ class ManifestToolTests(unittest.TestCase):
             benchmark_path = root / "benchmark.json"
             consensus_path = root / "benchmark.consensus.json"
             release_path = root / "release.json"
-            runtime_path.write_bytes(generate_manifest.canonical_bytes(runtime))
+            runtime_bytes = generate_manifest.canonical_bytes(runtime)
+            reference = (
+                "ghcr.io/letsinferlabs/engines/example@sha256:" + "7" * 64
+            )
+            immutable_id = "sha256:" + "6" * 64
+            _, _, expected_runtime_bytes = pin_engine.update_bytes(
+                runtime_bytes, reference, immutable_id
+            )
+            runtime_path.write_bytes(runtime_bytes)
             benchmark_path.write_text("sealed evidence\n", encoding="utf-8")
             consensus_path.write_text("sealed consensus\n", encoding="utf-8")
             release_path.write_text(
@@ -375,13 +383,13 @@ class ManifestToolTests(unittest.TestCase):
             )
             _, changed = pin_engine.pin_runtime(
                 runtime_path,
-                "ghcr.io/letsinferlabs/engines/example@sha256:" + "7" * 64,
-                "sha256:" + "6" * 64,
+                reference,
+                immutable_id,
             )
             self.assertTrue(changed)
             self.assertFalse(benchmark_path.exists())
             self.assertFalse(consensus_path.exists())
-            self.assertTrue(runtime_path.read_text(encoding="utf-8").startswith("{\n  \""))
+            self.assertEqual(runtime_path.read_bytes(), expected_runtime_bytes)
             pinned = json.loads(runtime_path.read_text(encoding="utf-8"))
             self.assertIsNone(json.loads(release_path.read_text())["provenance"])
             self.assertEqual(
