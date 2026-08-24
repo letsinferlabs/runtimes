@@ -64,7 +64,6 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           LETSINFER_CORE_ROOT: .core
-          LETSINFER_VERIFICATION_BYPASS_LOGINS: ${{ vars.LETSINFER_VERIFICATION_BYPASS_LOGINS }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail

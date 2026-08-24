@@ -29,7 +29,8 @@ CHECK_NAME = "runtime/community-verification"
 SUBMISSION_MARKER = "<!-- letsinfer-verification:v1\n"
 TALLY_MARKER = "<!-- letsinfer-verification-tally:v1 -->"
 REJECTION_MARKER = "letsinfer-verification-rejected"
-BYPASS_LOGINS_ENV = "LETSINFER_VERIFICATION_BYPASS_LOGINS"
+RUNTIME_LABEL = "runtime"
+SOURCE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class BotError(RuntimeError):
@@ -76,40 +77,99 @@ def canonical_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
-def maintainer_bypass(pull: Mapping[str, Any]) -> bool:
-    configured = {
-        login.strip().casefold()
-        for login in os.environ.get(BYPASS_LOGINS_ENV, "").split(",")
-        if login.strip()
+def runtime_candidate_names(files: Sequence[Mapping[str, Any]]) -> list[str]:
+    trusted = {
+        path.parent.name
+        for path in SOURCE_ROOT.glob("*/runtime.json")
+        if path.is_file() and not path.is_symlink()
     }
-    author = pull.get("user")
-    login = author.get("login") if isinstance(author, Mapping) else None
-    return isinstance(login, str) and login.casefold() in configured
+    paths: list[pathlib.PurePosixPath] = []
+    for item in files:
+        for field in ("filename", "previous_filename"):
+            value = item.get(field)
+            if isinstance(value, str):
+                paths.append(pathlib.PurePosixPath(value))
+    declared = {
+        path.parts[0]
+        for path in paths
+        if len(path.parts) == 2 and path.parts[1] == "runtime.json"
+    }
+    candidates = trusted | declared
+    return sorted({
+        path.parts[0]
+        for path in paths
+        if len(path.parts) > 1 and path.parts[0] in candidates
+    })
 
 
-def publish_maintainer_bypass(pull: Mapping[str, Any]) -> None:
+def changed_runtime_candidates(number: int) -> list[str]:
+    files = _flatten_pages(
+        api(
+            f"repos/{REPOSITORY}/pulls/{number}/files?per_page=100",
+            paginate=True,
+        )
+    )
+    return runtime_candidate_names(files)
+
+
+def _labels(pull: Mapping[str, Any]) -> set[str]:
+    return {
+        str(item.get("name"))
+        for item in pull.get("labels", [])
+        if isinstance(item, Mapping) and isinstance(item.get("name"), str)
+    }
+
+
+def sync_runtime_label(pull: Mapping[str, Any], *, runtime: bool) -> None:
+    number = pull.get("number")
+    if not isinstance(number, int):
+        raise BotError("pull request number is invalid")
+    labels = _labels(pull)
+    if runtime and RUNTIME_LABEL not in labels:
+        api(
+            f"repos/{REPOSITORY}/issues/{number}/labels",
+            method="POST",
+            value={"labels": [RUNTIME_LABEL]},
+        )
+    elif not runtime and RUNTIME_LABEL in labels:
+        api(
+            f"repos/{REPOSITORY}/issues/{number}/labels/{RUNTIME_LABEL}",
+            method="DELETE",
+        )
+
+
+def publish_classification_check(
+    pull: Mapping[str, Any], *, runtime_pending: bool
+) -> None:
     head = pull.get("head")
-    author = pull.get("user")
     head_sha = head.get("sha") if isinstance(head, Mapping) else None
-    login = author.get("login") if isinstance(author, Mapping) else None
-    if not isinstance(head_sha, str) or not isinstance(login, str):
-        raise BotError("maintainer pull request identity is invalid")
+    if not isinstance(head_sha, str):
+        raise BotError("pull request head identity is invalid")
+    if runtime_pending:
+        status = "in_progress"
+        conclusion = None
+        title = "Runtime verification is pending"
+        summary = "Add the benchmark-ready label to begin independent verification."
+    else:
+        status = "completed"
+        conclusion = "success"
+        title = "Community verification is not applicable"
+        summary = (
+            "No runtime candidate changed; benchmark consensus and runtime "
+            "qualification are not required."
+        )
+    value: dict[str, Any] = {
+        "name": CHECK_NAME,
+        "head_sha": head_sha,
+        "status": status,
+        "output": {"title": title, "summary": summary},
+    }
+    if conclusion is not None:
+        value["conclusion"] = conclusion
     api(
         f"repos/{REPOSITORY}/check-runs",
         method="POST",
-        value={
-            "name": CHECK_NAME,
-            "head_sha": head_sha,
-            "status": "completed",
-            "conclusion": "success",
-            "output": {
-                "title": "Maintainer verification bypass",
-                "summary": (
-                    f"Repository-maintenance bypass granted to @{login}. "
-                    "This does not create benchmark consensus or qualify runtime bytes."
-                ),
-            },
-        },
+        value=value,
     )
 
 
@@ -702,15 +762,15 @@ def process(event: Mapping[str, Any]) -> dict[str, Any]:
         if event.get("action") == "closed":
             cancel_check(pull)
             return {"processed": True, "closed": True}
-        if maintainer_bypass(pull):
-            publish_maintainer_bypass(pull)
-            return {"processed": True, "maintainer_bypass": True}
-        labels = {
-            item.get("name")
-            for item in pull.get("labels", [])
-            if isinstance(item, Mapping)
-        }
+        candidates = changed_runtime_candidates(int(pull["number"]))
+        runtime = bool(candidates)
+        sync_runtime_label(pull, runtime=runtime)
+        if not runtime:
+            publish_classification_check(pull, runtime_pending=False)
+            return {"processed": True, "runtime_proposal": False}
+        labels = _labels(pull)
         if "benchmark-ready" not in labels:
+            publish_classification_check(pull, runtime_pending=True)
             return {"processed": False, "reason": "benchmark-ready gate is pending"}
         return process_pull_request(int(pull["number"]))
     issue = event.get("issue")
@@ -723,6 +783,8 @@ def process(event: Mapping[str, Any]) -> dict[str, Any]:
     ):
         return {"processed": False, "reason": "not a verification submission"}
     number = int(issue["number"])
+    if not changed_runtime_candidates(number):
+        return {"processed": False, "reason": "not a runtime proposal"}
     return process_pull_request(number)
 
 
