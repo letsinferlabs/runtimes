@@ -86,6 +86,7 @@ def build_environment(runtime: Mapping[str, Any]) -> Mapping[str, str]:
             "native_capacity_bytes": config["native_capacity_bytes"],
             "capture_tail_tokens": config["capture_tail_tokens"],
             "exact_capsules": config["exact_capsules"],
+            "device_address_mode": "host-copy-no-device-registration-v1",
         },
     }
     return {

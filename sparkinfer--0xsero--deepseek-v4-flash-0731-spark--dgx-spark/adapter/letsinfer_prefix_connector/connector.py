@@ -186,6 +186,14 @@ class LetsInferPrefixConnector(KVConnectorBase_V1, SupportsHMA):
     ):
         super().__init__(vllm_config, role, kv_cache_config)
         extra = self._kv_transfer_config.kv_connector_extra_config or {}
+        if (
+            extra.get("device_address_mode")
+            != "host-copy-no-device-registration-v1"
+        ):
+            raise ValueError(
+                "Let's Infer connector requires the verified host-copy "
+                "device-address mode"
+            )
         self._store_args = (
             str(extra.get("store_root", DEFAULT_ROOT)),
             int(extra.get("capacity_bytes", DEFAULT_CAPACITY_BYTES)),

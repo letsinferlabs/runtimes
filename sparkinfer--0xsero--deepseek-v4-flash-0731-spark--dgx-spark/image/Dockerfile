@@ -28,11 +28,15 @@ RUN cd /opt/sparkinfer && \
     patch --batch --forward --fuzz=0 -p1 < /tmp/letsinfer-patches/0005-native-nvfp4-dspark-context-writer.patch && \
     patch --batch --forward --fuzz=0 -p1 < /tmp/letsinfer-patches/0006-default-thinking-template-kwargs.patch && \
     patch --batch --forward --fuzz=0 -p1 < /tmp/letsinfer-patches/0007-cross-device-coalescer.patch && \
+    patch --batch --forward --fuzz=0 -p1 < /tmp/letsinfer-patches/0008-allow-host-copy-prefix-connector.patch && \
+    grep -Fq 'letsinfer_prefix_connector.connector' /opt/vllm/vllm/config/vllm.py && \
+    grep -Fq 'host-copy-no-device-registration-v1' /opt/vllm/vllm/config/vllm.py && \
     /opt/runtime-venv/bin/python -m compileall --invalidation-mode checked-hash -q \
       /opt/sparkinfer/sparkinfer/attention/_shared/mla/prefill.py \
       /opt/sparkinfer/sparkinfer/attention/_shared/mla/prefill_mg.py \
       /opt/sparkinfer/sparkinfer/moe/fused_moe/_impl.py \
       /opt/sparkinfer/sparkinfer/moe/_shared/kernels/tiny_decode.py \
+      /opt/vllm/vllm/config/vllm.py \
       /opt/vllm/vllm/models/deepseek_v4/nvidia/dspark.py \
       /opt/recipe/scripts/coalesce_rank_sliced_exl3.py && \
     bash -n /opt/vllm/serve-ds4-flash.sh && \
@@ -73,7 +77,8 @@ LABEL org.opencontainers.image.source="https://github.com/letsinferlabs/runtimes
       ai.letsinfer.runtime="sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark" \
       ai.letsinfer.upstream.recipe.revision="76c51c7defffd01025c75daaf241ea323dda4734" \
       ai.letsinfer.upstream.sparkinfer.revision="272a84bd97ce791a1e92d1f3a0da3dd5f3c6565f" \
-      ai.letsinfer.build.reproducibility="source-date-epoch-v1"
+      ai.letsinfer.build.reproducibility="source-date-epoch-v1" \
+      ai.letsinfer.kv-connector.address-stability="host-copy-no-device-registration-v1"
 
 FROM letsinfer-engine AS letsinfer-engine-inventory-build
 COPY --from=letsinfer-tools tools/engine_sbom.py /tmp/letsinfer-engine-sbom.py

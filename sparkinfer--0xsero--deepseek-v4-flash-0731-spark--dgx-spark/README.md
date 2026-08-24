@@ -30,9 +30,13 @@ reads. Its resident and native tiers are both zero bytes on unified memory.
 Only the final 2,048-token prefill boundary is captured, avoiding a durable
 write at every earlier chunk while leaving at most one chunk to recompute
 after a restart.
-The runtime enables vLLM's CuMem allocator for KV allocations so connector
-cache views stay on stable physical pages while SparkInfer retains its
-qualified expandable allocator for unified-memory model loading.
+The connector synchronizes each transfer and copies KV bytes between engine
+tensors and host buffers; it never exports or registers device addresses.
+The Engine carries an exact-file-verified vLLM compatibility patch that allows
+only this named external connector in its explicit host-copy address mode to
+retain SparkInfer's qualified expandable allocator. Connectors that pin or
+register device memory remain rejected, and the unavailable CuMem allocator is
+not enabled on DGX Spark.
 
 ## Reproduce
 

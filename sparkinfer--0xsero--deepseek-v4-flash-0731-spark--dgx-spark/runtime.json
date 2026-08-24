@@ -35,7 +35,6 @@
       "1024",
       "--kv-cache-memory-bytes",
       "4500000000",
-      "--enable-cumem-allocator",
       "--seed",
       "42042"
     ],

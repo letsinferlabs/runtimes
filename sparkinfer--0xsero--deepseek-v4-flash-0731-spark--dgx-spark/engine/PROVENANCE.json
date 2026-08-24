@@ -15,6 +15,7 @@
     "native-nvfp4-dspark-context-writer",
     "default-thinking-template-kwargs",
     "cross-device-coalescer",
+    "host-copy-prefix-connector-expandable-segments-compatibility",
     "hash-pinned-xgrammar-0.2.4-tool-calling-fix"
   ]
 }
