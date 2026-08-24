@@ -1,0 +1,24 @@
+name: Request verifier artifact
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '*--*--*--*/**'
+
+concurrency:
+  group: verifier-request-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+# This sentinel never checks out or executes proposal content. Its sole purpose
+# is to let a default-branch workflow_run job build the exact current PR head.
+permissions:
+  contents: read
+
+jobs:
+  request:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Request the trusted verifier builder
+        run: echo "Trusted default-branch automation will build this exact pull-request head."

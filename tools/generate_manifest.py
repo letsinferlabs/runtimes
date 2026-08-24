@@ -8,6 +8,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 import pathlib
 import re
 import sys
@@ -572,17 +573,79 @@ def validate_consensus_binding(
     runtime: dict[str, Any], consensus: dict[str, Any]
 ) -> None:
     candidate = runtime["id"]
+    waiver = consensus.get("waiver")
+    waived = waiver is not None
+    expected_verifiers = 1 if waived else 2
+    qualification = consensus.get("qualification")
     if (
-        consensus.get("schema_version") != 1
+        consensus.get("schema_version") != 2
         or consensus.get("candidate_id") != candidate
         or consensus.get("runtime_version") != runtime["version"]
-        or consensus.get("qualification", {}).get("passed") is not True
+        or not isinstance(qualification, dict)
+        or qualification.get("passed") is not True
+        or qualification.get("independent_verifiers") != expected_verifiers
+        or qualification.get("required_verifiers") != 2
+        or qualification.get("safety_passed") is not True
+        or qualification.get("blocking_failures") != []
+        or consensus.get("policy", {}).get("id")
+        != "letsinfer-two-independent-passes-v1"
         or not isinstance(consensus.get("verifications"), list)
-        or len(consensus["verifications"]) < 3
+        or len(consensus["verifications"]) < expected_verifiers
         or not isinstance(consensus.get("verifiers"), list)
-        or not consensus["verifiers"]
+        or len(consensus["verifiers"]) != expected_verifiers
     ):
         raise ManifestError(f"runtime consensus is not qualified: {candidate}")
+    if waived:
+        configured = os.environ.get("LETSINFER_VERIFIER_BYPASS_GITHUB_IDS", "")
+        values = configured.split(",") if configured else []
+        if (
+            not values
+            or any(re.fullmatch(r"[1-9][0-9]*", value) is None for value in values)
+            or len(values) != len({int(value) for value in values})
+        ):
+            raise ManifestError("maintainer verifier-waiver IDs are not configured")
+        authorized_ids = {int(value) for value in values}
+        if (
+            not isinstance(waiver, dict)
+            or set(waiver)
+            != {
+                "schema_version",
+                "policy",
+                "actor",
+                "reason",
+                "comment_id",
+                "comment_url",
+                "issued_at",
+            }
+            or waiver.get("schema_version") != 1
+            or waiver.get("policy") != "maintainer-one-independent-pass-v1"
+            or not isinstance(waiver.get("reason"), str)
+            or not waiver["reason"].strip()
+            or len(waiver["reason"].encode("utf-8")) > 1000
+            or not isinstance(waiver.get("comment_id"), int)
+            or waiver["comment_id"] <= 0
+            or not isinstance(waiver.get("comment_url"), str)
+            or waiver["comment_url"]
+            != (
+                "https://github.com/letsinferlabs/runtimes/pull/"
+                f"{consensus.get('pull_request')}#issuecomment-{waiver.get('comment_id')}"
+            )
+            or not isinstance(waiver.get("issued_at"), str)
+            or re.fullmatch(
+                r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+                r"(?:\.[0-9]{1,6})?Z",
+                waiver["issued_at"],
+            )
+            is None
+        ):
+            raise ManifestError(f"runtime verifier waiver is invalid: {candidate}")
+        github_identity(
+            waiver.get("actor"),
+            f"{candidate}.waiver.actor",
+            allow_organization=False,
+        )
+        if waiver["actor"]["github_id"] not in authorized_ids:
+            raise ManifestError(f"runtime verifier waiver actor is unauthorized: {candidate}")
     subject = consensus.get("subject")
     if not isinstance(subject, dict):
         raise ManifestError(f"runtime consensus subject is invalid: {candidate}")
@@ -696,10 +759,15 @@ def candidates(
             raise ManifestError(f"runtime authors contain duplicate accounts: {candidate}")
         adapter = directory / "adapter" / "engine-adapter"
         dockerfile = directory / "image" / "Dockerfile"
-        if not adapter.is_file() or adapter.is_symlink():
-            raise ManifestError(f"Engine protocol adapter is missing: {candidate}")
-        if not dockerfile.is_file() or dockerfile.is_symlink():
-            raise ManifestError(f"Engine OCI Dockerfile is missing: {candidate}")
+        engine_source = any(
+            (directory / name).exists()
+            for name in ("adapter", "engine", "image", "kernels", "patches", "scripts")
+        )
+        if engine_source:
+            if not adapter.is_file() or adapter.is_symlink():
+                raise ManifestError(f"Engine protocol adapter is missing: {candidate}")
+            if not dockerfile.is_file() or dockerfile.is_symlink():
+                raise ManifestError(f"Engine OCI Dockerfile is missing: {candidate}")
         benchmark_path = directory / "benchmark.json"
         benchmark = read_object(benchmark_path) if benchmark_path.is_file() else None
         if benchmark is not None:
@@ -968,10 +1036,19 @@ def generate(
                 },
                 "provenance": item["release_metadata"]["provenance"],
                 "verification": {
-                    "method": "community-consensus-v1",
+                    "method": (
+                        "maintainer-waiver-one-independent-v1"
+                        if consensus.get("waiver") is not None
+                        else "community-two-independent-v1"
+                    ),
                     "consensus_path": consensus_path,
                     "consensus_sha256": sha256_file(root / consensus_path),
                     "verifiers": consensus["verifiers"],
+                    **(
+                        {"waiver": consensus["waiver"]}
+                        if consensus.get("waiver") is not None
+                        else {}
+                    ),
                 },
             }
             existing = releases.get(runtime["version"])

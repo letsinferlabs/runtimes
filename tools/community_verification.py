@@ -15,17 +15,14 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 POLICY = {
-    "id": "letsinfer-community-consensus-v1",
-    "initial_verifiers": 3,
-    "expanded_verifiers": 5,
-    "aggregate_tps_cv_max": 0.075,
-    "decode_tps_cv_max": 0.075,
-    "ttft_seconds_cv_max": 0.10,
+    "id": "letsinfer-two-independent-passes-v1",
+    "required_verifiers": 2,
     "author_votes_count": False,
     "duplicate_github_accounts_count": False,
     "duplicate_devices_count": False,
+    "blocking_failures_are_terminal": True,
 }
 SHA256 = "0123456789abcdef"
 
@@ -77,14 +74,11 @@ def _metric_stats(values: Sequence[float]) -> dict[str, float]:
     if not values or any(not math.isfinite(value) or value <= 0 for value in values):
         raise ConsensusError("consensus metrics must be positive finite values")
     mean = statistics.fmean(values)
-    deviation = statistics.stdev(values) if len(values) > 1 else 0.0
     return {
         "mean": mean,
         "median": statistics.median(values),
         "minimum": min(values),
         "maximum": max(values),
-        "standard_deviation": deviation,
-        "coefficient_of_variation": deviation / mean,
     }
 
 
@@ -239,9 +233,7 @@ def build_consensus(
         for item in active
         if item["record"].get("counts_toward_consensus") is True
     ]
-    if not counted:
-        raise ConsensusError("no independent verification votes are available")
-    successful = [
+    eligible_successful = [
         item
         for item in counted
         if all(
@@ -249,6 +241,14 @@ def build_consensus(
             for name in ("correctness", "safety", "restoration")
         )
     ]
+    required = POLICY["required_verifiers"]
+    successful = sorted(
+        eligible_successful,
+        key=lambda item: (
+            int(item["record"]["submitted_at_unix"]),
+            str(item["record"]["verification_id"]),
+        ),
+    )[:required]
     key_set: set[tuple[str, str, bool]] | None = None
     rows_by_vote: list[dict[tuple[str, str, bool], Mapping[str, Any]]] = []
     for item in successful:
@@ -260,13 +260,8 @@ def build_consensus(
         rows_by_vote.append(rows)
     key_set = set() if key_set is None else key_set
 
-    metrics = {
-        "aggregate_tps": POLICY["aggregate_tps_cv_max"],
-        "decode_tps": POLICY["decode_tps_cv_max"],
-        "ttft_seconds": POLICY["ttft_seconds_cv_max"],
-    }
+    metrics = ("aggregate_tps", "decode_tps", "ttft_seconds")
     aggregate_rows: list[dict[str, Any]] = []
-    agreement = bool(successful)
     for key in sorted(key_set):
         summary: dict[str, Any] = {
             "workload": key[0],
@@ -274,7 +269,7 @@ def build_consensus(
             "is_prefix_cached": key[2],
             "metrics": {},
         }
-        for metric, limit in metrics.items():
+        for metric in metrics:
             values: list[float] = []
             for rows in rows_by_vote:
                 value = rows[key].get(metric)
@@ -287,21 +282,19 @@ def build_consensus(
                     raise ConsensusError(f"verification {metric} is invalid")
                 values.append(float(value))
             stats = _metric_stats(values)
-            stats["cv_limit"] = float(limit)
-            stats["within_tolerance"] = stats["coefficient_of_variation"] <= limit
-            agreement = agreement and stats["within_tolerance"]
             summary["metrics"][metric] = stats
         aggregate_rows.append(summary)
 
-    safety_passed = all(
-        item["record"][name]["passed"]
-        for item in active
-        for name in ("correctness", "safety", "restoration")
-    )
-    required = (
-        POLICY["initial_verifiers"] if agreement else POLICY["expanded_verifiers"]
-    )
-    passed = len(counted) >= required and agreement and safety_passed
+    blocking = [
+        item
+        for item in accepted_comments
+        if any(
+            item["record"][name]["passed"] is False
+            for name in ("correctness", "safety", "restoration")
+        )
+    ]
+    safety_passed = not blocking
+    passed = len(successful) >= required and safety_passed
 
     official_values = [
         row["metrics"]["aggregate_tps"]["mean"]
@@ -315,8 +308,21 @@ def build_consensus(
             sum(math.log(value) for value in official_values) / len(official_values)
         )
     )
+    active_ids = {
+        str(item["record"]["verification_id"])
+        for item in active
+    }
+    displayed = [
+        *active,
+        *[
+            item
+            for item in blocking
+            if str(item["record"]["verification_id"]) not in active_ids
+        ],
+    ]
+    displayed.sort(key=lambda item: str(item["record"]["verification_id"]))
     verifications: list[dict[str, Any]] = []
-    for item in active:
+    for item in displayed:
         record = item["record"]
         verifications.append(
             {
@@ -351,18 +357,20 @@ def build_consensus(
         "policy": POLICY,
         "qualification": {
             "passed": passed,
-            "independent_verifiers": len(counted),
+            "independent_verifiers": len(successful),
             "required_verifiers": required,
-            "agreement_passed": agreement,
             "safety_passed": safety_passed,
+            "blocking_failures": [
+                str(item["record"]["verification_id"]) for item in blocking
+            ],
         },
         "verifiers": [
             identity(item["record"]["verifier"], "verification.verifier")
-            for item in counted
+            for item in successful
         ],
         "results": aggregate_rows,
         "score": {
-            "policy": "letsinfer-throughput-geomean-of-consensus-means-v1",
+            "policy": "letsinfer-throughput-geomean-of-verifier-means-v1",
             "aggregate_tps": official_score,
         },
         "verifications": verifications,
@@ -442,7 +450,11 @@ def canonical_accepted_comment(item: Mapping[str, Any]) -> str:
         result = f"{float(throughput):.3f} aggregate tok/s" + (
             "" if change is None else f" · {float(change):+.2f}% vs baseline"
         )
-        disposition = "was validated and counted."
+        disposition = (
+            "was validated and counted."
+            if record.get("counts_toward_consensus") is True
+            else "was validated as informational evidence."
+        )
     else:
         result = f"blocking `{failure.get('category')}` failure"
         disposition = "was validated as blocking evidence."
@@ -463,7 +475,10 @@ def tally_comment(consensus: Mapping[str, Any]) -> str:
     qualification = consensus.get("qualification")
     if not isinstance(qualification, Mapping):
         raise ConsensusError("consensus qualification is unavailable")
-    state = "QUALIFIED" if qualification.get("passed") is True else "COLLECTING"
+    if qualification.get("safety_passed") is not True:
+        state = "FAILED"
+    else:
+        state = "QUALIFIED" if qualification.get("passed") is True else "COLLECTING"
     lines = [
         "## Let’s Infer community verification",
         "",
@@ -473,20 +488,23 @@ def tally_comment(consensus: Mapping[str, Any]) -> str:
         f"**Runtime:** `{consensus.get('candidate_id')}@{consensus.get('runtime_version')}`  ",
         f"**Subject:** `{consensus.get('subject', {}).get('execution_sha256')}`",
         "",
-        "| Verifier | Aggregate tok/s | Change vs baseline | Verification |",
-        "|---|---:|---:|---|",
+        "| Verifier | Role | Aggregate tok/s | Change vs baseline | Verification |",
+        "|---|---|---:|---:|---|",
     ]
     for verification in consensus.get("verifications", []):
-        if verification.get("counts_toward_consensus") is not True:
-            continue
         user = verification["user_id"]
+        role = (
+            "independent"
+            if verification.get("counts_toward_consensus") is True
+            else "informational"
+        )
         if verification.get("score") is None:
             failure = verification.get("evidence", {}).get(
                 "failure", "blocking failure"
             )
             lines.append(
                 f"| [@{user['github_login']}](https://github.com/{user['github_login']}) "
-                f"| — | **BLOCKED:** {failure} "
+                f"| {role} | — | **BLOCKED:** {failure} "
                 f"| `{verification['verification_id'][:12]}` |"
             )
             continue
@@ -494,7 +512,7 @@ def tally_comment(consensus: Mapping[str, Any]) -> str:
         change = overall.get("change_percent")
         lines.append(
             f"| [@{user['github_login']}](https://github.com/{user['github_login']}) "
-            f"| {float(overall['aggregate_tps_geomean']):.3f} "
+            f"| {role} | {float(overall['aggregate_tps_geomean']):.3f} "
             f"| {'—' if change is None else f'{float(change):+.2f}%'} "
             f"| `{verification['verification_id'][:12]}` |"
         )
@@ -507,7 +525,7 @@ def tally_comment(consensus: Mapping[str, Any]) -> str:
                 if consensus["score"]["aggregate_tps"] is None
                 else f"{float(consensus['score']['aggregate_tps']):.3f}  "
             ),
-            f"**Agreement:** {'PASS' if qualification.get('agreement_passed') else 'MORE DATA NEEDED'}  ",
+            f"**Safety and correctness:** {'PASS' if qualification.get('safety_passed') else 'BLOCKED'}  ",
             f"**Consensus ID:** `{consensus['consensus_id']}`",
         ]
     )
