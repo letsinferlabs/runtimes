@@ -8,6 +8,7 @@ import hashlib
 import json
 import pathlib
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -272,6 +273,16 @@ class ManifestToolTests(unittest.TestCase):
         misplaced = existing + readme_onboarding.launch_block("model")
         with self.assertRaisesRegex(readme_onboarding.ReadmeError, "misplaced"):
             readme_onboarding.prepend(misplaced, "model")
+
+    def test_runtime_readme_onboarding_supports_documented_script_entrypoint(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "tools/readme_onboarding.py"), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("--candidate", completed.stdout)
 
     def test_signature_document_is_ed25519_and_content_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

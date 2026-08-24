@@ -8,7 +8,10 @@ import json
 import pathlib
 import re
 
-from tools import changed_candidates
+if __package__:
+    from tools import changed_candidates
+else:
+    import changed_candidates
 
 
 SITE_URL = "https://letsinfer.ai/"
