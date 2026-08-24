@@ -71,8 +71,8 @@
       "version": 2
     },
     "oci": {
-      "reference": "ghcr.io/letsinferlabs/engines/sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark@sha256:1127c73b7b254b3ecfa0c4d8bab813919deeab5bbd32a370367994c6e81d1996",
-      "immutable_id": "sha256:fbbe115c5e24267939ea036423e4d7264b8464ee632f8bc722ac66a4b2a22bce",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:1a0c521d4064fa6293cc6091336348b8dd3e512b792fd3a58050e5ae9f0acada",
+      "immutable_id": "sha256:62f05aaff0181a99a76a0e98764cdac0793a4e792c3ada8467323d6bbfab51c6",
       "base": "ghcr.io/0xsero/deepseek-v4-flash-0731-spark-sparkinfer@sha256:2e077489a83a0360952828051fe7f7a32c1801e5ce8436d85f7267583d614ff4"
     }
   },
@@ -169,7 +169,7 @@
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
         "model_sha256": "a307a57164e5e934a4d092f5d8b34a236e08ecdd6282420a3bf2b5e15239874d",
-        "engine_image_sha256": "fbbe115c5e24267939ea036423e4d7264b8464ee632f8bc722ac66a4b2a22bce",
+        "engine_image_sha256": "62f05aaff0181a99a76a0e98764cdac0793a4e792c3ada8467323d6bbfab51c6",
         "render_contract": "openai-chat-user-v1"
       },
       "request": {
