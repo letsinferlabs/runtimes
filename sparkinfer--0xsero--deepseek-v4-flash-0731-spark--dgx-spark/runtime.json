@@ -128,9 +128,7 @@
         "id": "letsinfer-code-prose",
         "version": 7
       },
-      "domains": [
-        "code"
-      ],
+      "domains": ["code"],
       "execution": {
         "isolation": "fresh-matrix",
         "prefix_state": "shared",
@@ -186,38 +184,22 @@
         {
           "id": "32k",
           "prompt_tokens": 32768,
-          "concurrencies": [
-            1,
-            2,
-            4
-          ]
+          "concurrencies": [1, 2, 4]
         },
         {
           "id": "64k",
           "prompt_tokens": 65536,
-          "concurrencies": [
-            1,
-            2,
-            4
-          ]
+          "concurrencies": [1, 2, 4]
         },
         {
           "id": "128k",
           "prompt_tokens": 131072,
-          "concurrencies": [
-            1,
-            2,
-            4
-          ]
+          "concurrencies": [1, 2, 4]
         },
         {
           "id": "256k",
           "prompt_tokens": 260000,
-          "concurrencies": [
-            1,
-            2,
-            4
-          ]
+          "concurrencies": [1, 2, 4]
         }
       ]
     }
