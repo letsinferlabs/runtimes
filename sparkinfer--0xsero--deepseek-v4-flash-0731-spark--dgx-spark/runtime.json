@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-  "version": "0.1.0-rc.27",
+  "version": "0.1.0-rc.28",
   "logical_model": "deepseek-v4-flash",
   "target": {
     "id": "dgx-spark",
@@ -62,7 +62,7 @@
       "MAX_CUDAGRAPH_CAPTURE_SIZE": "7",
       "CUDAGRAPH_CAPTURE_SIZES": "7",
       "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS": "0",
-      "DEFAULT_CHAT_TEMPLATE_KWARGS_THINKING": "true",
+      "DEFAULT_CHAT_TEMPLATE_KWARGS_THINKING": "false",
       "DEFAULT_CHAT_TEMPLATE_KWARGS_EFFORT": "max",
       "OMP_NUM_THREADS": "16"
     },
