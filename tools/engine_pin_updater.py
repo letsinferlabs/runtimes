@@ -458,15 +458,17 @@ def apply_request(value: dict[str, Any], client: GitHubClient) -> dict[str, str]
         raise UpdateError("runtime.json is invalid JSON") from error
     if not isinstance(before, dict):
         raise UpdateError("runtime.json must contain one object")
-    after = copy.deepcopy(before)
-    pin_engine.update(after, request["engine_reference"], request["engine_config_digest"])
+    after, changed, pinned = pin_engine.update_bytes(
+        content, request["engine_reference"], request["engine_config_digest"]
+    )
+    if not changed:
+        raise UpdateError("Engine pin request is already present")
     validate_transition(
         before,
         after,
         reference=request["engine_reference"],
         immutable_id=request["engine_config_digest"],
     )
-    pinned = pin_engine.readable_bytes(after)
     if (
         git_blob_sha(pinned) != request["runtime_blob_sha_after"]
         or sha256_digest(pinned) != request["runtime_sha256_after"]

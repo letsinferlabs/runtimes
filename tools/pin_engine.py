@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import pathlib
@@ -55,6 +56,54 @@ def update(runtime: dict[str, Any], reference: str, immutable_id: str) -> bool:
     return changed
 
 
+def update_bytes(
+    content: bytes, reference: str, immutable_id: str
+) -> tuple[dict[str, Any], bool, bytes]:
+    """Update only the three owned JSON string values, preserving other bytes."""
+    try:
+        before = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PinError(f"cannot read runtime: {error}") from error
+    if not isinstance(before, dict):
+        raise PinError("runtime must contain one JSON object")
+    after = copy.deepcopy(before)
+    changed = update(after, reference, immutable_id)
+    if not changed:
+        return after, False, content
+
+    paths = (
+        ("engine", "oci", "reference"),
+        ("engine", "oci", "immutable_id"),
+        ("benchmark", "contract", "tokenizer", "engine_image_sha256"),
+    )
+    pinned = content
+    for path in paths:
+        old: Any = before
+        new: Any = after
+        for key in path:
+            old = old[key]
+            new = new[key]
+        if old == new:
+            continue
+        if not isinstance(old, str) or not isinstance(new, str):
+            raise PinError("Engine pin fields must contain JSON strings")
+        old_token = json.dumps(old, ensure_ascii=False).encode("utf-8")
+        new_token = json.dumps(new, ensure_ascii=False).encode("utf-8")
+        if pinned.count(old_token) != 1:
+            raise PinError(
+                f"Engine pin field {'.'.join(path)} is not byte-unique"
+            )
+        pinned = pinned.replace(old_token, new_token, 1)
+
+    try:
+        reconstructed = json.loads(pinned)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PinError("byte-preserving Engine pin produced invalid JSON") from error
+    if reconstructed != after:
+        raise PinError("byte-preserving Engine pin changed unrelated JSON content")
+    return after, True, pinned
+
+
 def write_atomic(path: pathlib.Path, data: bytes) -> None:
     descriptor, temporary_value = tempfile.mkstemp(
         prefix=f".{path.name}.", dir=path.parent
@@ -77,13 +126,13 @@ def pin_runtime(
     if path.is_symlink() or not path.is_file() or path.name != "runtime.json":
         raise PinError("runtime must be a regular runtime.json")
     try:
-        runtime = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        runtime, changed, pinned = update_bytes(
+            path.read_bytes(), reference, immutable_id
+        )
+    except OSError as error:
         raise PinError(f"cannot read runtime: {error}") from error
-    if not isinstance(runtime, dict):
-        raise PinError("runtime must contain one JSON object")
-    changed = update(runtime, reference, immutable_id)
-    write_atomic(path, readable_bytes(runtime))
+    if changed:
+        write_atomic(path, pinned)
     if changed:
         for name in ("benchmark.json", "benchmark.consensus.json"):
             evidence = path.parent / name
