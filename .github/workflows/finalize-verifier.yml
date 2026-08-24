@@ -50,7 +50,8 @@ jobs:
                   or run.get("head_branch") != "main"
                   or re.fullmatch(r"[0-9a-f]{40}", str(workflow_sha)) is None):
               raise SystemExit("triggering build run identity is invalid")
-          if len(artifacts) != 1 or artifacts[0].get("expired") is not False:
+          if (len(artifacts) != 1 or artifacts[0].get("expired") is not False
+                  or re.fullmatch(r"sha256:[0-9a-f]{64}", str(artifacts[0].get("digest"))) is None):
               raise SystemExit("triggering build run artifact set is invalid")
           name=artifacts[0].get("name")
           match=re.fullmatch(r"raw-verifier-pr-([1-9][0-9]*)-([0-9a-f]{40})", str(name))
@@ -59,6 +60,7 @@ jobs:
           pathlib.Path(sys.argv[3]).write_text(json.dumps({
               "number": int(match.group(1)), "head": match.group(2),
               "raw_name": name, "workflow_sha": workflow_sha,
+              "raw_digest": artifacts[0]["digest"],
           }))
           PY
           number=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["number"])' "$RUNNER_TEMP/identity.json")
@@ -77,6 +79,8 @@ jobs:
               for key, value in identity.items():
                   output.write(f"{key}={value}\n")
               output.write(f"base={base}\n")
+              output.write(f"same_repo={str(pull.get('head', {}).get('repo', {}).get('full_name') == pull.get('base', {}).get('repo', {}).get('full_name')).lower()}\n")
+              output.write(f"head_ref={pull.get('head', {}).get('ref')}\n")
           PY
       - name: Download the exact raw build artifact
         env:
@@ -117,6 +121,8 @@ jobs:
           BUILD_WORKFLOW_SHA: ${{ steps.event.outputs.workflow_sha }}
           BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
           PR_NUMBER: ${{ steps.event.outputs.number }}
+          FINALIZER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RAW_ARTIFACT_DIGEST: ${{ steps.event.outputs.raw_digest }}
           PYTHONDONTWRITEBYTECODE: "1"
         working-directory: trusted
         run: |
@@ -168,9 +174,27 @@ jobs:
             current_reference=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["reference"])' "../proposal/$candidate/runtime.json")
             current_config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["immutable_id"])' "../proposal/$candidate/runtime.json")
             if test "$reference" != "$current_reference" || test "$config" != "$current_config"; then
+              mkdir "$RUNNER_TEMP/pin"
+              cp "../proposal/$candidate/runtime.json" "$RUNNER_TEMP/runtime-before.json"
+              runtime_blob=$(git -C ../proposal rev-parse "$HEAD_SHA:$candidate/runtime.json")
+              [[ "$runtime_blob" =~ ^[0-9a-f]{40}$ ]]
               python3 tools/pin_engine.py --runtime "../proposal/$candidate/runtime.json" \
                 --reference "$reference" --immutable-id "$config"
-              git -C ../proposal diff --binary -- "$candidate/runtime.json" > "$RUNNER_TEMP/engine-pin.patch"
+              git -C ../proposal diff --binary -- "$candidate/runtime.json" > "$RUNNER_TEMP/pin/engine-pin.patch"
+              python3 tools/engine_pin_updater.py request \
+                --before "$RUNNER_TEMP/runtime-before.json" \
+                --after "../proposal/$candidate/runtime.json" \
+                --patch "$RUNNER_TEMP/pin/engine-pin.patch" \
+                --pull "$RUNNER_TEMP/pull.json" \
+                --build "$RUNNER_TEMP/raw/build.json" \
+                --audit "$RUNNER_TEMP/raw/candidate-audit.json" \
+                --repositories "$RUNNER_TEMP/repositories.json" \
+                --engine-plan "$RUNNER_TEMP/engine-plan.json" \
+                --runtime-blob-sha-before "$runtime_blob" \
+                --finalizer-run-id "$GITHUB_RUN_ID" \
+                --finalizer-workflow-sha "$FINALIZER_WORKFLOW_SHA" \
+                --raw-artifact-digest "$RAW_ARTIFACT_DIGEST" \
+                --output "$RUNNER_TEMP/pin/engine-pin-request.json"
               echo "changed=true" >> "$GITHUB_OUTPUT"
             else
               echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -183,13 +207,18 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: engine-pin-pr-${{ steps.event.outputs.number }}-${{ steps.event.outputs.head }}
-          path: ${{ runner.temp }}/engine-pin.patch
+          path: ${{ runner.temp }}/pin
           if-no-files-found: error
           retention-days: 30
+      - name: Attest deterministic Engine pin request
+        if: steps.pin.outputs.changed == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/pin/*
       - name: Require the production Engine pin before verification
         if: steps.pin.outputs.changed == 'true'
         run: |
-          echo "Apply the uploaded deterministic Engine pin patch and update the PR." >&2
+          echo "The trusted Engine pin updater will process this attested request." >&2
           exit 1
       - name: Repack exact proposal with trusted core
         if: steps.pin.outputs.changed != 'true'
@@ -238,6 +267,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ steps.event.outputs.head }}
           PIN_CHANGED: ${{ steps.pin.outputs.changed }}
+          SAME_REPO: ${{ steps.event.outputs.same_repo }}
+          FINALIZER_RUN_ID: ${{ github.run_id }}
+          PR_NUMBER: ${{ steps.event.outputs.number }}
           JOB_STATUS: ${{ job.status }}
         working-directory: trusted
         run: |
@@ -246,8 +278,13 @@ jobs:
           title="Verifier bundle failed"
           summary="The trusted finalizer rejected this proposal or its build output."
           if test "$PIN_CHANGED" = true; then
-            title="Deterministic Engine pin required"
-            summary="Apply the engine-pin artifact to runtime.json; the next head will receive a verifier bundle."
+            if test "$SAME_REPO" = true; then
+              title="Trusted Engine pin update queued"
+              summary="The attested deterministic pin request is queued for the repository-scoped updater; its bot commit will trigger exact-head verification."
+            else
+              title="Deterministic Engine pin requires fork update"
+              summary="Download engine-pin-pr-$PR_NUMBER-$HEAD_SHA from finalizer run $FINALIZER_RUN_ID, apply engine-pin.patch, and push the fork branch. No base-repository credential is sent to forks."
+            fi
           elif test "$JOB_STATUS" = success; then
             conclusion=success
             title="Verifier bundle is ready"
