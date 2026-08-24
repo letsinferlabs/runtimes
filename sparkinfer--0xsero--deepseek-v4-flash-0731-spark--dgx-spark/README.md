@@ -37,14 +37,16 @@ letsinfer install deepseek-v4-flash \
 letsinfer benchmark deepseek-v4-flash
 ```
 
-The schema-4 contract runs the canonical code workload once at C1, C2, and C4
-for 32K, 64K, 128K, and a 260,000-token prompt under the 262,144-token cap. It
-uses one fresh process/store for the complete matrix and intentionally retains
-prefix state between cells. Each context runs C1, C2, then C4 while all four
-distinct streams share the complete ledger prefix, so the matrix measures
-real prefix-cache reuse without repeating four cold long prefills. Benchmark
-claims are added only from a complete immutable evidence directory bound to
-the measured commit.
+The schema-5 contract first runs one fixed short-code C1 and one fixed
+short-prose C1 workload with 512-token completions. It then runs the canonical
+code workload once at C1, C2, and C4 for 32K, 64K, 128K, and a 260,000-token
+prompt under the 262,144-token cap: 14 cells total. One fresh process/store
+serves the complete matrix and intentionally retains prefix state between
+cells. Each long context runs C1, C2, then C4 while all four distinct streams
+share the complete ledger prefix, so the matrix measures real prefix-cache
+reuse without repeating four cold long prefills. Benchmark claims are added
+only from a complete immutable evidence directory bound to the measured
+commit.
 
 ## Upstream sources
 
