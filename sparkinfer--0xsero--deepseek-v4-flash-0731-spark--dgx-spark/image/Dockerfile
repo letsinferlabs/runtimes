@@ -67,10 +67,10 @@ RUN chmod 0555 /opt/letsinfer/bin/engine-adapter /opt/letsinfer/bin/sparkinfer-s
       /opt/letsinfer/lib/engine_frontend.py \
       /opt/runtime-venv/lib/python3.12/site-packages/letsinfer_prefix_connector/__init__.py \
       /opt/runtime-venv/lib/python3.12/site-packages/letsinfer_prefix_connector/connector.py && \
-    /opt/runtime-venv/bin/python -c \
+    /opt/runtime-venv/bin/python -B -c \
       'from letsinfer_prefix_store import PrefixStore; from letsinfer_prefix_connector import LetsInferPrefixConnector; store = PrefixStore("/tmp/letsinfer-prefix-store-selftest", 1048576, 60, 4, 0, True); assert store is not None; assert LetsInferPrefixConnector.__name__ == "LetsInferPrefixConnector"' && \
     rm -rf /tmp/letsinfer-prefix-store-selftest && \
-    /opt/runtime-venv/bin/python -m compileall --invalidation-mode checked-hash -q \
+    /opt/runtime-venv/bin/python -m compileall --invalidation-mode checked-hash -f -q \
       /opt/runtime-venv/lib/python3.12/site-packages/letsinfer_prefix_connector
 
 LABEL org.opencontainers.image.source="https://github.com/letsinferlabs/runtimes" \
