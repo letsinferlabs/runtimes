@@ -1,0 +1,258 @@
+name: Finalize verifier artifact
+
+on:
+  workflow_run:
+    workflows: [Build verifier artifact]
+    types: [completed]
+
+concurrency:
+  group: verifier-finalize-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  artifact-metadata: write
+  attestations: write
+  checks: write
+  contents: read
+  id-token: write
+
+jobs:
+  finalize:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ${{ vars.LETSINFER_FINALIZER_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out trusted finalizer code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Resolve and validate the triggering proposal
+        id: event
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" > "$RUNNER_TEMP/build-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
+          python3 - "$RUNNER_TEMP/build-run.json" "$RUNNER_TEMP/artifacts.json" \
+            "$RUNNER_TEMP/identity.json" <<'PY'
+          import json, os, pathlib, re, sys
+          run=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          artifacts=json.loads(pathlib.Path(sys.argv[2]).read_text()).get("artifacts", [])
+          workflow_sha=run.get("head_sha")
+          if (run.get("event") != "workflow_run" or run.get("conclusion") != "success"
+                  or run.get("path") != ".github/workflows/build-verifier.yml"
+                  or run.get("head_branch") != "main"
+                  or re.fullmatch(r"[0-9a-f]{40}", str(workflow_sha)) is None):
+              raise SystemExit("triggering build run identity is invalid")
+          if len(artifacts) != 1 or artifacts[0].get("expired") is not False:
+              raise SystemExit("triggering build run artifact set is invalid")
+          name=artifacts[0].get("name")
+          match=re.fullmatch(r"raw-verifier-pr-([1-9][0-9]*)-([0-9a-f]{40})", str(name))
+          if match is None:
+              raise SystemExit("triggering build artifact name is invalid")
+          pathlib.Path(sys.argv[3]).write_text(json.dumps({
+              "number": int(match.group(1)), "head": match.group(2),
+              "raw_name": name, "workflow_sha": workflow_sha,
+          }))
+          PY
+          number=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["number"])' "$RUNNER_TEMP/identity.json")
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$number" > "$RUNNER_TEMP/pull.json"
+          python3 - "$RUNNER_TEMP/identity.json" "$RUNNER_TEMP/pull.json" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, re, sys
+          identity=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          pull=json.loads(pathlib.Path(sys.argv[2]).read_text())
+          base=pull.get("base", {}).get("sha")
+          if (pull.get("state") != "open" or pull.get("draft") is True
+                  or pull.get("base", {}).get("ref") != "main"
+                  or pull.get("head", {}).get("sha") != identity["head"]
+                  or re.fullmatch(r"[0-9a-f]{40}", str(base)) is None):
+              raise SystemExit("triggering pull request identity is stale or invalid")
+          with pathlib.Path(sys.argv[3]).open("a") as output:
+              for key, value in identity.items():
+                  output.write(f"{key}={value}\n")
+              output.write(f"base={base}\n")
+          PY
+      - name: Download the exact raw build artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
+          RAW_NAME: ${{ steps.event.outputs.raw_name }}
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/raw"
+          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$RAW_NAME" --dir "$RUNNER_TEMP/raw"
+      - name: Check out the proposal as untrusted data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.event.outputs.head }}
+          path: proposal
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require immutable released core contract
+        env:
+          CORE_SHA: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$CORE_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - name: Check out trusted core pack contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: letsinferlabs/letsinfer
+          ref: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
+          path: core-contract
+          persist-credentials: false
+      - name: Validate metadata and prepare a pin patch when needed
+        id: pin
+        env:
+          HEAD_SHA: ${{ steps.event.outputs.head }}
+          BASE_SHA: ${{ steps.event.outputs.base }}
+          BUILD_WORKFLOW_SHA: ${{ steps.event.outputs.workflow_sha }}
+          BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
+          PR_NUMBER: ${{ steps.event.outputs.number }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/raw/build.json" "$GITHUB_REPOSITORY" \
+            "$PR_NUMBER" "$HEAD_SHA" "$BASE_SHA" "$GITHUB_OUTPUT" <<'PY'
+          import json, os, pathlib, re, sys
+          value=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          base=value.get("proposal_base_sha")
+          if (value.get("schema_version") != 1 or value.get("repository") != sys.argv[2]
+                  or value.get("pull_request") != int(sys.argv[3])
+                  or value.get("proposal_head_sha") != sys.argv[4]
+                  or not isinstance(base, str) or re.fullmatch(r"[0-9a-f]{40}", base) is None
+                  or base != sys.argv[5]
+                  or value.get("build_workflow_sha") != os.environ["BUILD_WORKFLOW_SHA"]
+                  or value.get("build_workflow_run_id") != int(os.environ["BUILD_RUN_ID"])):
+              raise SystemExit("raw artifact metadata differs from triggering run")
+          with pathlib.Path(sys.argv[6]).open("a") as output:
+              output.write(f"candidate={value['candidate']}\nmode={value['mode']}\nbase={base}\n")
+          PY
+          base=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["proposal_base_sha"])' "$RUNNER_TEMP/raw/build.json")
+          python3 tools/candidate_policy.py classify --root ../proposal \
+            --base "$base" --head "$HEAD_SHA" \
+            --output "$RUNNER_TEMP/trusted-classification.json"
+          candidate=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["candidate"])' "$RUNNER_TEMP/trusted-classification.json")
+          python3 tools/candidate_policy.py repositories --root ../proposal \
+            --base "$base" --candidate "$candidate" \
+            --output "$RUNNER_TEMP/repositories.json"
+          python3 - "$RUNNER_TEMP/raw/build.json" "$RUNNER_TEMP/raw/classification.json" \
+            "$RUNNER_TEMP/trusted-classification.json" <<'PY'
+          import json, pathlib, sys
+          value=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          untrusted_classification=json.loads(pathlib.Path(sys.argv[2]).read_text())
+          trusted_classification=json.loads(pathlib.Path(sys.argv[3]).read_text())
+          if (untrusted_classification != trusted_classification
+                  or value.get("candidate") != trusted_classification.get("candidate")
+                  or value.get("mode") != trusted_classification.get("mode")):
+              raise SystemExit("raw artifact metadata differs from triggering run")
+          PY
+          if test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["mode"])' "$RUNNER_TEMP/raw/build.json")" = build-engine; then
+            candidate=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["candidate"])' "$RUNNER_TEMP/raw/build.json")
+            platform=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_platform"])' "$RUNNER_TEMP/raw/candidate-audit.json")
+            engine_repository=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine_repository"])' "$RUNNER_TEMP/repositories.json")
+            python3 tools/oci_layout.py inspect --archive "$RUNNER_TEMP/raw/engine.oci.tar" \
+              --platform "$platform" --repository "$engine_repository" \
+              --output "$RUNNER_TEMP/engine-plan.json"
+            reference=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["reference"])' "$RUNNER_TEMP/engine-plan.json")
+            config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$RUNNER_TEMP/engine-plan.json")
+            current_reference=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["reference"])' "../proposal/$candidate/runtime.json")
+            current_config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["immutable_id"])' "../proposal/$candidate/runtime.json")
+            if test "$reference" != "$current_reference" || test "$config" != "$current_config"; then
+              python3 tools/pin_engine.py --runtime "../proposal/$candidate/runtime.json" \
+                --reference "$reference" --immutable-id "$config"
+              git -C ../proposal diff --binary -- "$candidate/runtime.json" > "$RUNNER_TEMP/engine-pin.patch"
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload deterministic Engine pin patch
+        if: steps.pin.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: engine-pin-pr-${{ steps.event.outputs.number }}-${{ steps.event.outputs.head }}
+          path: ${{ runner.temp }}/engine-pin.patch
+          if-no-files-found: error
+          retention-days: 30
+      - name: Require the production Engine pin before verification
+        if: steps.pin.outputs.changed == 'true'
+        run: |
+          echo "Apply the uploaded deterministic Engine pin patch and update the PR." >&2
+          exit 1
+      - name: Repack exact proposal with trusted core
+        if: steps.pin.outputs.changed != 'true'
+        env:
+          CANDIDATE: ${{ steps.pin.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          core-contract/bin/letsinfer pack "proposal/$CANDIDATE" \
+            --output "$RUNNER_TEMP/raw/runtime-trusted.letsinfer"
+      - name: Finalize the verifier bundle without executing proposal code
+        if: steps.pin.outputs.changed != 'true'
+        env:
+          FINALIZER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          LETSINFER_CORE_ROOT: ${{ github.workspace }}/core-contract
+          PYTHONDONTWRITEBYTECODE: "1"
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          tree=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["candidate_tree_sha256"])' "$RUNNER_TEMP/raw/candidate-audit.json")
+          python3 tools/verifier_bundle.py finalize --root ../proposal --raw "$RUNNER_TEMP/raw" \
+            --output "$RUNNER_TEMP/bundle" --candidate "${{ steps.pin.outputs.candidate }}" \
+            --mode "${{ steps.pin.outputs.mode }}" --pull-request "${{ steps.event.outputs.number }}" \
+            --proposal-head-sha "${{ steps.event.outputs.head }}" --proposal-tree-sha "$tree" \
+            --proposal-base-sha "${{ steps.pin.outputs.base }}" \
+            --build-run-id "${{ github.event.workflow_run.id }}" \
+            --build-workflow-sha "${{ steps.event.outputs.workflow_sha }}" \
+            --finalizer-run-id "$GITHUB_RUN_ID" \
+            --finalizer-workflow-sha "$FINALIZER_WORKFLOW_SHA"
+      - name: Upload immutable verifier bundle
+        if: steps.pin.outputs.changed != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verification-bundle-pr-${{ steps.event.outputs.number }}-${{ steps.event.outputs.head }}
+          path: ${{ runner.temp }}/bundle
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Attest verifier bundle payloads
+        if: steps.pin.outputs.changed != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/bundle/*
+      - name: Publish verifier bundle check
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.event.outputs.head }}
+          PIN_CHANGED: ${{ steps.pin.outputs.changed }}
+          JOB_STATUS: ${{ job.status }}
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          conclusion=failure
+          title="Verifier bundle failed"
+          summary="The trusted finalizer rejected this proposal or its build output."
+          if test "$PIN_CHANGED" = true; then
+            title="Deterministic Engine pin required"
+            summary="Apply the engine-pin artifact to runtime.json; the next head will receive a verifier bundle."
+          elif test "$JOB_STATUS" = success; then
+            conclusion=success
+            title="Verifier bundle is ready"
+            summary="Verifiers can download the exact immutable runtime and Engine artifact through letsinfer benchmark verify."
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/check-runs" --method POST --input - <<JSON
+          {"name":"runtime/verifier-bundle","head_sha":"$HEAD_SHA","status":"completed","conclusion":"$conclusion","output":{"title":"$title","summary":"$summary"}}
+          JSON

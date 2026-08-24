@@ -1,0 +1,659 @@
+#!/usr/bin/env python3
+"""Trusted maintainer-only publisher for one reviewed runtime proposal."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import pathlib
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import zipfile
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+if __package__:
+    from tools import community_verification, generate_manifest, oci_artifact, oci_layout
+    from tools import verification_bot, verifier_bundle
+else:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from tools import community_verification, generate_manifest, oci_artifact, oci_layout
+    from tools import verification_bot, verifier_bundle
+
+
+REPOSITORY = "letsinferlabs/runtimes"
+CHECK_NAME = "runtime/shipit"
+RECEIPT_MARKER = "<!-- letsinfer-shipit:v1 -->"
+PLAIN_COMMAND = "/shipit"
+BYPASS_COMMAND = "/shipit --bypass-verifiers"
+ALLOWED_BOT_FILES = {"manifest.json"}
+MIN_GH_VERSION = (2, 97, 0)
+FINALIZER_CERT_IDENTITY = (
+    "https://github.com/letsinferlabs/runtimes/"
+    ".github/workflows/finalize-verifier.yml@refs/heads/main"
+)
+
+
+class ShipitError(RuntimeError):
+    pass
+
+
+def canonical_bytes(value: Any) -> bytes:
+    return (
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        + "\n"
+    ).encode("utf-8")
+
+
+def parse_command(body: str) -> tuple[bool, str | None]:
+    normalized = body.replace("\r\n", "\n").strip()
+    if normalized == PLAIN_COMMAND:
+        return False, None
+    lines = normalized.splitlines()
+    if len(lines) == 2 and lines[0].strip() == BYPASS_COMMAND:
+        prefix = "Reason:"
+        if not lines[1].startswith(prefix):
+            raise ShipitError("bypass requires `Reason: ...` on the second line")
+        reason = lines[1][len(prefix) :].strip()
+        if not reason or len(reason.encode("utf-8")) > 1000:
+            raise ShipitError("bypass reason must contain 1 to 1000 UTF-8 bytes")
+        return True, reason
+    raise ShipitError(
+        "command must be exactly `/shipit` or `/shipit --bypass-verifiers` plus `Reason: ...`"
+    )
+
+
+def require_configured_bypass_actor(actor_id: int, configured: str) -> None:
+    values = configured.split(",") if configured else []
+    if (
+        not values
+        or any(re.fullmatch(r"[1-9][0-9]*", value) is None for value in values)
+        or len(values) != len({int(value) for value in values})
+        or actor_id not in {int(value) for value in values}
+    ):
+        raise ShipitError(
+            "verifier bypass is restricted to configured maintainer account IDs"
+        )
+
+
+def _identity(value: Any, where: str) -> dict[str, Any]:
+    if (
+        not isinstance(value, Mapping)
+        or not isinstance(value.get("login"), str)
+        or not value["login"]
+        or not isinstance(value.get("id"), int)
+        or isinstance(value.get("id"), bool)
+        or value["id"] <= 0
+        or value.get("type") != "User"
+    ):
+        raise ShipitError(f"{where} identity is invalid")
+    return {
+        "github_login": value["login"],
+        "github_id": value["id"],
+        "github_type": value["type"],
+    }
+
+
+def _permission(identity: Mapping[str, Any]) -> str:
+    login = str(identity["github_login"])
+    value = verification_bot.api(
+        f"repos/{REPOSITORY}/collaborators/{login}/permission"
+    )
+    permission = value.get("permission") if isinstance(value, dict) else None
+    user = value.get("user") if isinstance(value, dict) else None
+    if (
+        permission not in {"admin", "maintain", "write", "triage", "read", "none"}
+        or not isinstance(user, Mapping)
+        or user.get("id") != identity["github_id"]
+        or user.get("type") != "User"
+    ):
+        raise ShipitError("GitHub collaborator permission is invalid")
+    return str(permission)
+
+
+def _pull(number: int, *, require_open: bool = True) -> dict[str, Any]:
+    value = verification_bot.api(f"repos/{REPOSITORY}/pulls/{number}")
+    if (
+        not isinstance(value, dict)
+        or value.get("number") != number
+        or value.get("base", {}).get("ref") != "main"
+        or not isinstance(value.get("head", {}).get("sha"), str)
+        or not isinstance(value.get("html_url"), str)
+    ):
+        raise ShipitError("issue is not a runtimes pull request against main")
+    if require_open and (value.get("state") != "open" or value.get("draft") is True):
+        raise ShipitError("pull request must be open and ready for review")
+    return value
+
+
+def _verify_bundle_attestations(root: pathlib.Path) -> None:
+    token = os.environ.get("LETSINFER_ATTESTATION_TOKEN", "")
+    if not token:
+        raise ShipitError("trusted attestation token is unavailable")
+    version = subprocess.run(
+        ["gh", "--version"], capture_output=True, check=False
+    )
+    match = re.search(rb"gh version ([0-9]+)\.([0-9]+)\.([0-9]+)", version.stdout)
+    actual = tuple(map(int, match.groups())) if match is not None else None
+    if version.returncode or actual is None or actual < MIN_GH_VERSION:
+        raise ShipitError("GitHub CLI 2.97.0 or newer is required for safe attestation verification")
+    environment = dict(os.environ)
+    environment["GH_TOKEN"] = token
+    paths = sorted(root.iterdir(), key=lambda value: value.name)
+    if not paths or any(path.is_symlink() or not path.is_file() for path in paths):
+        raise ShipitError("verifier bundle contains a non-regular entry")
+    for path in paths:
+        result = subprocess.run(
+            [
+                "gh",
+                "attestation",
+                "verify",
+                str(path),
+                "--repo",
+                REPOSITORY,
+                "--cert-identity",
+                FINALIZER_CERT_IDENTITY,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            env=environment,
+        )
+        if len(result.stdout) > (4 << 20) or len(result.stderr) > (4 << 20):
+            raise ShipitError("attestation verifier output exceeded its bounded limit")
+        if result.returncode:
+            raise ShipitError(f"verifier bundle attestation is invalid: {path.name}")
+
+
+def _changed_candidate(number: int) -> str:
+    candidates = verification_bot.changed_runtime_candidates(number)
+    if len(candidates) != 1:
+        raise ShipitError("/shipit requires exactly one changed runtime candidate")
+    return candidates[0]
+
+
+def _approved_review(number: int, pull_author_id: int) -> dict[str, Any]:
+    values = verification_bot._flatten_pages(
+        verification_bot.api(
+            f"repos/{REPOSITORY}/pulls/{number}/reviews?per_page=100", paginate=True
+        )
+    )
+    latest: dict[int, dict[str, Any]] = {}
+    for review in values:
+        user = review.get("user")
+        user_id = user.get("id") if isinstance(user, dict) else None
+        if isinstance(user_id, int):
+            prior = latest.get(user_id)
+            if prior is None or int(review.get("id", 0)) > int(prior.get("id", 0)):
+                latest[user_id] = review
+    if any(review.get("state") == "CHANGES_REQUESTED" for review in latest.values()):
+        raise ShipitError("a current review requests changes")
+    for review in latest.values():
+        user = review.get("user")
+        if (
+            review.get("state") == "APPROVED"
+            and isinstance(user, dict)
+            and user.get("id") != pull_author_id
+            and _permission(_identity(user, "reviewer")) in {"admin", "maintain"}
+        ):
+            return review
+    raise ShipitError("one current non-author maintainer approval is required")
+
+
+def _check_runs(head: str) -> list[dict[str, Any]]:
+    value = verification_bot.api(
+        f"repos/{REPOSITORY}/commits/{head}/check-runs?per_page=100"
+    )
+    records = value.get("check_runs") if isinstance(value, dict) else None
+    if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+        raise ShipitError("GitHub check-run response is invalid")
+    latest: dict[str, dict[str, Any]] = {}
+    for item in records:
+        name = item.get("name")
+        if isinstance(name, str):
+            prior = latest.get(name)
+            if prior is None or int(item.get("id", 0)) > int(prior.get("id", 0)):
+                latest[name] = item
+    return list(latest.values())
+
+
+def require_checks(head: str, *, bypass: bool, wait_seconds: int = 0) -> None:
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        runs = _check_runs(head)
+        by_name = {str(item.get("name")): item for item in runs}
+        required = {"validate"}
+        if not bypass:
+            required.add(verification_bot.CHECK_NAME)
+        pending = [
+            name
+            for name in required
+            if name not in by_name or by_name[name].get("status") != "completed"
+        ]
+        failures = [
+            str(item.get("name"))
+            for item in runs
+            if item.get("status") == "completed"
+            and item.get("conclusion") not in {"success", "neutral", "skipped"}
+            and item.get("name") not in {CHECK_NAME}
+            and not (bypass and item.get("name") == verification_bot.CHECK_NAME)
+        ]
+        bad_required = [
+            name
+            for name in required
+            if name in by_name
+            and by_name[name].get("status") == "completed"
+            and by_name[name].get("conclusion") not in {"success", "neutral", "skipped"}
+        ]
+        if failures or bad_required:
+            raise ShipitError("blocking checks failed: " + ", ".join(sorted(set(failures + bad_required))))
+        if not pending:
+            return
+        if time.monotonic() >= deadline:
+            raise ShipitError("required checks are incomplete: " + ", ".join(sorted(pending)))
+        time.sleep(20)
+
+
+def _bot_only_head(
+    *, proposal: str, current: str, candidate: str, bot_login: str
+) -> None:
+    if proposal == current:
+        return
+    comparison = verification_bot.api(
+        f"repos/{REPOSITORY}/compare/{proposal}...{current}"
+    )
+    if not isinstance(comparison, dict) or comparison.get("status") != "ahead":
+        raise ShipitError("current PR head is not a descendant of the verified proposal")
+    allowed = ALLOWED_BOT_FILES | {
+        f"{candidate}/benchmark.consensus.json",
+        f"{candidate}/release.json",
+    }
+    files = comparison.get("files")
+    commits = comparison.get("commits")
+    if (
+        not isinstance(files, list)
+        or any(item.get("filename") not in allowed for item in files if isinstance(item, dict))
+        or not isinstance(commits, list)
+        or not commits
+    ):
+        raise ShipitError("post-verification head changes are not bot-owned qualification files")
+    for commit in commits:
+        author = commit.get("author") if isinstance(commit, dict) else None
+        login = author.get("login") if isinstance(author, dict) else None
+        if not isinstance(login, str) or login.casefold() != bot_login.casefold():
+            raise ShipitError("post-verification commit is not owned by the configured bot")
+
+
+def _download_artifact(
+    *,
+    name: str,
+    expected_pr: int,
+    expected_head: str,
+    expected_base: str,
+    destination: pathlib.Path,
+) -> tuple[pathlib.Path, dict[str, Any]]:
+    response = verification_bot.api(
+        f"repos/{REPOSITORY}/actions/artifacts?name={name}&per_page=100"
+    )
+    artifacts = response.get("artifacts") if isinstance(response, dict) else None
+    exact = [
+        item
+        for item in artifacts or []
+        if isinstance(item, dict)
+        and item.get("name") == name
+        and item.get("expired") is False
+        and isinstance(item.get("id"), int)
+    ]
+    if len(exact) != 1:
+        raise ShipitError("exact verifier bundle artifact is unavailable or ambiguous")
+    artifact = exact[0]
+    workflow = artifact.get("workflow_run")
+    run_id = workflow.get("id") if isinstance(workflow, dict) else None
+    if not isinstance(run_id, int) or run_id <= 0:
+        raise ShipitError("verifier bundle finalizer run identity is invalid")
+    finalizer = verification_bot.api(
+        f"repos/{REPOSITORY}/actions/runs/{run_id}"
+    )
+    if (
+        not isinstance(finalizer, dict)
+        or finalizer.get("event") != "workflow_run"
+        or finalizer.get("path") != ".github/workflows/finalize-verifier.yml"
+        or finalizer.get("conclusion") != "success"
+        or finalizer.get("head_branch") != "main"
+    ):
+        raise ShipitError("verifier bundle finalizer identity is invalid")
+    archive = destination / "bundle.zip"
+    with archive.open("xb") as output:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip"],
+            stdout=output,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    if result.returncode:
+        raise ShipitError("cannot download verifier bundle")
+    root = destination / "bundle"
+    root.mkdir(mode=0o700)
+    try:
+        source = zipfile.ZipFile(archive)
+    except zipfile.BadZipFile as error:
+        raise ShipitError("verifier bundle artifact is not a zip") from error
+    with source:
+        members = source.infolist()
+        if not members or len(members) > 32:
+            raise ShipitError("verifier bundle artifact file count is invalid")
+        total = 0
+        seen: set[str] = set()
+        for member in members:
+            path = pathlib.PurePosixPath(member.filename)
+            mode = member.external_attr >> 16
+            if (
+                path.is_absolute()
+                or len(path.parts) != 1
+                or any(part in {"", ".", ".."} for part in path.parts)
+                or member.filename in seen
+                or (mode and not stat.S_ISREG(mode))
+            ):
+                raise ShipitError("verifier bundle artifact contains an unsafe path")
+            seen.add(member.filename)
+            total += member.file_size
+            if total > (20 << 30) or member.compress_size > (20 << 30) or member.is_dir():
+                raise ShipitError("verifier bundle artifact exceeds its bounds")
+            target = root / member.filename
+            with source.open(member) as incoming, target.open("xb") as outgoing:
+                shutil.copyfileobj(incoming, outgoing, 1024 * 1024)
+    archive.unlink(missing_ok=True)
+    bundle = verifier_bundle.validate(
+        root, expected_pr=expected_pr, expected_head=expected_head
+    )
+    _verify_bundle_attestations(root)
+    identity = bundle.get("finalizer_workflow")
+    if not isinstance(identity, dict) or identity.get("run_id") != run_id or identity.get("workflow_sha") != finalizer.get("head_sha"):
+        raise ShipitError("verifier bundle does not bind its trusted finalizer")
+    build_id = bundle.get("build_workflow", {}).get("run_id")
+    build = verification_bot.api(f"repos/{REPOSITORY}/actions/runs/{build_id}")
+    if (
+        not isinstance(build, dict)
+        or build.get("event") != "workflow_run"
+        or build.get("path") != ".github/workflows/build-verifier.yml"
+        or build.get("conclusion") != "success"
+        or build.get("head_branch") != "main"
+        or build.get("head_sha") != expected_base
+        or bundle.get("build_workflow", {}).get("workflow_sha") != expected_base
+    ):
+        raise ShipitError("verifier bundle does not bind its untrusted build run")
+    return root, bundle
+
+
+def _bypass_consensus(
+    *,
+    pr: Mapping[str, Any],
+    candidate: str,
+    subject: Mapping[str, Any],
+    root: pathlib.Path,
+    actor: Mapping[str, Any],
+    reason: str,
+    comment: Mapping[str, Any],
+) -> dict[str, Any]:
+    runtime = generate_manifest.read_object(root / candidate / "runtime.json")
+    release = generate_manifest.read_object(root / candidate / "release.json")
+    submissions = verification_bot.accepted_submissions(int(pr["number"]), subject=subject)
+    author = {
+        "github_login": pr["user"]["login"],
+        "github_id": pr["user"]["id"],
+        "github_type": pr["user"]["type"],
+    }
+    consensus = community_verification.build_consensus(
+        candidate_id=candidate,
+        runtime_version=runtime["version"],
+        pull_request=int(pr["number"]),
+        pull_request_url=str(pr["html_url"]),
+        proposal_head_sha=str(subject["proposal_head_sha"]),
+        author=author,
+        runtime_authors=release["authors"],
+        accepted_comments=submissions,
+    )
+    qualification = consensus["qualification"]
+    if (
+        qualification["independent_verifiers"] != 1
+        or qualification["safety_passed"] is not True
+        or qualification["blocking_failures"]
+        or len(consensus.get("verifiers", [])) != 1
+    ):
+        raise ShipitError("bypass requires exactly one independent successful verification and no blocking failure")
+    consensus["qualification"]["passed"] = True
+    consensus["waiver"] = {
+        "schema_version": 1,
+        "policy": "maintainer-one-independent-pass-v1",
+        "actor": dict(actor),
+        "reason": reason,
+        "comment_id": int(comment["id"]),
+        "comment_url": str(comment["html_url"]),
+        "issued_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    consensus.pop("consensus_id", None)
+    consensus["consensus_id"] = hashlib.sha256(canonical_bytes(consensus)).hexdigest()
+    return consensus
+
+
+def _ordinary_consensus(
+    *, root: pathlib.Path, candidate: str, subject: Mapping[str, Any]
+) -> dict[str, Any]:
+    consensus = generate_manifest.read_object(root / candidate / "benchmark.consensus.json")
+    if (
+        consensus.get("subject") != subject
+        or consensus.get("qualification", {}).get("passed") is not True
+        or consensus.get("waiver") is not None
+    ):
+        raise ShipitError("two-independent-verifier consensus is unavailable or stale")
+    return consensus
+
+
+def _publish(
+    *, root: pathlib.Path, bundle: Mapping[str, Any], candidate: str
+) -> dict[str, Any]:
+    username = os.environ.get("OCI_USERNAME", "")
+    password = os.environ.get("OCI_PASSWORD", "")
+    if not username or not password:
+        raise ShipitError("production registry credentials are unavailable")
+    engine = bundle["engine"]
+    if bundle["mode"] == "build-engine":
+        engine_repository = str(engine["reference"]).rsplit("@", 1)[0]
+        published_engine = oci_layout.publish(
+            root / "engine.oci.tar",
+            repository=engine_repository,
+            platform=engine["platform"],
+            tag=f"verified-{bundle['proposal_head_sha'][:12]}",
+            username=username,
+            password=password,
+        )
+        if published_engine["reference"] != engine["reference"] or published_engine["config_digest"] != engine["config_digest"]:
+            raise ShipitError("published Engine identity differs from verifier bundle")
+    engine_receipt = oci_layout.verify_reference(
+        engine["reference"],
+        expected_config=engine["config_digest"],
+        expected_platform=engine.get("platform"),
+    )
+    runtime = bundle["runtime"]
+    runtime_repository = str(runtime["source"]).rsplit("@", 1)[0]
+    runtime_plan = oci_artifact.plan(
+        root / "runtime.letsinfer",
+        repository=runtime_repository,
+        candidate=candidate,
+        version=runtime["version"],
+    )
+    if runtime_plan.document() != runtime:
+        raise ShipitError("runtime publication plan differs from verifier bundle")
+    registry = oci_artifact.Registry(runtime_plan, username, password)
+    source = registry.publish()
+    if source != runtime["source"]:
+        raise ShipitError("published runtime identity differs from verifier bundle")
+    runtime_receipt = oci_layout.verify_reference(
+        source, expected_config=runtime["config_digest"]
+    )
+    return {"engine": engine_receipt, "runtime": runtime_receipt}
+
+
+def _check(name: str, head: str, conclusion: str, summary: str) -> None:
+    verification_bot.api(
+        f"repos/{REPOSITORY}/check-runs",
+        method="POST",
+        value={
+            "name": name,
+            "head_sha": head,
+            "status": "completed",
+            "conclusion": conclusion,
+            "output": {"title": "Runtime publication " + conclusion, "summary": summary[:65000]},
+        },
+    )
+
+
+def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
+    issue, comment = event.get("issue"), event.get("comment")
+    if not isinstance(issue, Mapping) or not isinstance(comment, Mapping) or not isinstance(issue.get("pull_request"), Mapping):
+        return {"processed": False, "reason": "not a pull-request comment"}
+    body = comment.get("body")
+    if not isinstance(body, str) or not body.strip().startswith("/shipit"):
+        return {"processed": False, "reason": "not a shipit command"}
+    bypass, reason = parse_command(body)
+    actor = _identity(comment.get("user"), "shipit actor")
+    if _permission(actor) not in {"admin", "maintain"}:
+        raise ShipitError("/shipit requires repository maintain or admin permission")
+    if bypass:
+        require_configured_bypass_actor(
+            int(actor["github_id"]),
+            os.environ.get("LETSINFER_VERIFIER_BYPASS_GITHUB_IDS", ""),
+        )
+    number = int(issue["number"])
+    pr = _pull(number)
+    candidate = _changed_candidate(number)
+    root = root.resolve(strict=True)
+    current = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    if current != pr["head"]["sha"]:
+        raise ShipitError("checked-out proposal head differs from GitHub")
+    runtime = generate_manifest.read_object(root / candidate / "runtime.json")
+    release = generate_manifest.read_object(root / candidate / "release.json")
+    provenance = release.get("provenance")
+    proposal = (
+        provenance.get("proposal_head_sha")
+        if isinstance(provenance, dict)
+        else current
+    )
+    if not isinstance(proposal, str) or re.fullmatch(r"[0-9a-f]{40}", proposal) is None:
+        raise ShipitError("verified proposal head is unavailable")
+    bot_login = os.environ.get("LETSINFER_VERIFICATION_BOT_LOGIN", "")
+    if not bot_login:
+        raise ShipitError("verification bot login is not configured")
+    _bot_only_head(proposal=proposal, current=current, candidate=candidate, bot_login=bot_login)
+    _approved_review(number, int(pr["user"]["id"]))
+    with tempfile.TemporaryDirectory(prefix="letsinfer-shipit-") as temporary:
+        artifact_root, bundle = _download_artifact(
+            name=f"verification-bundle-pr-{number}-{proposal}",
+            expected_pr=number,
+            expected_head=proposal,
+            expected_base=str(pr["base"]["sha"]),
+            destination=pathlib.Path(temporary),
+        )
+        if bundle["candidate"] != candidate or bundle["subject"]["runtime_version"] != runtime["version"]:
+            raise ShipitError("verifier bundle candidate or version differs")
+        if bypass:
+            assert reason is not None
+            consensus = _bypass_consensus(
+                pr=pr, candidate=candidate, subject=bundle["subject"], root=root,
+                actor=actor, reason=reason, comment=comment,
+            )
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+            _url, current = verification_bot.materialize(root, candidate, pr, consensus)
+            _check(
+                verification_bot.CHECK_NAME,
+                current,
+                "success",
+                "One independent verification passed; an authorized maintainer applied the recorded verifier-only waiver.",
+            )
+            require_checks(current, bypass=True, wait_seconds=1800)
+        else:
+            consensus = _ordinary_consensus(root=root, candidate=candidate, subject=bundle["subject"])
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+            require_checks(current, bypass=False)
+        receipts = _publish(root=artifact_root, bundle=bundle, candidate=candidate)
+        latest = _pull(number)
+        if latest["head"]["sha"] != current:
+            raise ShipitError("pull-request head changed during publication")
+        _approved_review(number, int(latest["user"]["id"]))
+        require_checks(current, bypass=bypass)
+        receipt = {
+            "schema_version": 1,
+            "repository": REPOSITORY,
+            "pull_request": number,
+            "proposal_head_sha": proposal,
+            "merge_head_sha": current,
+            "candidate": candidate,
+            "runtime_version": runtime["version"],
+            "execution_sha256": bundle["subject"]["execution_sha256"],
+            "actor": actor,
+            "command_comment_id": comment["id"],
+            "waiver": consensus.get("waiver"),
+            "published": receipts,
+            "workflow_run_id": int(os.environ.get("GITHUB_RUN_ID", "0")),
+            "published_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        verification_bot._post_comment(
+            number,
+            "## Runtime publication receipt\n\n```json\n"
+            + json.dumps(receipt, indent=2, sort_keys=True)
+            + "\n```\n\n"
+            + RECEIPT_MARKER,
+        )
+        _check(CHECK_NAME, current, "success", f"Published exact Engine/runtime artifacts for `{bundle['subject']['execution_sha256']}`.")
+        merged = verification_bot.api(
+            f"repos/{REPOSITORY}/pulls/{number}/merge",
+            method="PUT",
+            value={
+                "sha": current,
+                "merge_method": "squash",
+                "commit_title": f"Publish {candidate} {runtime['version']}",
+            },
+        )
+        if not isinstance(merged, dict) or merged.get("merged") is not True:
+            raise ShipitError("GitHub refused the exact-head merge after publication")
+    return {"processed": True, "merged": True, "candidate": candidate, "head": current}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--event", type=pathlib.Path, required=True)
+    parser.add_argument("--root", type=pathlib.Path, required=True)
+    arguments = parser.parse_args()
+    try:
+        event = json.loads(arguments.event.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ShipitError(f"cannot read GitHub event: {error}") from error
+    if not isinstance(event, dict):
+        raise ShipitError("GitHub event must contain an object")
+    print(json.dumps(process(event, arguments.root), sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (
+        ShipitError,
+        community_verification.ConsensusError,
+        generate_manifest.ManifestError,
+        oci_artifact.OciError,
+        oci_layout.LayoutError,
+        verifier_bundle.BundleError,
+        verification_bot.BotError,
+    ) as error:
+        print(f"FATAL: {error}", file=sys.stderr)
+        raise SystemExit(1)
