@@ -67,4 +67,4 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
-          python3 tools/verification_bot.py --event "$GITHUB_EVENT_PATH"
+          python3 -m tools.verification_bot --event "$GITHUB_EVENT_PATH"
