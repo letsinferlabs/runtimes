@@ -178,6 +178,26 @@ jobs:
           python3 tools/oci_layout.py inspect --archive "$raw/engine.oci.tar" \
             --platform "$platform" --repository "$repository" \
             --output "$raw/engine-a-plan.json"
+          # A second no-cache build from the same checkout can hide source-mtime
+          # dependencies. Give every regular proposal file a fixed, distinct
+          # mtime before build B so embedded checkout timestamps change the OCI
+          # identity and fail the comparison instead of surfacing after pinning.
+          python3 - "../proposal/$CANDIDATE" <<'PY'
+          import os
+          import pathlib
+          import stat
+          import sys
+
+          root = pathlib.Path(sys.argv[1]).resolve(strict=True)
+          for path in sorted(root.rglob("*")):
+              mode = path.lstat().st_mode
+              if stat.S_ISLNK(mode) or not (
+                  stat.S_ISDIR(mode) or stat.S_ISREG(mode)
+              ):
+                  raise SystemExit(f"unsupported candidate entry: {path}")
+              if stat.S_ISREG(mode):
+                  os.utime(path, (946684800, 946684800), follow_symlinks=False)
+          PY
           docker buildx build "../proposal/$CANDIDATE" \
             --file "../proposal/$CANDIDATE/image/Dockerfile" \
             --platform "$platform" --build-context letsinfer-tools=. --no-cache \
