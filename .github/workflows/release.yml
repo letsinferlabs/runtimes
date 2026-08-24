@@ -11,7 +11,6 @@ concurrency:
 permissions:
   artifact-metadata: write
   contents: write
-  packages: write
   id-token: write
   attestations: write
 
@@ -43,6 +42,7 @@ jobs:
           persist-credentials: false
       - name: Validate release inputs
         env:
+          LETSINFER_VERIFIER_BYPASS_GITHUB_IDS: ${{ vars.LETSINFER_VERIFIER_BYPASS_GITHUB_IDS }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
@@ -80,9 +80,12 @@ jobs:
           raise SystemExit(0 if found else 1)
           PY
             .core/bin/letsinfer pack "$candidate" --output "$RUNNER_TEMP/packs/$candidate.letsinfer"
+            python3 tools/candidate_policy.py repositories --candidate "$candidate" \
+              --output "$RUNNER_TEMP/repositories.json"
+            repository=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_repository"])' "$RUNNER_TEMP/repositories.json")
             python3 tools/oci_artifact.py plan \
               --artifact "$RUNNER_TEMP/packs/$candidate.letsinfer" \
-              --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
+              --repository "$repository" \
               --candidate "$candidate" --version "$version" \
               --output "$RUNNER_TEMP/plans/$candidate.json"
           done
@@ -106,20 +109,20 @@ jobs:
           PY
           plans=("$RUNNER_TEMP"/plans/*.json)
           if ((${#plans[@]})); then echo "available=true" >> "$GITHUB_OUTPUT"; else echo "available=false" >> "$GITHUB_OUTPUT"; fi
-      - name: Publish immutable runtime OCI artifacts
-        env:
-          OCI_USERNAME: ${{ github.actor }}
-          OCI_PASSWORD: ${{ github.token }}
+      - name: Verify anonymously pullable Engine and runtime artifacts
         run: |
           set -euo pipefail
           shopt -s nullglob
           for plan in "$RUNNER_TEMP"/plans/*.json; do
             candidate=$(basename "$plan" .json)
-            version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$plan")
-            python3 tools/oci_artifact.py push \
-              --artifact "$RUNNER_TEMP/packs/$candidate.letsinfer" \
-              --repository "ghcr.io/letsinferlabs/runtimes/$candidate" \
-              --candidate "$candidate" --version "$version"
+            source=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source"])' "$plan")
+            config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$plan")
+            python3 tools/oci_layout.py verify --reference "$source" --config-digest "$config"
+            engine=$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1]))["engine"]["oci"]; print(value["reference"]+"\t"+value["immutable_id"])' "$candidate/runtime.json")
+            IFS=$'\t' read -r engine_reference engine_config <<< "$engine"
+            platform=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target"]["platform"])' "$candidate/runtime.json")
+            python3 tools/oci_layout.py verify --reference "$engine_reference" \
+              --config-digest "$engine_config" --platform "$platform"
           done
       - name: Sign catalog and revocation ledger
         env:

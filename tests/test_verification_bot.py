@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import types
 import unittest
 from unittest import mock
 
@@ -11,6 +12,75 @@ from tools import verification_bot as bot
 
 
 class VerificationBotTests(unittest.TestCase):
+    def test_core_pull_request_contract_binds_base_and_head_by_name(self) -> None:
+        class PullRequest:
+            def __init__(self, **values):
+                self.__dict__.update(values)
+
+        contract_module = types.SimpleNamespace(
+            GitHubIdentity=lambda login, numeric_id, kind: (login, numeric_id, kind),
+            PullRequest=PullRequest,
+        )
+        pull = {
+            "number": 17,
+            "html_url": "https://github.com/letsinferlabs/runtimes/pull/17",
+            "base": {"sha": "b" * 40},
+            "head": {"sha": "a" * 40},
+            "user": {"login": "Author", "id": 41, "type": "User"},
+            "labels": [{"name": "benchmark-ready"}],
+        }
+        with mock.patch.object(bot, "_core", return_value=(contract_module, None)):
+            contract = bot._pr_contract(pull, ["candidate/runtime.json"])
+        self.assertEqual(contract.base_sha, "b" * 40)
+        self.assertEqual(contract.head_sha, "a" * 40)
+        self.assertEqual(contract.files, ("candidate/runtime.json",))
+
+    def test_runtime_candidate_names_use_changed_paths(self) -> None:
+        current = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        new = "engine--owner--model--target"
+        self.assertEqual(
+            bot.runtime_candidate_names([
+                {"filename": "README.md"},
+                {"filename": f"{current}/engine/config.json"},
+            ]),
+            [current],
+        )
+        self.assertEqual(
+            bot.runtime_candidate_names([
+                {"filename": f"{new}/runtime.json"},
+                {"filename": f"{new}/README.md"},
+            ]),
+            [new],
+        )
+
+    def test_non_runtime_pr_satisfies_verification_check(self) -> None:
+        pull = {
+            "number": 17,
+            "head": {"sha": "a" * 40},
+            "labels": [],
+        }
+        with (
+            mock.patch.object(bot, "changed_runtime_candidates", return_value=[]),
+            mock.patch.object(bot, "sync_runtime_label") as sync,
+            mock.patch.object(bot, "publish_classification_check") as publish,
+            mock.patch.object(bot, "process_pull_request") as process,
+        ):
+            result = bot.process({"action": "opened", "pull_request": pull})
+        self.assertEqual(result, {"processed": True, "runtime_proposal": False})
+        sync.assert_called_once_with(pull, runtime=False)
+        publish.assert_called_once_with(pull, runtime_pending=False)
+        process.assert_not_called()
+
+    def test_non_runtime_check_does_not_claim_qualification(self) -> None:
+        pull = {
+            "head": {"sha": "a" * 40},
+        }
+        with mock.patch.object(bot, "api", return_value={}) as api:
+            bot.publish_classification_check(pull, runtime_pending=False)
+        value = api.call_args.kwargs["value"]
+        self.assertEqual(value["conclusion"], "success")
+        self.assertIn("No runtime candidate changed", value["output"]["summary"])
+
     def test_pending_check_remains_in_progress(self) -> None:
         calls: list[dict] = []
 
@@ -23,15 +93,26 @@ class VerificationBotTests(unittest.TestCase):
             "qualification": {
                 "passed": False,
                 "safety_passed": True,
-                "agreement_passed": True,
-                "independent_verifiers": 2,
-                "required_verifiers": 3,
+                "blocking_failures": [],
+                "independent_verifiers": 1,
+                "required_verifiers": 2,
             },
         }
         with mock.patch.object(bot, "api", side_effect=fake_api):
             bot.update_check({"head": {"sha": "a" * 40}}, consensus, "https://example")
         self.assertEqual(calls[0]["status"], "in_progress")
         self.assertNotIn("conclusion", calls[0])
+
+    def test_empty_consensus_uses_two_independent_passes(self) -> None:
+        document = bot.empty_consensus(
+            candidate="engine--owner--model--target",
+            version="1.2.3",
+            subject={"execution_sha256": "a" * 64},
+            proposal="b" * 40,
+        )
+        self.assertEqual(document["schema_version"], 2)
+        self.assertEqual(document["qualification"]["required_verifiers"], 2)
+        self.assertNotIn("agreement_passed", document["qualification"])
 
     def test_unchanged_content_does_not_create_a_commit(self) -> None:
         data = b"same\n"
@@ -75,11 +156,26 @@ class VerificationBotTests(unittest.TestCase):
     def test_pull_request_waits_for_benchmark_ready_without_api_work(self) -> None:
         event = {
             "action": "synchronize",
-            "pull_request": {"number": 17, "labels": []},
+            "pull_request": {
+                "number": 17,
+                "head": {"sha": "a" * 40},
+                "labels": [],
+            },
         }
-        with mock.patch.object(bot, "process_pull_request") as process:
+        with (
+            mock.patch.object(
+                bot, "changed_runtime_candidates", return_value=["candidate"]
+            ),
+            mock.patch.object(bot, "sync_runtime_label") as sync,
+            mock.patch.object(bot, "publish_classification_check") as publish,
+            mock.patch.object(bot, "process_pull_request") as process,
+        ):
             result = bot.process(event)
         self.assertFalse(result["processed"])
+        sync.assert_called_once_with(event["pull_request"], runtime=True)
+        publish.assert_called_once_with(
+            event["pull_request"], runtime_pending=True
+        )
         process.assert_not_called()
 
     def test_closed_pull_request_cancels_the_check(self) -> None:

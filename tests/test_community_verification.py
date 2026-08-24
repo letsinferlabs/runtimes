@@ -99,17 +99,17 @@ class CommunityConsensusTests(unittest.TestCase):
             accepted_comments=votes,
         )
 
-    def test_three_independent_agreeing_votes_qualify(self) -> None:
-        document = self.build([self.vote(11), self.vote(12, multiplier=1.01), self.vote(13)])
+    def test_two_independent_successful_votes_qualify(self) -> None:
+        document = self.build([self.vote(11), self.vote(12, multiplier=1.01)])
         self.assertTrue(document["qualification"]["passed"])
-        self.assertEqual(document["qualification"]["required_verifiers"], 3)
-        self.assertEqual(len(document["verifiers"]), 3)
+        self.assertEqual(document["qualification"]["required_verifiers"], 2)
+        self.assertEqual(len(document["verifiers"]), 2)
 
     def test_author_and_duplicate_device_do_not_supply_votes(self) -> None:
         document = self.build(
             [self.vote(10), self.vote(11), self.vote(12, device=11), self.vote(13)]
         )
-        self.assertFalse(document["qualification"]["passed"])
+        self.assertTrue(document["qualification"]["passed"])
         self.assertEqual(document["qualification"]["independent_verifiers"], 2)
 
     def test_declared_runtime_author_does_not_supply_a_vote(self) -> None:
@@ -123,16 +123,16 @@ class CommunityConsensusTests(unittest.TestCase):
         document = self.build(
             [vote, self.vote(12), self.vote(13)], [runtime_author]
         )
-        self.assertFalse(document["qualification"]["passed"])
+        self.assertTrue(document["qualification"]["passed"])
         self.assertEqual(document["qualification"]["independent_verifiers"], 2)
 
-    def test_disagreement_expands_to_five_and_remains_unqualified(self) -> None:
-        document = self.build(
-            [self.vote(number, multiplier=1.0 if number < 14 else 1.5) for number in range(11, 16)]
-        )
-        self.assertFalse(document["qualification"]["passed"])
-        self.assertEqual(document["qualification"]["required_verifiers"], 5)
-        self.assertFalse(document["qualification"]["agreement_passed"])
+    def test_performance_difference_does_not_change_the_quorum(self) -> None:
+        document = self.build([self.vote(11), self.vote(12, multiplier=1.5)])
+        self.assertTrue(document["qualification"]["passed"])
+        self.assertEqual(document["qualification"]["required_verifiers"], 2)
+        metric = document["results"][0]["metrics"]["aggregate_tps"]
+        self.assertEqual(set(metric), {"mean", "median", "minimum", "maximum"})
+        self.assertNotIn("agreement", document["qualification"])
 
     def test_any_safety_failure_blocks_qualification(self) -> None:
         failed = self.vote(13, safe=False)
@@ -144,11 +144,41 @@ class CommunityConsensusTests(unittest.TestCase):
         self.assertIn("blocking evidence", rendered)
         self.assertIn("output_validation", rendered)
 
-    def test_tally_is_deterministic_and_links_structured_verifiers(self) -> None:
+    def test_blocking_failure_cannot_be_replaced_by_a_later_success(self) -> None:
+        failed = self.vote(12, safe=False)
+        recovered = self.vote(12)
+        recovered["record"]["submitted_at_unix"] += 100
+        recovered["record"]["verification_id"] = "e" * 64
+        document = self.build([self.vote(11), failed, recovered])
+        self.assertEqual(document["qualification"]["independent_verifiers"], 2)
+        self.assertFalse(document["qualification"]["passed"])
+        self.assertEqual(
+            document["qualification"]["blocking_failures"],
+            [failed["record"]["verification_id"]],
+        )
+
+    def test_one_reviewer_rerun_occupies_one_slot(self) -> None:
+        first = self.vote(11)
+        second = self.vote(11, multiplier=1.1)
+        second["record"]["submitted_at_unix"] += 100
+        second["record"]["verification_id"] = "e" * 64
+        document = self.build([first, second])
+        self.assertFalse(document["qualification"]["passed"])
+        self.assertEqual(document["qualification"]["independent_verifiers"], 1)
+
+    def test_additional_success_is_preserved_without_expanding_the_quorum(self) -> None:
         document = self.build([self.vote(11), self.vote(12), self.vote(13)])
+        self.assertTrue(document["qualification"]["passed"])
+        self.assertEqual(document["qualification"]["independent_verifiers"], 2)
+        self.assertEqual(len(document["verifiers"]), 2)
+        self.assertEqual(len(document["verifications"]), 3)
+
+    def test_tally_is_deterministic_and_links_structured_verifiers(self) -> None:
+        document = self.build([self.vote(11), self.vote(12)])
         rendered = consensus.tally_comment(document)
-        self.assertIn("3 / 3 independent verifications", rendered)
+        self.assertIn("2 / 2 independent verifications", rendered)
         self.assertIn("[@User11]", rendered)
+        self.assertNotIn("Agreement", rendered)
         self.assertIn(document["consensus_id"], rendered)
 
 

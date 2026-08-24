@@ -25,6 +25,14 @@ class CatalogReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("names != expected", workflow)
         self.assertIn("value.get('targetCommitish') != sys.argv[2]", workflow)
 
+    def test_release_verifies_but_never_republishes_runtime_objects(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Verify anonymously pullable Engine and runtime artifacts", workflow)
+        self.assertNotIn("oci_artifact.py push", workflow)
+        self.assertNotIn("packages: write", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

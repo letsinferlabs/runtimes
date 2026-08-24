@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from tools import community_verification, generate_manifest
+from tools import candidate_policy, community_verification, generate_manifest
 
 
 REPOSITORY = "letsinferlabs/runtimes"
@@ -29,6 +30,8 @@ CHECK_NAME = "runtime/community-verification"
 SUBMISSION_MARKER = "<!-- letsinfer-verification:v1\n"
 TALLY_MARKER = "<!-- letsinfer-verification-tally:v1 -->"
 REJECTION_MARKER = "letsinfer-verification-rejected"
+RUNTIME_LABEL = "runtime"
+SOURCE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class BotError(RuntimeError):
@@ -75,6 +78,102 @@ def canonical_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def runtime_candidate_names(files: Sequence[Mapping[str, Any]]) -> list[str]:
+    trusted = {
+        path.parent.name
+        for path in SOURCE_ROOT.glob("*/runtime.json")
+        if path.is_file() and not path.is_symlink()
+    }
+    paths: list[pathlib.PurePosixPath] = []
+    for item in files:
+        for field in ("filename", "previous_filename"):
+            value = item.get(field)
+            if isinstance(value, str):
+                paths.append(pathlib.PurePosixPath(value))
+    declared = {
+        path.parts[0]
+        for path in paths
+        if len(path.parts) == 2 and path.parts[1] == "runtime.json"
+    }
+    candidates = trusted | declared
+    return sorted({
+        path.parts[0]
+        for path in paths
+        if len(path.parts) > 1 and path.parts[0] in candidates
+    })
+
+
+def changed_runtime_candidates(number: int) -> list[str]:
+    files = _flatten_pages(
+        api(
+            f"repos/{REPOSITORY}/pulls/{number}/files?per_page=100",
+            paginate=True,
+        )
+    )
+    return runtime_candidate_names(files)
+
+
+def _labels(pull: Mapping[str, Any]) -> set[str]:
+    return {
+        str(item.get("name"))
+        for item in pull.get("labels", [])
+        if isinstance(item, Mapping) and isinstance(item.get("name"), str)
+    }
+
+
+def sync_runtime_label(pull: Mapping[str, Any], *, runtime: bool) -> None:
+    number = pull.get("number")
+    if not isinstance(number, int):
+        raise BotError("pull request number is invalid")
+    labels = _labels(pull)
+    if runtime and RUNTIME_LABEL not in labels:
+        api(
+            f"repos/{REPOSITORY}/issues/{number}/labels",
+            method="POST",
+            value={"labels": [RUNTIME_LABEL]},
+        )
+    elif not runtime and RUNTIME_LABEL in labels:
+        api(
+            f"repos/{REPOSITORY}/issues/{number}/labels/{RUNTIME_LABEL}",
+            method="DELETE",
+        )
+
+
+def publish_classification_check(
+    pull: Mapping[str, Any], *, runtime_pending: bool
+) -> None:
+    head = pull.get("head")
+    head_sha = head.get("sha") if isinstance(head, Mapping) else None
+    if not isinstance(head_sha, str):
+        raise BotError("pull request head identity is invalid")
+    if runtime_pending:
+        status = "in_progress"
+        conclusion = None
+        title = "Runtime verification is pending"
+        summary = "Add the benchmark-ready label to begin independent verification."
+    else:
+        status = "completed"
+        conclusion = "success"
+        title = "Community verification is not applicable"
+        summary = (
+            "No runtime candidate changed; benchmark consensus and runtime "
+            "qualification are not required."
+        )
+    value: dict[str, Any] = {
+        "name": CHECK_NAME,
+        "head_sha": head_sha,
+        "status": status,
+        "output": {"title": title, "summary": summary},
+    }
+    if conclusion is not None:
+        value["conclusion"] = conclusion
+    api(
+        f"repos/{REPOSITORY}/check-runs",
+        method="POST",
+        value=value,
+    )
+
+
 def _core() -> tuple[Any, Any]:
     core = pathlib.Path(os.environ.get("LETSINFER_CORE_ROOT", ".core")).resolve()
     if not (core / "core" / "benchmark_verification.py").is_file():
@@ -105,6 +204,8 @@ def pull_request(number: int) -> dict[str, Any]:
         or value.get("number") != number
         or value.get("state") != "open"
         or value.get("base", {}).get("ref") != "main"
+        or re.fullmatch(r"[0-9a-f]{40}", str(value.get("base", {}).get("sha")))
+        is None
         or not isinstance(value.get("head", {}).get("sha"), str)
         or not isinstance(value.get("head", {}).get("ref"), str)
         or not isinstance(value.get("head", {}).get("repo", {}).get("full_name"), str)
@@ -127,14 +228,15 @@ def _pr_contract(pr: Mapping[str, Any], files: list[str]) -> Any:
         str(author.get("login")), int(author.get("id", -1)), str(author.get("type"))
     )
     return benchmark_verification.PullRequest(
-        int(pr["number"]),
-        str(pr["html_url"]),
-        "OPEN",
-        "main",
-        str(pr["head"]["sha"]),
-        author_identity,
-        tuple(files),
-        tuple(sorted(
+        number=int(pr["number"]),
+        url=str(pr["html_url"]),
+        state="OPEN",
+        base_ref="main",
+        base_sha=str(pr["base"]["sha"]),
+        head_sha=str(pr["head"]["sha"]),
+        author=author_identity,
+        files=tuple(files),
+        labels=tuple(sorted(
             str(item["name"])
             for item in pr.get("labels", [])
             if isinstance(item, dict) and isinstance(item.get("name"), str)
@@ -145,7 +247,7 @@ def _pr_contract(pr: Mapping[str, Any], files: list[str]) -> Any:
 def execution_source(
     pr: Mapping[str, Any], destination: pathlib.Path
 ) -> tuple[pathlib.Path, str, dict[str, Any]]:
-    benchmark_verification, build_archive = _core()
+    benchmark_verification, _build_archive = _core()
     files = _flatten_pages(
         api(
             f"repos/{REPOSITORY}/pulls/{pr['number']}/files?per_page=100",
@@ -155,28 +257,16 @@ def execution_source(
     names = [str(item.get("filename")) for item in files]
     contract = _pr_contract(pr, names)
     candidate = benchmark_verification.select_candidate(contract, None)
+    try:
+        bundle = benchmark_verification.download_verifier_bundle(
+            contract, candidate, destination / "verifier-artifact", gh="gh"
+        )
+    except Exception as error:
+        raise BotError(f"exact verifier bundle is unavailable: {error}") from error
     checkout = benchmark_verification.fetch_pull_request(
         contract, destination / "checkout", gh="gh"
     )
-    candidate_root = checkout / candidate
-    runtime_path = candidate_root / "runtime.json"
-    try:
-        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise BotError("candidate runtime.json is invalid") from error
-    if not isinstance(runtime, dict) or runtime.get("id") != candidate:
-        raise BotError("candidate runtime identity differs from its directory")
-    pack = destination / f"{candidate}.letsinfer"
-    try:
-        build_archive(candidate_root, pack)
-        subject = benchmark_verification.execution_subject(
-            runtime,
-            pack_sha256=hashlib.sha256(pack.read_bytes()).hexdigest(),
-            pack_bytes=pack.stat().st_size,
-        )
-    except Exception as error:
-        raise BotError(f"candidate execution subject is invalid: {error}") from error
-    return checkout, candidate, subject
+    return checkout, candidate, bundle.subject
 
 
 def accepted_submissions(
@@ -310,10 +400,6 @@ def update_check(
         status = "completed"
         conclusion = "failure"
         title = "Safety or correctness verification failed"
-    elif not qualification["agreement_passed"]:
-        status = "completed"
-        conclusion = "neutral"
-        title = "More independent measurements are needed"
     else:
         status = "in_progress"
         conclusion = None
@@ -453,6 +539,15 @@ def proposal_head(
     return str(pr["head"]["sha"])
 
 
+def runtime_publication_source(
+    checkout: pathlib.Path, candidate: str, manifest_digest: str
+) -> str:
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", manifest_digest) is None:
+        raise BotError("runtime OCI manifest digest is invalid")
+    repository = candidate_policy.runtime_repository(checkout, candidate)
+    return f"{repository}@{manifest_digest}"
+
+
 def materialize(
     checkout: pathlib.Path,
     candidate: str,
@@ -514,9 +609,10 @@ def materialize(
     previous = generate_manifest.read_object(checkout / "manifest.json")
     sources = generate_manifest.sources_from_manifest(checkout / "manifest.json")
     version = consensus["runtime_version"]
-    sources[(candidate, version)] = (
-        f"ghcr.io/letsinferlabs/runtimes/{candidate}@"
-        f"{consensus['subject']['runtime_oci_manifest_digest']}"
+    sources[(candidate, version)] = runtime_publication_source(
+        checkout,
+        candidate,
+        str(consensus["subject"]["runtime_oci_manifest_digest"]),
     )
     manifest = generate_manifest.generate(checkout, sources, previous)
     final_commit = put_content(
@@ -561,13 +657,13 @@ def empty_consensus(
         "qualification": {
             "passed": False,
             "independent_verifiers": 0,
-            "required_verifiers": community_verification.POLICY["initial_verifiers"],
-            "agreement_passed": True,
+            "required_verifiers": community_verification.POLICY["required_verifiers"],
             "safety_passed": True,
+            "blocking_failures": [],
         },
         "verifications": [],
         "score": {
-            "policy": "letsinfer-throughput-geomean-of-consensus-means-v1",
+            "policy": "letsinfer-throughput-geomean-of-verifier-means-v1",
             "aggregate_tps": None,
         },
     }
@@ -664,12 +760,15 @@ def process(event: Mapping[str, Any]) -> dict[str, Any]:
         if event.get("action") == "closed":
             cancel_check(pull)
             return {"processed": True, "closed": True}
-        labels = {
-            item.get("name")
-            for item in pull.get("labels", [])
-            if isinstance(item, Mapping)
-        }
+        candidates = changed_runtime_candidates(int(pull["number"]))
+        runtime = bool(candidates)
+        sync_runtime_label(pull, runtime=runtime)
+        if not runtime:
+            publish_classification_check(pull, runtime_pending=False)
+            return {"processed": True, "runtime_proposal": False}
+        labels = _labels(pull)
         if "benchmark-ready" not in labels:
+            publish_classification_check(pull, runtime_pending=True)
             return {"processed": False, "reason": "benchmark-ready gate is pending"}
         return process_pull_request(int(pull["number"]))
     issue = event.get("issue")
@@ -682,6 +781,8 @@ def process(event: Mapping[str, Any]) -> dict[str, Any]:
     ):
         return {"processed": False, "reason": "not a verification submission"}
     number = int(issue["number"])
+    if not changed_runtime_candidates(number):
+        return {"processed": False, "reason": "not a runtime proposal"}
     return process_pull_request(number)
 
 
@@ -702,6 +803,11 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (BotError, community_verification.ConsensusError, generate_manifest.ManifestError) as error:
+    except (
+        BotError,
+        candidate_policy.CandidatePolicyError,
+        community_verification.ConsensusError,
+        generate_manifest.ManifestError,
+    ) as error:
         print(f"FATAL: {error}", file=sys.stderr)
         raise SystemExit(1)
