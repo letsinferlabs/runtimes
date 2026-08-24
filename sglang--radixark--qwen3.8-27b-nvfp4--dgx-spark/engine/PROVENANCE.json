@@ -1,15 +1,21 @@
 {
   "schema_version": 1,
-  "base_image": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6",
+  "base_image": "docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1",
   "base_image_id": "sha256:0076dffa60b76b7bf033c04d05e0cc69d46f2b8cd60aa2468827782afe9bc38f",
-  "base_sglang_version": "0.0.0.dev0+qwen38.27b.g561c8f3",
+  "base_sglang_version": "0.0.0.dev0",
   "upstream_repository": "sgl-project/sglang",
-  "upstream_parent": "3a8f522f6547f4fe772885145ea0a50a3a6967c0",
-  "upstream_commit": "c14312a66420b75ca9a11bf1817c4db1fa26b097",
-  "upstream_pull_request": 35371,
+  "upstream_commit": "1cf2b8c54d81802abc15dcf23a29b9cc687bc01e",
+  "upstream_recipe": {
+    "repository": "Weschera/Qwen3.8-27B-NVFP4-DFlash2-DGX-Spark",
+    "commit": "3fad86cb3719876288b57b121ae0dd45bdb6343a"
+  },
   "method": "full-tree-source-overlay",
   "runtime_fixes": [
-    "run-the-dflash-selector-through-the-target-quantized-lm-head",
-    "install-a-target-qualified-flashinfer-autotune-profile"
-  ]
+    "persist-the-fast-flashinfer-tactics-to-remove-boot-lottery",
+    "rank-greedy-dflash-candidates-by-expected-accepted-prefix-value"
+  ],
+  "sealed_artifacts": {
+    "dflash_selector_sha256": "eda3392ea66597f113c76cf1d9113e9bba290590e31a75ceee537e4269df2dae",
+    "flashinfer_profile_sha256": "ea30460e95be5d3c14186e58048f8dc14b79a3416f73c073b6501c36ae8eae98"
+  }
 }

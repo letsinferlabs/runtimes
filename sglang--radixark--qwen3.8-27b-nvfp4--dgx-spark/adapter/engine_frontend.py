@@ -73,7 +73,7 @@ def load_runtime(expected_engine: str) -> dict[str, Any]:
     runtime = _load_object(path)
     engine = runtime.get("engine")
     if (
-        runtime.get("schema_version") != 4
+        runtime.get("schema_version") != 5
         or not isinstance(engine, dict)
         or engine.get("id") != expected_engine
         or engine.get("protocol") != {"version": PROTOCOL_VERSION}

@@ -72,6 +72,7 @@ if _use_aiter:
 class Bf16GemmBackend(Enum):
     AUTO = "auto"
     CUTEDSL = "cutedsl"
+    GEMV = "gemv"
     TORCH = "torch"
 
     def is_auto(self) -> bool:
@@ -80,10 +81,15 @@ class Bf16GemmBackend(Enum):
     def is_cutedsl(self) -> bool:
         return self == Bf16GemmBackend.CUTEDSL
 
+    def is_gemv(self) -> bool:
+        return self == Bf16GemmBackend.GEMV
+
 
 _BF16_GEMM_BACKEND: Optional[Bf16GemmBackend] = None
 _cutedsl_bf16_gemm = None
 _use_cutedsl_bf16_gemm = None
+_hopper_bf16_gemv = None
+_use_hopper_bf16_gemv = None
 
 
 def initialize_bf16_gemm_config(server_args: ServerArgs) -> None:
@@ -99,7 +105,22 @@ def initialize_bf16_gemm_config(server_args: ServerArgs) -> None:
 
     backend = Bf16GemmBackend(backend_str)
 
-    if backend.is_cutedsl():
+    if backend.is_gemv():
+        capability = torch.cuda.get_device_capability()
+        if capability[0] != 9 and capability != (12, 1):
+            raise ValueError(
+                "--bf16-gemm-backend gemv requires SM90 (Hopper) or SM121 (DGX Spark)"
+            )
+
+        global _hopper_bf16_gemv, _use_hopper_bf16_gemv
+        from sglang.kernels.ops.gemm.hopper_bf16_gemv import (
+            hopper_bf16_gemv,
+            use_hopper_bf16_gemv,
+        )
+
+        _hopper_bf16_gemv = hopper_bf16_gemv
+        _use_hopper_bf16_gemv = use_hopper_bf16_gemv
+    elif backend.is_cutedsl():
         if server_args.enable_deterministic_inference:
             raise ValueError(
                 "--bf16-gemm-backend cutedsl is batch-size dependent and cannot "
@@ -129,6 +150,16 @@ def _bf16_gemm_dispatch_fake(
 def bf16_gemm_dispatch(
     x: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
+    if (
+        _use_hopper_bf16_gemv is not None
+        and bias is None
+        and _use_hopper_bf16_gemv(
+            x.numel() // x.shape[-1], weight.shape[0], weight.shape[1]
+        )
+    ):
+        return _hopper_bf16_gemv(x.view(-1, x.shape[-1]), weight).view(
+            *x.shape[:-1], -1
+        )
     if _use_cutedsl_bf16_gemm is not None and _use_cutedsl_bf16_gemm(
         x.numel() // x.shape[-1], weight.shape[0], weight.shape[1]
     ):
@@ -236,7 +267,10 @@ class UnquantizedLinearMethod(LinearMethodBase):
             return tgemm.mm(x, layer.weight, bias, otype=x.dtype)
 
         elif (
-            get_bf16_gemm_backend().is_cutedsl()
+            (
+                get_bf16_gemm_backend().is_cutedsl()
+                or get_bf16_gemm_backend().is_gemv()
+            )
             and x.is_cuda
             and x.dtype == torch.bfloat16
             and layer.weight.dtype == torch.bfloat16
@@ -249,6 +283,8 @@ class UnquantizedLinearMethod(LinearMethodBase):
                 # token dim under Dynamo and recompile per shape bucket; the
                 # opaque op resolves it at runtime with concrete shapes,
                 # keeping the per-shape kernel choice.
+                return bf16_gemm_dispatch(x, layer.weight, bias)
+            if get_bf16_gemm_backend().is_gemv():
                 return bf16_gemm_dispatch(x, layer.weight, bias)
             if _use_cutedsl_bf16_gemm(
                 x.numel() // x.shape[-1],
