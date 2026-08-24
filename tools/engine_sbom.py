@@ -15,7 +15,10 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 DIGEST_RE = re.compile(r"sha256:([0-9a-f]{64})")
-OCI_RE = re.compile(r"ghcr\.io/letsinferlabs/engines/[^@]+@sha256:[0-9a-f]{64}")
+OCI_RE = re.compile(
+    r"ghcr\.io/letsinferlabs/(?:engines/[^@]+|engine-images)"
+    r"@sha256:[0-9a-f]{64}"
+)
 
 
 class SbomError(ValueError):
@@ -88,9 +91,18 @@ def read_inventory(path: pathlib.Path) -> dict[str, Any]:
         for record in records:
             if not isinstance(record, dict) or set(record) != set(keys):
                 raise SbomError(f"invalid Engine package inventory {collection} record")
-            current = tuple(str(record[key]) for key in keys)
-            if any(not item for item in current) or previous == current:
+            if any(
+                not isinstance(record[key], str) or not record[key]
+                for key in keys
+            ):
                 raise SbomError(f"invalid Engine package inventory {collection} value")
+            current = (record["name"].casefold(),) + tuple(
+                record[key] for key in keys[1:]
+            )
+            if previous is not None and current <= previous:
+                raise SbomError(
+                    f"Engine package inventory {collection} must be strictly sorted"
+                )
             previous = current
     return value
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import types
 import unittest
 from unittest import mock
 
@@ -11,6 +12,29 @@ from tools import verification_bot as bot
 
 
 class VerificationBotTests(unittest.TestCase):
+    def test_core_pull_request_contract_binds_base_and_head_by_name(self) -> None:
+        class PullRequest:
+            def __init__(self, **values):
+                self.__dict__.update(values)
+
+        contract_module = types.SimpleNamespace(
+            GitHubIdentity=lambda login, numeric_id, kind: (login, numeric_id, kind),
+            PullRequest=PullRequest,
+        )
+        pull = {
+            "number": 17,
+            "html_url": "https://github.com/letsinferlabs/runtimes/pull/17",
+            "base": {"sha": "b" * 40},
+            "head": {"sha": "a" * 40},
+            "user": {"login": "Author", "id": 41, "type": "User"},
+            "labels": [{"name": "benchmark-ready"}],
+        }
+        with mock.patch.object(bot, "_core", return_value=(contract_module, None)):
+            contract = bot._pr_contract(pull, ["candidate/runtime.json"])
+        self.assertEqual(contract.base_sha, "b" * 40)
+        self.assertEqual(contract.head_sha, "a" * 40)
+        self.assertEqual(contract.files, ("candidate/runtime.json",))
+
     def test_runtime_candidate_names_use_changed_paths(self) -> None:
         current = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         new = "engine--owner--model--target"

@@ -37,9 +37,9 @@ Every candidate is a single top-level directory:
 ├── runtime.json
 ├── release.json  # structured authors, SPDX license, bot-owned provenance
 ├── README.md      # Let's Infer install block, model links, reproduction
-├── adapter/       # Engine protocol frontend included in the Engine OCI
-├── engine/        # pinned engine or kernel source used to build the Engine OCI
-├── image/         # deterministic Engine OCI recipe
+├── adapter/       # present only when this PR builds a changed Engine OCI
+├── engine/        # optional pinned engine source for radical Engine changes
+├── image/         # required deterministic recipe when building an Engine OCI
 ├── kernels/       # optional runtime-specific kernels
 ├── patches/       # optional auditable source patches
 ├── scripts/       # optional build or qualification helpers
@@ -122,21 +122,53 @@ prior qualification evidence.
 ```bash
 python3 tools/generate_manifest.py --validate-only
 python3 -m unittest discover -s tests -p 'test_*.py'
-python3 <candidate>/adapter/engine-adapter verify --protocol 2
+python3 <candidate>/adapter/engine-adapter verify --protocol 2 # build-engine only
 letsinfer pack <candidate> --output /tmp/runtime.letsinfer
 ```
 
 Pull requests run the same checks, build the runtime pack twice, require
 byte-identical archives, and verify the deterministic OCI manifest identity.
+No separate public `letsinfer dev` command family is required: authoring uses
+the reviewed candidate directory, ordinary Docker/buildx commands, and the
+existing deterministic `letsinfer pack` boundary.
+
+A candidate that only targets an already-published Engine omits `adapter/`,
+`engine/`, and `image/`; CI classifies it as `reuse-engine` and verifies the
+exact digest in `runtime.json`. Adding or changing any Engine input directory
+classifies the candidate as `build-engine` and includes the complete submitted
+Engine source in the runtime pack.
+
+For a smaller checkout, fetch only the candidate and repository tools. Git
+downloads omitted Engine history blobs only if you later select them:
+
+```bash
+git clone --filter=blob:none --sparse https://github.com/letsinferlabs/runtimes.git
+cd runtimes
+git sparse-checkout set tools <candidate>
+```
 
 ## Publication
 
-Engine sources, adapter, or image changes automatically start the Engine OCI
-workflow after merge. It normalizes exported layer timestamps, publishes the
-image by digest, exports a deterministic Debian/Python package inventory,
-binds that inventory to the exact image and configuration identities as SPDX,
-and attaches the SBOM attestation to the OCI. It then emits a deterministic
-pin review patch; applying that patch resets the candidate to unqualified.
+Every runtime PR first runs a no-code sentinel. A default-branch `workflow_run`
+builder—not the contributor-editable PR workflow—then checks out the exact
+proposal as untrusted input. It has read-only permissions and no secrets. It
+audits candidate size and contents, builds the runtime twice, and, for
+`build-engine`, independently builds the Engine OCI twice plus its package
+inventory. It cannot publish a package and retains only one byte-verified OCI
+layout.
+
+A second default-branch `workflow_run` finalizer treats the proposal and raw
+outputs as untrusted data. It independently reclassifies the base-to-head diff,
+audits and repacks the candidate, verifies both Engine identities, creates
+runtime and Engine SPDX documents plus provenance and checksums, attests the
+payloads, and uploads one immutable artifact named
+`verification-bundle-pr-NUMBER-HEAD`. It never executes proposal code.
+
+For a changed Engine, `runtime.json` must already pin the future production
+manifest and configuration digests. If local authoring did not pin them, the
+finalizer uploads a deterministic `engine-pin-pr-*` patch and refuses to make
+the head benchmarkable. Apply that patch and push; the next head receives a
+new bundle. No registry write is needed during local development or PR build.
 
 Every runtime proposal must first pass source and supply-chain review. The bot
 automatically adds the `runtime` label when a PR directly changes a runtime
@@ -151,7 +183,12 @@ letsinfer benchmark verify https://github.com/letsinferlabs/runtimes/pull/123
 ```
 
 Let's Infer runs a paired baseline/candidate benchmark, restores the verifier's
-runtime, and posts complete signed evidence. Two successful non-author users
+runtime, and posts complete signed evidence. It downloads only the trusted,
+head-bound verifier bundle—not a PR source archive—and locally loads the exact
+bundled OCI layout when the PR changes Engine internals. Core validates every
+OCI descriptor and rootfs diff ID, converts it to a temporary Docker-load
+archive locally, and removes both the temporary archive and any image it
+introduced. Two successful non-author users
 on distinct account and device identities qualify the exact execution
 subject. One user occupies one slot even after a rerun. A correctness, safety,
 or restoration failure blocks that subject; performance differences remain
@@ -161,11 +198,41 @@ updates the required check, and owns `benchmark.consensus.json`, provenance,
 and the generated manifest projection. Merge is the qualification boundary;
 recommendation remains a separate calculated choice.
 
+After review and qualification, a repository maintainer comments exactly:
+
+```text
+/shipit
+```
+
+The trusted publisher rechecks the current head, maintainer approval, all
+blocking checks, exact artifact/workflow identities, every payload's
+trusted-finalizer attestation, consensus, and bot-only qualification commits.
+It promotes the exact bundled Engine when needed,
+publishes the exact runtime pack, verifies both objects through anonymous
+digest pulls, posts a publication receipt, and merges only that checked head.
+It is the only workflow allowed to publish an Engine OCI; ordinary runtime
+releases never rebuild or overwrite Engine images.
+
+Configured maintainers may waive only the second verifier after one successful
+independent verification and no correctness, safety, or restoration failure:
+
+```text
+/shipit --bypass-verifiers
+Reason: concise auditable justification
+```
+
+The actor must have live `maintain` or `admin` permission and their immutable
+numeric GitHub ID must appear in the trusted comma-separated repository
+variable `LETSINFER_VERIFIER_BYPASS_GITHUB_IDS`. The waiver, reason, actor ID,
+comment, and time are retained in consensus and the publication receipt. It
+does not bypass review, failed checks, source audits, digest matching, public
+pull verification, or exact-head merge protection.
+
 After qualification, merging the exact revision to the `release` branch:
 
 1. rebuilds and verifies deterministic runtime packs;
 2. checks that every advertised OCI digest matches the planned artifact;
-3. publishes the immutable runtime-pack OCI artifacts;
+3. anonymously verifies every already-published runtime and Engine object;
 4. preserves immutable qualified releases and calculates the best release for
    every model/target using the catalog's versioned scoring policy;
 5. verifies that every model/target has a qualified recommendation;
@@ -189,10 +256,27 @@ Contents, Issues, Pull requests, and Checks (read/write), plus Metadata (read).
 The `runtime-verification-bot` environment stores
 `LETSINFER_VERIFICATION_APP_PRIVATE_KEY`; repository variables store the App ID
 and bot login as `LETSINFER_VERIFICATION_APP_ID` and
-`LETSINFER_VERIFICATION_BOT_LOGIN`. All three workflows also require
-`LETSINFER_VERIFICATION_CORE_SHA`, pinned to the exact 40-character commit of
-the released core verification contract. The workflow mints a short-lived
+`LETSINFER_VERIFICATION_BOT_LOGIN`. The comma-separated
+`LETSINFER_VERIFIER_BYPASS_GITHUB_IDS` variable contains the immutable numeric
+IDs of maintainers authorized to use the verifier-only waiver. All workflows
+also require `LETSINFER_VERIFICATION_CORE_SHA`, pinned to the exact 40-character
+commit of the released core verification contract. The workflow mints a short-lived
 token explicitly limited to this repository and those permissions.
+
+GHCR needs one maintainer setup because a new package is private by default.
+Pre-provision `ghcr.io/letsinferlabs/runtime-artifacts` and
+`ghcr.io/letsinferlabs/engine-images`, link both to this public repository, and
+make both public. New candidates publish into those shared packages by
+immutable digest; existing candidates keep their already-public package.
+`/shipit` always performs an anonymous digest pull before merge, so missing or
+private package setup fails closed.
+
+The default public runners are `ubuntu-24.04-arm` for isolated builds and
+`ubuntu-24.04` for finalization. Repositories with large Engine images should
+set `LETSINFER_VERIFIER_RUNNER` and `LETSINFER_FINALIZER_RUNNER` to isolated
+GitHub-hosted larger-runner labels with adequate disk. Raw outputs expire after
+one day and finalized verifier bundles after 30 days; an expired bundle is
+rebuilt only from the same exact head and must reproduce every recorded digest.
 
 The release fails closed when an Engine digest, model revision, benchmark
 identity, catalog source, signature key, or recommendation is inconsistent.

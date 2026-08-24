@@ -233,7 +233,7 @@ def build_consensus(
         for item in active
         if item["record"].get("counts_toward_consensus") is True
     ]
-    successful = [
+    eligible_successful = [
         item
         for item in counted
         if all(
@@ -241,6 +241,14 @@ def build_consensus(
             for name in ("correctness", "safety", "restoration")
         )
     ]
+    required = POLICY["required_verifiers"]
+    successful = sorted(
+        eligible_successful,
+        key=lambda item: (
+            int(item["record"]["submitted_at_unix"]),
+            str(item["record"]["verification_id"]),
+        ),
+    )[:required]
     key_set: set[tuple[str, str, bool]] | None = None
     rows_by_vote: list[dict[tuple[str, str, bool], Mapping[str, Any]]] = []
     for item in successful:
@@ -286,7 +294,6 @@ def build_consensus(
         )
     ]
     safety_passed = not blocking
-    required = POLICY["required_verifiers"]
     passed = len(successful) >= required and safety_passed
 
     official_values = [

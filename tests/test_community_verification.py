@@ -132,6 +132,7 @@ class CommunityConsensusTests(unittest.TestCase):
         self.assertEqual(document["qualification"]["required_verifiers"], 2)
         metric = document["results"][0]["metrics"]["aggregate_tps"]
         self.assertEqual(set(metric), {"mean", "median", "minimum", "maximum"})
+        self.assertNotIn("agreement", document["qualification"])
 
     def test_any_safety_failure_blocks_qualification(self) -> None:
         failed = self.vote(13, safe=False)
@@ -164,6 +165,13 @@ class CommunityConsensusTests(unittest.TestCase):
         document = self.build([first, second])
         self.assertFalse(document["qualification"]["passed"])
         self.assertEqual(document["qualification"]["independent_verifiers"], 1)
+
+    def test_additional_success_is_preserved_without_expanding_the_quorum(self) -> None:
+        document = self.build([self.vote(11), self.vote(12), self.vote(13)])
+        self.assertTrue(document["qualification"]["passed"])
+        self.assertEqual(document["qualification"]["independent_verifiers"], 2)
+        self.assertEqual(len(document["verifiers"]), 2)
+        self.assertEqual(len(document["verifications"]), 3)
 
     def test_tally_is_deterministic_and_links_structured_verifiers(self) -> None:
         document = self.build([self.vote(11), self.vote(12)])

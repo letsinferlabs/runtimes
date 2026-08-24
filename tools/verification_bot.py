@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from tools import community_verification, generate_manifest
+from tools import candidate_policy, community_verification, generate_manifest
 
 
 REPOSITORY = "letsinferlabs/runtimes"
@@ -203,6 +204,8 @@ def pull_request(number: int) -> dict[str, Any]:
         or value.get("number") != number
         or value.get("state") != "open"
         or value.get("base", {}).get("ref") != "main"
+        or re.fullmatch(r"[0-9a-f]{40}", str(value.get("base", {}).get("sha")))
+        is None
         or not isinstance(value.get("head", {}).get("sha"), str)
         or not isinstance(value.get("head", {}).get("ref"), str)
         or not isinstance(value.get("head", {}).get("repo", {}).get("full_name"), str)
@@ -225,14 +228,15 @@ def _pr_contract(pr: Mapping[str, Any], files: list[str]) -> Any:
         str(author.get("login")), int(author.get("id", -1)), str(author.get("type"))
     )
     return benchmark_verification.PullRequest(
-        int(pr["number"]),
-        str(pr["html_url"]),
-        "OPEN",
-        "main",
-        str(pr["head"]["sha"]),
-        author_identity,
-        tuple(files),
-        tuple(sorted(
+        number=int(pr["number"]),
+        url=str(pr["html_url"]),
+        state="OPEN",
+        base_ref="main",
+        base_sha=str(pr["base"]["sha"]),
+        head_sha=str(pr["head"]["sha"]),
+        author=author_identity,
+        files=tuple(files),
+        labels=tuple(sorted(
             str(item["name"])
             for item in pr.get("labels", [])
             if isinstance(item, dict) and isinstance(item.get("name"), str)
@@ -243,7 +247,7 @@ def _pr_contract(pr: Mapping[str, Any], files: list[str]) -> Any:
 def execution_source(
     pr: Mapping[str, Any], destination: pathlib.Path
 ) -> tuple[pathlib.Path, str, dict[str, Any]]:
-    benchmark_verification, build_archive = _core()
+    benchmark_verification, _build_archive = _core()
     files = _flatten_pages(
         api(
             f"repos/{REPOSITORY}/pulls/{pr['number']}/files?per_page=100",
@@ -253,28 +257,16 @@ def execution_source(
     names = [str(item.get("filename")) for item in files]
     contract = _pr_contract(pr, names)
     candidate = benchmark_verification.select_candidate(contract, None)
+    try:
+        bundle = benchmark_verification.download_verifier_bundle(
+            contract, candidate, destination / "verifier-artifact", gh="gh"
+        )
+    except Exception as error:
+        raise BotError(f"exact verifier bundle is unavailable: {error}") from error
     checkout = benchmark_verification.fetch_pull_request(
         contract, destination / "checkout", gh="gh"
     )
-    candidate_root = checkout / candidate
-    runtime_path = candidate_root / "runtime.json"
-    try:
-        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise BotError("candidate runtime.json is invalid") from error
-    if not isinstance(runtime, dict) or runtime.get("id") != candidate:
-        raise BotError("candidate runtime identity differs from its directory")
-    pack = destination / f"{candidate}.letsinfer"
-    try:
-        build_archive(candidate_root, pack)
-        subject = benchmark_verification.execution_subject(
-            runtime,
-            pack_sha256=hashlib.sha256(pack.read_bytes()).hexdigest(),
-            pack_bytes=pack.stat().st_size,
-        )
-    except Exception as error:
-        raise BotError(f"candidate execution subject is invalid: {error}") from error
-    return checkout, candidate, subject
+    return checkout, candidate, bundle.subject
 
 
 def accepted_submissions(
@@ -547,6 +539,15 @@ def proposal_head(
     return str(pr["head"]["sha"])
 
 
+def runtime_publication_source(
+    checkout: pathlib.Path, candidate: str, manifest_digest: str
+) -> str:
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", manifest_digest) is None:
+        raise BotError("runtime OCI manifest digest is invalid")
+    repository = candidate_policy.runtime_repository(checkout, candidate)
+    return f"{repository}@{manifest_digest}"
+
+
 def materialize(
     checkout: pathlib.Path,
     candidate: str,
@@ -608,9 +609,10 @@ def materialize(
     previous = generate_manifest.read_object(checkout / "manifest.json")
     sources = generate_manifest.sources_from_manifest(checkout / "manifest.json")
     version = consensus["runtime_version"]
-    sources[(candidate, version)] = (
-        f"ghcr.io/letsinferlabs/runtimes/{candidate}@"
-        f"{consensus['subject']['runtime_oci_manifest_digest']}"
+    sources[(candidate, version)] = runtime_publication_source(
+        checkout,
+        candidate,
+        str(consensus["subject"]["runtime_oci_manifest_digest"]),
     )
     manifest = generate_manifest.generate(checkout, sources, previous)
     final_commit = put_content(
@@ -801,6 +803,11 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (BotError, community_verification.ConsensusError, generate_manifest.ManifestError) as error:
+    except (
+        BotError,
+        candidate_policy.CandidatePolicyError,
+        community_verification.ConsensusError,
+        generate_manifest.ManifestError,
+    ) as error:
         print(f"FATAL: {error}", file=sys.stderr)
         raise SystemExit(1)

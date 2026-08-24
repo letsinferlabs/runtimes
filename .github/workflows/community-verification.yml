@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  attestations: read
   contents: read
 
 jobs:
@@ -63,6 +64,7 @@ jobs:
       - name: Validate submission and update consensus
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
+          LETSINFER_ATTESTATION_TOKEN: ${{ github.token }}
           LETSINFER_CORE_ROOT: .core
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
