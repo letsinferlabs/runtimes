@@ -1,3 +1,17 @@
+> **Run this model with [Let's Infer](https://letsinfer.ai/).**
+>
+> Install Let's Infer first:
+>
+> ```sh
+> curl -fsSL https://letsinfer.ai/install.sh | sh
+> ```
+>
+> Then install this model:
+>
+> ```sh
+> letsinfer install deepseek-v4-flash
+> ```
+
 # DeepSeek V4 Flash EXL3 / SparkInfer / DGX Spark
 
 Run the `0xSero/deepseek-v4-flash-0731-spark` 3.0-bpw EXL3 checkpoint on
