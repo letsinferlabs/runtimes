@@ -62,7 +62,7 @@ jobs:
           base=pull.get("base", {}).get("sha")
           if (pull.get("state") != "open" or pull.get("draft") is True
                   or pull.get("base", {}).get("ref") != "main"
-                  or pull.get("merge_commit_sha") != identity["trigger_sha"]
+                  or head != identity["trigger_sha"]
                   or re.fullmatch(r"[0-9a-f]{40}", str(head)) is None
                   or re.fullmatch(r"[0-9a-f]{40}", str(base)) is None):
               raise SystemExit("pull request is not an open ready proposal against main")

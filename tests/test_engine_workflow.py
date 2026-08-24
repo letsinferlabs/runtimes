@@ -25,7 +25,10 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request_target", workflow)
         self.assertNotIn("secrets.", workflow)
         self.assertIn("raw-verifier-pr-", workflow)
-        self.assertIn('pull.get("merge_commit_sha") != identity["trigger_sha"]', workflow)
+        self.assertIn('head != identity["trigger_sha"]', workflow)
+        self.assertNotIn(
+            'pull.get("merge_commit_sha") != identity["trigger_sha"]', workflow
+        )
         self.assertIn("path: trusted", workflow)
         self.assertIn("working-directory: trusted", workflow)
 
