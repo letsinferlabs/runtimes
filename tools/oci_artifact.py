@@ -270,7 +270,7 @@ class Registry:
         query.append(("digest", value))
         target = location.path + "?" + urllib.parse.urlencode(query)
         connection = http.client.HTTPSConnection(
-            self.plan.registry, timeout=300
+            self.plan.registry, timeout=600
         )
         try:
             connection.putrequest("PUT", target)

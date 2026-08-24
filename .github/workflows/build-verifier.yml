@@ -1,0 +1,207 @@
+name: Build verifier artifact
+
+on:
+  workflow_run:
+    workflows: [Request verifier artifact]
+    types: [completed]
+
+concurrency:
+  group: verifier-build-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+# This job executes contributor-controlled build recipes. It intentionally has
+# no secrets, no package writes, no attestations, and a read-only token.
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ${{ vars.LETSINFER_VERIFIER_RUNNER || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 180
+    steps:
+      - name: Resolve the exact triggering proposal
+        id: event
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$TRIGGER_RUN_ID" > "$RUNNER_TEMP/request-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$TRIGGER_HEAD_SHA/pulls?per_page=100" > "$RUNNER_TEMP/pulls.json"
+          python3 - "$RUNNER_TEMP/request-run.json" "$RUNNER_TEMP/pulls.json" "$RUNNER_TEMP/identity.json" <<'PY'
+          import json, pathlib, re, sys
+          run=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          pulls=json.loads(pathlib.Path(sys.argv[2]).read_text())
+          trigger_sha=run.get("head_sha")
+          if (run.get("event") != "pull_request" or run.get("conclusion") != "success"
+                  or run.get("path") != ".github/workflows/request-verifier.yml"
+                  or re.fullmatch(r"[0-9a-f]{40}", str(trigger_sha)) is None
+                  or not isinstance(pulls, list)):
+              raise SystemExit("triggering verifier request identity is invalid")
+          numbers={item.get("number") for item in run.get("pull_requests", [])
+                   if isinstance(item, dict) and isinstance(item.get("number"), int)}
+          numbers.update(item.get("number") for item in pulls
+                         if isinstance(item, dict) and item.get("state") == "open"
+                         and item.get("base", {}).get("ref") == "main")
+          if len(numbers) != 1:
+              raise SystemExit("verifier request does not map to exactly one pull request")
+          pathlib.Path(sys.argv[3]).write_text(json.dumps({
+              "number": numbers.pop(), "trigger_sha": trigger_sha,
+          }))
+          PY
+          number=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["number"])' "$RUNNER_TEMP/identity.json")
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$number" > "$RUNNER_TEMP/pull.json"
+          python3 - "$RUNNER_TEMP/identity.json" "$RUNNER_TEMP/pull.json" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, re, sys
+          identity=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          pull=json.loads(pathlib.Path(sys.argv[2]).read_text())
+          head=pull.get("head", {}).get("sha")
+          base=pull.get("base", {}).get("sha")
+          if (pull.get("state") != "open" or pull.get("draft") is True
+                  or pull.get("base", {}).get("ref") != "main"
+                  or pull.get("merge_commit_sha") != identity["trigger_sha"]
+                  or re.fullmatch(r"[0-9a-f]{40}", str(head)) is None
+                  or re.fullmatch(r"[0-9a-f]{40}", str(base)) is None):
+              raise SystemExit("pull request is not an open ready proposal against main")
+          with pathlib.Path(sys.argv[3]).open("a") as output:
+              output.write(f"number={pull['number']}\nhead={head}\nbase={base}\n")
+          PY
+      - name: Check out the exact proposal head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.event.outputs.head }}
+          path: proposal
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out trusted base-branch tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.event.outputs.base }}
+          path: trusted
+          persist-credentials: false
+      - name: Require immutable released core contract
+        env:
+          BASE_SHA: ${{ steps.event.outputs.base }}
+          CORE_SHA: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$CORE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$WORKFLOW_SHA" = "$BASE_SHA"
+      - name: Check out the released pack contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: letsinferlabs/letsinfer
+          ref: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
+          path: core-contract
+          persist-credentials: false
+      - name: Set up the isolated BuildKit builder
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Classify the proposal
+        id: candidate
+        env:
+          BASE_SHA: ${{ steps.event.outputs.base }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          python3 tools/candidate_policy.py classify --root ../proposal \
+            --base "$BASE_SHA" --head HEAD \
+            --github-output "$GITHUB_OUTPUT" --output "$RUNNER_TEMP/classification.json"
+          candidate=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["candidate"])' "$RUNNER_TEMP/classification.json")
+          python3 tools/candidate_policy.py repositories --root ../proposal \
+            --base "$BASE_SHA" --candidate "$candidate" \
+            --github-output "$GITHUB_OUTPUT" --output "$RUNNER_TEMP/repositories.json"
+      - name: Audit source and build the runtime twice
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.candidate }}
+          MODE: ${{ steps.candidate.outputs.mode }}
+          PR_NUMBER: ${{ steps.event.outputs.number }}
+          HEAD_SHA: ${{ steps.event.outputs.head }}
+          BASE_SHA: ${{ steps.event.outputs.base }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUNTIME_REPOSITORY: ${{ steps.candidate.outputs.runtime_repository }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          raw="$RUNNER_TEMP/raw"
+          mkdir "$raw"
+          cp "$RUNNER_TEMP/classification.json" "$raw/classification.json"
+          python3 tools/candidate_policy.py audit --root ../proposal \
+            --candidate "$CANDIDATE" --mode "$MODE" \
+            --output "$raw/candidate-audit.json"
+          ../core-contract/bin/letsinfer pack "../proposal/$CANDIDATE" \
+            --output "$raw/runtime-a.letsinfer"
+          ../core-contract/bin/letsinfer pack "../proposal/$CANDIDATE" \
+            --output "$raw/runtime-b.letsinfer"
+          cmp "$raw/runtime-a.letsinfer" "$raw/runtime-b.letsinfer"
+          version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "../proposal/$CANDIDATE/runtime.json")
+          python3 tools/oci_artifact.py plan --artifact "$raw/runtime-a.letsinfer" \
+            --repository "$RUNTIME_REPOSITORY" \
+            --candidate "$CANDIDATE" --version "$version" --output "$raw/runtime-plan.json"
+          python3 - "$raw/build.json" "$CANDIDATE" "$MODE" <<'PY'
+          import json, os, pathlib, sys
+          path, candidate, mode = sys.argv[1:]
+          value = {
+              "schema_version": 1,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "pull_request": int(os.environ["PR_NUMBER"]),
+              "proposal_head_sha": os.environ["HEAD_SHA"],
+              "proposal_base_sha": os.environ["BASE_SHA"],
+              "build_workflow_sha": os.environ["WORKFLOW_SHA"],
+              "build_workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "candidate": candidate,
+              "mode": mode,
+          }
+          pathlib.Path(path).write_text(json.dumps(value, sort_keys=True, separators=(",", ":"))+"\n")
+          PY
+      - name: Build the exact Engine OCI twice
+        if: steps.candidate.outputs.mode == 'build-engine'
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.candidate }}
+          ENGINE_REPOSITORY: ${{ steps.candidate.outputs.engine_repository }}
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          raw="$RUNNER_TEMP/raw"
+          repository="$ENGINE_REPOSITORY"
+          platform=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_platform"])' "$raw/candidate-audit.json")
+          docker buildx build "../proposal/$CANDIDATE" \
+            --file "../proposal/$CANDIDATE/image/Dockerfile" \
+            --platform "$platform" --build-context letsinfer-tools=. --no-cache \
+            --build-arg SOURCE_DATE_EPOCH=0 \
+            --output "type=oci,dest=$raw/engine.oci.tar,oci-mediatypes=true,rewrite-timestamp=true,compression=gzip"
+          python3 tools/oci_layout.py inspect --archive "$raw/engine.oci.tar" \
+            --platform "$platform" --repository "$repository" \
+            --output "$raw/engine-a-plan.json"
+          docker buildx build "../proposal/$CANDIDATE" \
+            --file "../proposal/$CANDIDATE/image/Dockerfile" \
+            --platform "$platform" --build-context letsinfer-tools=. --no-cache \
+            --build-arg SOURCE_DATE_EPOCH=0 \
+            --output "type=oci,dest=$raw/engine-b.oci.tar,oci-mediatypes=true,rewrite-timestamp=true,compression=gzip"
+          python3 tools/oci_layout.py inspect --archive "$raw/engine-b.oci.tar" \
+            --platform "$platform" --repository "$repository" \
+            --output "$raw/engine-b-plan.json"
+          cmp "$raw/engine-a-plan.json" "$raw/engine-b-plan.json"
+          rm "$raw/engine-b.oci.tar"
+          inventory="$RUNNER_TEMP/inventory"
+          docker buildx build "../proposal/$CANDIDATE" \
+            --file "../proposal/$CANDIDATE/image/Dockerfile" \
+            --platform "$platform" --target letsinfer-engine-inventory \
+            --build-context letsinfer-tools=. --no-cache \
+            --build-arg SOURCE_DATE_EPOCH=0 \
+            --output "type=local,dest=$inventory"
+          test -s "$inventory/engine-inventory.json"
+          cp "$inventory/engine-inventory.json" "$raw/engine-inventory.json"
+      - name: Upload raw, untrusted build outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: raw-verifier-pr-${{ steps.event.outputs.number }}-${{ steps.event.outputs.head }}
+          path: ${{ runner.temp }}/raw
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0

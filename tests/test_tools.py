@@ -8,6 +8,7 @@ import hashlib
 import json
 import pathlib
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -17,6 +18,7 @@ from tools import (
     generate_manifest,
     oci_artifact,
     pin_engine,
+    readme_onboarding,
     set_publication_source,
     sign_manifest,
 )
@@ -247,6 +249,42 @@ class ManifestToolTests(unittest.TestCase):
             generate_manifest.validate_model_links(
                 runtime, "https://huggingface.co/Owner/Primary\n"
             )
+
+    def test_runtime_readme_onboarding_uses_the_logical_model(self) -> None:
+        block = readme_onboarding.launch_block("qwen3.8-27b")
+        self.assertTrue(block.startswith("> **Run this model with [Let's Infer]"))
+        self.assertIn("https://letsinfer.ai/", block)
+        self.assertIn("curl -fsSL https://letsinfer.ai/install.sh | sh", block)
+        self.assertIn("letsinfer install qwen3.8-27b", block)
+        readme_onboarding.validate(block + "\n# Existing README\n", "qwen3.8-27b")
+        with self.assertRaisesRegex(
+            readme_onboarding.ReadmeError, "logical model deepseek-v4-flash"
+        ):
+            readme_onboarding.validate(
+                block + "\n# Existing README\n", "deepseek-v4-flash"
+            )
+
+    def test_runtime_readme_onboarding_preserves_existing_content(self) -> None:
+        existing = "# Upstream runtime\n\nOriginal documentation.\n"
+        updated = readme_onboarding.prepend(existing, "model")
+        self.assertTrue(updated.endswith(existing))
+        self.assertEqual(
+            readme_onboarding.prepend(updated, "model"),
+            updated,
+        )
+        misplaced = existing + readme_onboarding.launch_block("model")
+        with self.assertRaisesRegex(readme_onboarding.ReadmeError, "misplaced"):
+            readme_onboarding.prepend(misplaced, "model")
+
+    def test_runtime_readme_onboarding_supports_documented_script_entrypoint(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "tools/readme_onboarding.py"), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("--candidate", completed.stdout)
 
     def test_signature_document_is_ed25519_and_content_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

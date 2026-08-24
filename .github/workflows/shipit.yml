@@ -1,0 +1,91 @@
+name: Ship reviewed runtime
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: runtime-shipit-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  attestations: read
+  checks: write
+  contents: read
+  packages: write
+  pull-requests: write
+
+jobs:
+  ship:
+    if: >-
+      github.repository == 'letsinferlabs/runtimes' &&
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/shipit')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production-runtime-publication
+    steps:
+      - name: Check out trusted default-branch publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Resolve exact current proposal head
+        id: proposal
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          value=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)
+          [[ "$value" =~ ^[0-9a-f]{40}$ ]]
+          echo "head=$value" >> "$GITHUB_OUTPUT"
+      - name: Check out proposal as data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.proposal.outputs.head }}
+          path: proposal
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Mint repository-scoped GitHub App token
+        id: app
+        env:
+          APP_ID: ${{ vars.LETSINFER_VERIFICATION_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.LETSINFER_VERIFICATION_APP_PRIVATE_KEY }}
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          test -n "$APP_ID" && test -n "$APP_PRIVATE_KEY"
+          key="$RUNNER_TEMP/github-app.pem"
+          printf '%s' "$APP_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          python3 tools/github_app_token.py --app-id "$APP_ID" \
+            --private-key "$key" --github-output "$GITHUB_OUTPUT"
+          rm -f "$key"
+      - name: Publish exact artifacts and merge reviewed head
+        id: publish
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          LETSINFER_ATTESTATION_TOKEN: ${{ github.token }}
+          OCI_USERNAME: ${{ github.actor }}
+          OCI_PASSWORD: ${{ github.token }}
+          LETSINFER_VERIFIER_BYPASS_GITHUB_IDS: ${{ vars.LETSINFER_VERIFIER_BYPASS_GITHUB_IDS }}
+          LETSINFER_VERIFICATION_BOT_LOGIN: ${{ vars.LETSINFER_VERIFICATION_BOT_LOGIN }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          python3 -m tools.shipit --event "$GITHUB_EVENT_PATH" --root ../proposal
+      - name: Report rejected publication command
+        if: failure() && steps.publish.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          HEAD_SHA: ${{ steps.proposal.outputs.head }}
+        working-directory: trusted
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/check-runs" --method POST --input - <<JSON
+          {"name":"runtime/shipit","head_sha":"$HEAD_SHA","status":"completed","conclusion":"failure","output":{"title":"Runtime publication rejected","summary":"The trusted publisher rejected the command. Review the workflow log; no merge was performed."}}
+          JSON
