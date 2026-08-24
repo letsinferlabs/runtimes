@@ -34,12 +34,14 @@ After this candidate is independently verified and published:
 ```bash
 letsinfer install deepseek-v4-flash \
   --runtime sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark
-letsinfer benchmark deepseek-v4-flash --c1
+letsinfer benchmark deepseek-v4-flash
 ```
 
-The C1 contract covers code and prose at 32K, 64K, 128K, and a 260,000-token
-prompt under the 262,144-token cap. Benchmark claims are added only from a
-complete immutable evidence directory bound to the measured commit.
+The schema-3 contract runs the canonical code workload once at C1, C2, and C4
+for 32K, 64K, 128K, and a 260,000-token prompt under the 262,144-token cap. It
+uses one fresh process/store for the complete matrix and intentionally retains
+prefix state between cells. Benchmark claims are added only from a complete
+immutable evidence directory bound to the measured commit.
 
 ## Upstream sources
 
