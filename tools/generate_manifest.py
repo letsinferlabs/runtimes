@@ -1104,14 +1104,6 @@ def generate(
         candidate = runtime["id"]
         target = runtime["target"]
         target_id = target["id"]
-        existing_target = targets.setdefault(target_id, {"match": target})
-        if existing_target["match"] != target:
-            raise ManifestError(f"target contract differs across candidates: {target_id}")
-        model_target = models.setdefault(
-            runtime["logical_model"], {"targets": {}}
-        )["targets"].setdefault(
-            target_id, {"recommended": None, "candidates": {}}
-        )
         releases = history.get((runtime["logical_model"], target_id, candidate), {})
         retained_historical_migrations.update(
             f"{candidate}@{version}" for version in releases
@@ -1299,6 +1291,14 @@ def generate(
         }
         if not releases:
             continue
+        existing_target = targets.setdefault(target_id, {"match": target})
+        if existing_target["match"] != target:
+            raise ManifestError(f"target contract differs across candidates: {target_id}")
+        model_target = models.setdefault(
+            runtime["logical_model"], {"targets": {}}
+        )["targets"].setdefault(
+            target_id, {"recommended": None, "candidates": {}}
+        )
         latest = max(releases, key=_version_key)
         model_target["candidates"][candidate] = {
             "latest": latest,

@@ -31,6 +31,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 class ManifestToolTests(unittest.TestCase):
     def test_changed_candidate_selection_is_flat_and_shared_changes_fan_out(self) -> None:
         qwen = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        nemotron = (
+            "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark"
+        )
         deepseek = "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark"
         sparkinfer = "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark"
         self.assertEqual(
@@ -39,7 +42,7 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(
             changed_candidates.changed(ROOT, ["tools/generate_manifest.py"]),
-            sorted((deepseek, qwen, sparkinfer)),
+            sorted((deepseek, nemotron, qwen, sparkinfer)),
         )
 
     def test_runtime_oci_plan_is_deterministic_and_pull_compatible(self) -> None:
@@ -79,6 +82,25 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(manifest_path.read_bytes(), expected)
 
+    def test_unqualified_candidate_does_not_enter_catalog_projection(self) -> None:
+        manifest_path = ROOT / "manifest.json"
+        sources = generate_manifest.sources_from_manifest(manifest_path)
+        previous = generate_manifest.read_object(manifest_path)
+        items = generate_manifest.candidates(ROOT, sources)
+        unqualified = copy.deepcopy(items[0])
+        unqualified["runtime"]["id"] = "engine--owner--unqualified--target"
+        unqualified["runtime"]["logical_model"] = "unqualified"
+        unqualified["runtime"]["target"]["id"] = "unqualified-target"
+        unqualified["qualified"] = False
+        unqualified["consensus"] = None
+        unqualified["source"] = None
+        unqualified["release_metadata"]["provenance"] = None
+        with mock.patch.object(
+            generate_manifest, "candidates", return_value=[*items, unqualified]
+        ):
+            generated = generate_manifest.generate(ROOT, sources, previous)
+        self.assertEqual(generated, previous)
+
     def test_orphan_contract_migration_is_rejected(self) -> None:
         manifest_path = ROOT / "manifest.json"
         sources = generate_manifest.sources_from_manifest(manifest_path)
@@ -110,18 +132,19 @@ class ManifestToolTests(unittest.TestCase):
 
     def test_scored_maintainer_bypasses_mark_author_benchmark_source(self) -> None:
         manifest = generate_manifest.read_object(ROOT / "manifest.json")
-        expected = {
-            (
-                "qwen3.8-27b",
-                "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-                "0.1.0-rc.17",
-            ),
-            (
-                "deepseek-v4-flash",
-                "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-                "0.1.0-rc.35",
-            ),
-        }
+        expected: set[tuple[str, str, str]] = set()
+        for consensus_path in ROOT.glob("*/benchmark.consensus.json"):
+            consensus = generate_manifest.read_object(consensus_path)
+            if consensus["score"]["policy"] != "letsinfer-throughput-geomean-of-author-run-v1":
+                continue
+            runtime = generate_manifest.read_object(consensus_path.with_name("runtime.json"))
+            expected.add(
+                (
+                    runtime["logical_model"],
+                    runtime["id"],
+                    runtime["version"],
+                )
+            )
         observed: set[tuple[str, str, str]] = set()
         for model_id, model in manifest["models"].items():
             for target in model["targets"].values():
@@ -145,6 +168,7 @@ class ManifestToolTests(unittest.TestCase):
             {record["runtime"]["id"] for record in records},
             {
                 "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
+                "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
                 "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
                 "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
             },
