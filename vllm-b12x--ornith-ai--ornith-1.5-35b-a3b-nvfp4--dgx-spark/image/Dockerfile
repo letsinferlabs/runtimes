@@ -6,6 +6,7 @@ ARG SOURCE_DATE_EPOCH
 WORKDIR /build/letsinfer-prefix-store
 COPY adapter/letsinfer_prefix_store/ ./
 RUN SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
+    cargo test --release --locked && \
     cargo build --release --locked --features python && \
     strip --strip-debug target/release/libletsinfer_prefix_store.so && \
     install -D -m 0555 target/release/libletsinfer_prefix_store.so \
@@ -39,6 +40,8 @@ COPY adapter/letsinfer_prefix_connector/__init__.py \
   /usr/local/lib/python3.12/dist-packages/letsinfer_prefix_connector/__init__.py
 COPY adapter/letsinfer_prefix_connector/connector.py \
   /usr/local/lib/python3.12/dist-packages/letsinfer_prefix_connector/connector.py
+RUN --mount=type=bind,source=adapter/letsinfer_prefix_connector/tests,target=/tmp/connector-tests,readonly \
+    PYTHONDONTWRITEBYTECODE=1 python3 /tmp/connector-tests/run.py
 RUN chmod 0555 /opt/letsinfer/bin/engine-adapter && \
     chmod 0444 \
       /opt/letsinfer/lib/engine_frontend.py \
