@@ -250,6 +250,19 @@ class PublicationPolicyTests(unittest.TestCase):
             candidate_policy.runtime_repository(ROOT, existing),
             f"ghcr.io/letsinferlabs/runtimes/{existing}",
         )
+        existing_repositories = candidate_policy.publication_repositories(
+            ROOT, existing
+        )
+        self.assertEqual(
+            existing_repositories["engine_repository"],
+            f"ghcr.io/letsinferlabs/engines/{existing}",
+        )
+        self.assertEqual(
+            existing_repositories["engine_existing_reference"],
+            generate_manifest.read_object(ROOT / existing / "runtime.json")["engine"][
+                "oci"
+            ]["reference"],
+        )
         repositories = candidate_policy.publication_repositories(
             ROOT, "newengine--owner--model--target"
         )

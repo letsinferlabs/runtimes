@@ -199,17 +199,25 @@ jobs:
         env:
           CANDIDATE: ${{ steps.candidate.outputs.candidate }}
           ENGINE_REPOSITORY: ${{ steps.candidate.outputs.engine_repository }}
+          ENGINE_EXISTING_REFERENCE: ${{ steps.candidate.outputs.engine_existing_reference }}
         working-directory: trusted
         run: |
           set -euo pipefail
           raw="$RUNNER_TEMP/raw"
           repository="$ENGINE_REPOSITORY"
           platform=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_platform"])' "$raw/candidate-audit.json")
+          thin=(python3 tools/oci_layout.py thin --archive - \
+            --platform "$platform" --repository "$repository" \
+            --output "$raw/engine.oci.tar")
+          if test -n "$ENGINE_EXISTING_REFERENCE"; then
+            thin+=(--existing-reference "$ENGINE_EXISTING_REFERENCE")
+          fi
           docker buildx build "../proposal/$CANDIDATE" \
             --file "../proposal/$CANDIDATE/image/Dockerfile" \
             --platform "$platform" --build-context letsinfer-tools=. --no-cache \
             --build-arg SOURCE_DATE_EPOCH=0 \
-            --output "type=oci,dest=$raw/engine.oci.tar,oci-mediatypes=true,rewrite-timestamp=true,compression=gzip"
+            --output "type=oci,dest=-,oci-mediatypes=true,rewrite-timestamp=true,compression=gzip" \
+            | "${thin[@]}"
           python3 tools/oci_layout.py inspect --archive "$raw/engine.oci.tar" \
             --platform "$platform" --repository "$repository" \
             --output "$raw/engine-a-plan.json"
@@ -233,11 +241,18 @@ jobs:
               if stat.S_ISREG(mode):
                   os.utime(path, (946684800, 946684800), follow_symlinks=False)
           PY
+          thin=(python3 tools/oci_layout.py thin --archive - \
+            --platform "$platform" --repository "$repository" \
+            --output "$raw/engine-b.oci.tar")
+          if test -n "$ENGINE_EXISTING_REFERENCE"; then
+            thin+=(--existing-reference "$ENGINE_EXISTING_REFERENCE")
+          fi
           docker buildx build "../proposal/$CANDIDATE" \
             --file "../proposal/$CANDIDATE/image/Dockerfile" \
             --platform "$platform" --build-context letsinfer-tools=. --no-cache \
             --build-arg SOURCE_DATE_EPOCH=0 \
-            --output "type=oci,dest=$raw/engine-b.oci.tar,oci-mediatypes=true,rewrite-timestamp=true,compression=gzip"
+            --output "type=oci,dest=-,oci-mediatypes=true,rewrite-timestamp=true,compression=gzip" \
+            | "${thin[@]}"
           python3 tools/oci_layout.py inspect --archive "$raw/engine-b.oci.tar" \
             --platform "$platform" --repository "$repository" \
             --output "$raw/engine-b-plan.json"
