@@ -124,21 +124,18 @@
     "config": {
       "durable_capacity_bytes": 68719476736,
       "resident_capacity_bytes": 0,
-      "staging_capacity_bytes": 1073741824,
       "ttl_seconds": 604800,
       "min_tokens": 512,
       "direct_reads": true,
       "capture": true,
-      "prefix_lookup": true
+      "prefix_lookup": true,
+      "host_capacity_bytes": 1073741824
     }
   },
   "serving": {
     "max_connections": 128,
     "max_active_requests": 10,
-    "max_context_tokens": 262144,
-    "gate": {
-      "measured_commit": "7c5a138e1f1d8d34d0e6a60d99c3163ee7af5373"
-    }
+    "max_context_tokens": 262144
   },
   "benchmark": {
     "contract": {

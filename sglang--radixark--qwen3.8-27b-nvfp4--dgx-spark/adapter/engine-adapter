@@ -35,8 +35,8 @@ def _cache_arguments(runtime: Mapping[str, Any]) -> Sequence[str]:
     config = cache.get("config")
     if not isinstance(config, Mapping):
         raise AdapterError("persistent cache config is missing")
-    staging_bytes = int(config.get("staging_capacity_bytes", 1024**3))
-    staging_gib = max(1, (staging_bytes + 1024**3 - 1) // 1024**3)
+    host_bytes = int(config.get("host_capacity_bytes", 1024**3))
+    host_gib = max(1, (host_bytes + 1024**3 - 1) // 1024**3)
     extra = {
         "durable_capacity_bytes": int(config["durable_capacity_bytes"]),
         "ttl_seconds": int(config["ttl_seconds"]),
@@ -48,9 +48,9 @@ def _cache_arguments(runtime: Mapping[str, Any]) -> Sequence[str]:
     return (
         "--enable-hierarchical-cache",
         "--hicache-host-memory-mode",
-        "buffer_only",
+        "cache",
         "--hicache-size",
-        str(staging_gib),
+        str(host_gib),
         "--hicache-write-policy",
         "write_through",
         "--hicache-io-backend",
