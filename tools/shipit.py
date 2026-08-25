@@ -233,6 +233,37 @@ def _check_runs(head: str) -> list[dict[str, Any]]:
     return list(latest.values())
 
 
+def _bypassed_community_wrapper(
+    item: Mapping[str, Any], *, head: str, checks: Mapping[str, Mapping[str, Any]]
+) -> bool:
+    authoritative = checks.get(verification_bot.CHECK_NAME)
+    app = item.get("app")
+    match = re.fullmatch(
+        r"https://github\.com/letsinferlabs/runtimes/actions/runs/"
+        r"([1-9][0-9]*)/job/[1-9][0-9]*",
+        str(item.get("details_url")),
+    )
+    if (
+        item.get("name") != "process"
+        or not isinstance(app, Mapping)
+        or app.get("slug") != "github-actions"
+        or match is None
+        or not isinstance(authoritative, Mapping)
+        or authoritative.get("status") != "completed"
+        or authoritative.get("conclusion") != "success"
+    ):
+        return False
+    run = verification_bot.api(
+        f"repos/{REPOSITORY}/actions/runs/{int(match[1])}"
+    )
+    return (
+        isinstance(run, Mapping)
+        and run.get("path") == ".github/workflows/community-verification.yml"
+        and run.get("head_sha") == head
+        and run.get("event") in {"pull_request_target", "issue_comment"}
+    )
+
+
 def require_checks(head: str, *, bypass: bool, wait_seconds: int = 0) -> None:
     deadline = time.monotonic() + wait_seconds
     while True:
@@ -253,6 +284,10 @@ def require_checks(head: str, *, bypass: bool, wait_seconds: int = 0) -> None:
             and item.get("conclusion") not in {"success", "neutral", "skipped"}
             and item.get("name") not in {CHECK_NAME}
             and not (bypass and item.get("name") == verification_bot.CHECK_NAME)
+            and not (
+                bypass
+                and _bypassed_community_wrapper(item, head=head, checks=by_name)
+            )
         ]
         bad_required = [
             name

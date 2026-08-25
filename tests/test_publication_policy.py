@@ -409,6 +409,55 @@ class PublicationPolicyTests(unittest.TestCase):
         ), self.assertRaisesRegex(shipit.ShipitError, "requests changes"):
             shipit._approved_review(31, 10000001, required=False)
 
+    def test_bypass_ignores_only_the_superseded_community_wrapper(self) -> None:
+        head = "a" * 40
+        runs = [
+            {
+                "id": 1,
+                "name": "validate",
+                "status": "completed",
+                "conclusion": "success",
+            },
+            {
+                "id": 2,
+                "name": verification_bot.CHECK_NAME,
+                "status": "completed",
+                "conclusion": "success",
+            },
+            {
+                "id": 3,
+                "name": "process",
+                "status": "completed",
+                "conclusion": "failure",
+                "details_url": (
+                    "https://github.com/letsinferlabs/runtimes/actions/runs/"
+                    "123/job/456"
+                ),
+                "app": {"slug": "github-actions"},
+            },
+        ]
+        workflow = {
+            "path": ".github/workflows/community-verification.yml",
+            "head_sha": head,
+            "event": "pull_request_target",
+        }
+        with (
+            mock.patch.object(shipit, "_check_runs", return_value=runs),
+            mock.patch.object(
+                verification_bot, "api", return_value=workflow
+            ) as api,
+        ):
+            shipit.require_checks(head, bypass=True)
+        api.assert_called_once_with("repos/letsinferlabs/runtimes/actions/runs/123")
+
+        workflow["path"] = ".github/workflows/validate.yml"
+        with (
+            mock.patch.object(shipit, "_check_runs", return_value=runs),
+            mock.patch.object(verification_bot, "api", return_value=workflow),
+            self.assertRaisesRegex(shipit.ShipitError, "blocking checks failed"),
+        ):
+            shipit.require_checks(head, bypass=True)
+
     def _waived_consensus(self, actor_id: int) -> tuple[dict, dict]:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
