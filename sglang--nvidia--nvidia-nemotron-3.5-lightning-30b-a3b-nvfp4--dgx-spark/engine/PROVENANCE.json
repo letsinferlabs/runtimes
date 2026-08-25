@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "base_image": "docker.io/lmsysorg/sglang@sha256:ee63304703432429d55cf2e4579b70c5a334ed4cc49194fb5290c077fcbbd4a0",
+  "base_image_id": "sha256:323c95b7d39569328eceac7a23c4271992df149e9835303da70acc3e9afa90be",
+  "base_sglang_version": "0.0.0.dev0",
+  "upstream_repository": "sgl-project/sglang",
+  "upstream_commit": "d59c1ddf70ee17fcc41c053ed38bd60bc6cc28cc",
+  "official_recipe": {
+    "repository": "NVIDIA-NeMo/Nemotron",
+    "commit": "e27b37133d652f72dbf631ff8bb487df45f8f7d1"
+  },
+  "spark_recipe": {
+    "repository": "MiaAI-Lab/Nemotron3.5-Lightning-DGX-Spark-RTX-5090-6000-PRO",
+    "commit": "38c16a403ea57f26f1828fa572270245ae51f01d"
+  },
+  "method": "immutable-base-adapter-overlay",
+  "runtime_fixes": [
+    "letsinfer-engine-protocol-v2-adapter",
+    "digest-pinned-arm64-base",
+    "immutable-model-and-dspark-revisions"
+  ]
+}
