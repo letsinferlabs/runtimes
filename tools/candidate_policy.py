@@ -364,8 +364,11 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
         "candidate": candidate,
         "files": records,
     }
-    tracked = _tracked_paths(root, candidate)
-    actual = [f"{candidate}/{record['path']}" for record in records]
+    # Git tree order and recursive filesystem order differ when a candidate
+    # mixes files and nested directories. The inventory is a set identity;
+    # normalize both traversals before comparing it.
+    tracked = sorted(_tracked_paths(root, candidate))
+    actual = sorted(f"{candidate}/{record['path']}" for record in records)
     if not tracked:
         raise CandidatePolicyError("candidate source is not tracked by Git")
     if actual != tracked:
