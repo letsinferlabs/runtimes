@@ -146,6 +146,17 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("actions/attest@", workflow)
         self.assertNotIn("actions/attest-build-provenance@", workflow)
 
+    def test_release_promotion_requires_the_exact_current_main_tree(self) -> None:
+        workflow = (ROOT / ".github/workflows/validate.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('test "$BASE_REF" = release', workflow)
+        self.assertIn("git fetch --no-tags --depth=1 origin main", workflow)
+        self.assertIn('git rev-parse "${HEAD_SHA}^{tree}"', workflow)
+        self.assertIn('git rev-parse "FETCH_HEAD^{tree}"', workflow)
+        self.assertIn('git rev-parse "${HEAD_SHA}^"', workflow)
+        self.assertIn('= "$BASE_SHA"', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
