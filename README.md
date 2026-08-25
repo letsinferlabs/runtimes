@@ -223,8 +223,8 @@ digest pulls, posts a publication receipt, and merges only that checked head.
 It is the only workflow allowed to publish an Engine OCI; ordinary runtime
 releases never rebuild or overwrite Engine images.
 
-Configured maintainers may waive only the second verifier after one successful
-independent verification and no correctness, safety, or restoration failure:
+Explicitly allowlisted maintainers may bypass the independent benchmark-verifier
+quorum when a maintainer release decision is required:
 
 ```text
 /shipit --bypass-verifiers
@@ -233,10 +233,15 @@ Reason: concise auditable justification
 
 The actor must have live `maintain` or `admin` permission and their immutable
 numeric GitHub ID must appear in the trusted comma-separated repository
-variable `LETSINFER_VERIFIER_BYPASS_GITHUB_IDS`. The waiver, reason, actor ID,
-comment, and time are retained in consensus and the publication receipt. It
-does not bypass review, failed checks, source audits, digest matching, public
-pull verification, or exact-head merge protection.
+variable `LETSINFER_VERIFIER_BYPASS_GITHUB_IDS`. The command itself is the
+maintainer authorization, so this path does not require a separate non-author
+maintainer review. The override, reason, actor ID, comment, and time are
+retained in consensus and the publication receipt. Accepted correctness,
+safety, or restoration failures remain blocking. The override does not bypass
+failed source/supply-chain checks, digest matching, trusted attestations,
+public pull verification, or exact-head merge protection. Without measured
+evidence the release is published without a benchmark score and is not eligible
+for automatic recommendation.
 
 After qualification, merging the exact revision to the `release` branch:
 
@@ -268,7 +273,7 @@ The `runtime-verification-bot` environment stores
 and bot login as `LETSINFER_VERIFICATION_APP_ID` and
 `LETSINFER_VERIFICATION_BOT_LOGIN`. The comma-separated
 `LETSINFER_VERIFIER_BYPASS_GITHUB_IDS` variable contains the immutable numeric
-IDs of maintainers authorized to use the verifier-only waiver. All workflows
+IDs of maintainers authorized to use the verifier override. All workflows
 also require `LETSINFER_VERIFICATION_CORE_SHA`, pinned to the exact 40-character
 commit of the released core verification contract. The workflow mints a short-lived
 token explicitly limited to this repository and those permissions.

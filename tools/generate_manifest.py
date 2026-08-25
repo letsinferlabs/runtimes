@@ -575,7 +575,22 @@ def validate_consensus_binding(
     candidate = runtime["id"]
     waiver = consensus.get("waiver")
     waived = waiver is not None
-    expected_verifiers = 1 if waived else 2
+    waiver_policy = waiver.get("policy") if isinstance(waiver, dict) else None
+    if waiver_policy == "maintainer-one-independent-pass-v1":
+        expected_verifiers = 1
+    elif waiver_policy == "allowlisted-maintainer-bypass-v1":
+        expected_verifiers = consensus.get("qualification", {}).get(
+            "independent_verifiers"
+        )
+        if (
+            not isinstance(expected_verifiers, int)
+            or isinstance(expected_verifiers, bool)
+            or expected_verifiers < 0
+            or expected_verifiers > 2
+        ):
+            raise ManifestError(f"runtime maintainer bypass is invalid: {candidate}")
+    else:
+        expected_verifiers = 2
     qualification = consensus.get("qualification")
     if (
         consensus.get("schema_version") != 2
@@ -595,6 +610,32 @@ def validate_consensus_binding(
         or len(consensus["verifiers"]) != expected_verifiers
     ):
         raise ManifestError(f"runtime consensus is not qualified: {candidate}")
+    if waiver_policy == "allowlisted-maintainer-bypass-v1":
+        score = consensus.get("score")
+        aggregate_tps = score.get("aggregate_tps") if isinstance(score, dict) else None
+        results = consensus.get("results")
+        if (
+            not isinstance(score, dict)
+            or set(score) != {"policy", "aggregate_tps"}
+            or score.get("policy")
+            != "letsinfer-throughput-geomean-of-verifier-means-v1"
+            or not isinstance(results, list)
+            or (
+                expected_verifiers == 0
+                and (aggregate_tps is not None or results != [])
+            )
+            or (
+                expected_verifiers > 0
+                and (
+                    not isinstance(aggregate_tps, (int, float))
+                    or isinstance(aggregate_tps, bool)
+                    or not math.isfinite(float(aggregate_tps))
+                    or aggregate_tps <= 0
+                    or not results
+                )
+            )
+        ):
+            raise ManifestError(f"runtime maintainer bypass score is invalid: {candidate}")
     if waived:
         configured = os.environ.get("LETSINFER_VERIFIER_BYPASS_GITHUB_IDS", "")
         values = configured.split(",") if configured else []
@@ -618,7 +659,11 @@ def validate_consensus_binding(
                 "issued_at",
             }
             or waiver.get("schema_version") != 1
-            or waiver.get("policy") != "maintainer-one-independent-pass-v1"
+            or waiver.get("policy")
+            not in {
+                "maintainer-one-independent-pass-v1",
+                "allowlisted-maintainer-bypass-v1",
+            }
             or not isinstance(waiver.get("reason"), str)
             or not waiver["reason"].strip()
             or len(waiver["reason"].encode("utf-8")) > 1000
@@ -1022,6 +1067,7 @@ def generate(
         if item["qualified"]:
             consensus = item["consensus"]
             consensus_path = f"{candidate}/benchmark.consensus.json"
+            consensus_score = consensus["score"]["aggregate_tps"]
             release = {
                 "authors": item["release_metadata"]["authors"],
                 "source": item["source"],
@@ -1029,17 +1075,26 @@ def generate(
                 "engine_oci": runtime["engine"]["oci"]["reference"],
                 "model_uri": runtime["model"]["uri"],
                 "license": item["release_metadata"]["license"],
-                "benchmark": {
-                    "id": consensus["consensus_id"],
-                    "suite": runtime["benchmark"]["contract"]["suite"],
-                    "score": consensus["score"]["aggregate_tps"],
-                },
+                "benchmark": (
+                    None
+                    if consensus_score is None
+                    else {
+                        "id": consensus["consensus_id"],
+                        "suite": runtime["benchmark"]["contract"]["suite"],
+                        "score": consensus_score,
+                    }
+                ),
                 "provenance": item["release_metadata"]["provenance"],
                 "verification": {
                     "method": (
-                        "maintainer-waiver-one-independent-v1"
-                        if consensus.get("waiver") is not None
-                        else "community-two-independent-v1"
+                        "allowlisted-maintainer-bypass-v1"
+                        if consensus.get("waiver", {}).get("policy")
+                        == "allowlisted-maintainer-bypass-v1"
+                        else (
+                            "maintainer-waiver-one-independent-v1"
+                            if consensus.get("waiver") is not None
+                            else "community-two-independent-v1"
+                        )
                     ),
                     "consensus_path": consensus_path,
                     "consensus_sha256": sha256_file(root / consensus_path),

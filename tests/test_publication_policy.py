@@ -185,6 +185,32 @@ class PublicationPolicyTests(unittest.TestCase):
         ), self.assertRaisesRegex(shipit.ShipitError, "permission is invalid"):
             shipit._permission(actor)
 
+    def test_allowlisted_bypass_does_not_require_a_second_maintainer(self) -> None:
+        with mock.patch.object(
+            verification_bot, "api", return_value=[]
+        ) as api:
+            self.assertIsNone(
+                shipit._approved_review(31, 10000001, required=False)
+            )
+        api.assert_called_once_with(
+            "repos/letsinferlabs/runtimes/pulls/31/reviews?per_page=100",
+            paginate=True,
+        )
+
+        requested_changes = [{
+            "id": 1,
+            "state": "CHANGES_REQUESTED",
+            "user": {
+                "login": "Reviewer",
+                "id": 10000002,
+                "type": "User",
+            },
+        }]
+        with mock.patch.object(
+            verification_bot, "api", return_value=requested_changes
+        ), self.assertRaisesRegex(shipit.ShipitError, "requests changes"):
+            shipit._approved_review(31, 10000001, required=False)
+
     def _waived_consensus(self, actor_id: int) -> tuple[dict, dict]:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
@@ -252,6 +278,112 @@ class PublicationPolicyTests(unittest.TestCase):
             os.environ, {
                 "LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001,10000002"
             }
+        ):
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+
+    def test_maintainer_bypass_accepts_zero_independent_verifiers(self) -> None:
+        runtime, consensus = self._waived_consensus(10000001)
+        consensus["qualification"]["independent_verifiers"] = 0
+        consensus["verifications"] = []
+        consensus["verifiers"] = []
+        consensus["results"] = []
+        consensus["score"] = {
+            "policy": "letsinfer-throughput-geomean-of-verifier-means-v1",
+            "aggregate_tps": None,
+        }
+        consensus["waiver"]["policy"] = "allowlisted-maintainer-bypass-v1"
+        consensus.pop("consensus_id")
+        consensus["consensus_id"] = hashlib.sha256(
+            generate_manifest.canonical_bytes(consensus)
+        ).hexdigest()
+
+        with mock.patch.dict(
+            os.environ,
+            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
+            clear=True,
+        ):
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+
+        consensus["score"]["aggregate_tps"] = 1.0
+        consensus.pop("consensus_id")
+        consensus["consensus_id"] = hashlib.sha256(
+            generate_manifest.canonical_bytes(consensus)
+        ).hexdigest()
+        with mock.patch.dict(
+            os.environ,
+            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
+            clear=True,
+        ), self.assertRaisesRegex(
+            generate_manifest.ManifestError, "bypass score is invalid"
+        ):
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+
+    def test_maintainer_bypass_materializes_without_verifier_comments(self) -> None:
+        candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
+        release = generate_manifest.read_object(ROOT / candidate / "release.json")
+        subject = {
+            "candidate_id": candidate,
+            "runtime_version": runtime["version"],
+            "proposal_head_sha": "a" * 40,
+            "execution_sha256": "b" * 64,
+            "engine_oci_manifest_digest": runtime["engine"]["oci"][
+                "reference"
+            ].rsplit("@", 1)[-1],
+            "benchmark_contract_sha256": hashlib.sha256(
+                generate_manifest.canonical_bytes(runtime["benchmark"]["contract"])
+            ).hexdigest(),
+            "target_contract_sha256": hashlib.sha256(
+                generate_manifest.canonical_bytes(runtime["target"])
+            ).hexdigest(),
+        }
+        pull = {
+            "number": 31,
+            "html_url": "https://github.com/letsinferlabs/runtimes/pull/31",
+            "user": {
+                "login": "RuntimeAuthor",
+                "id": 10000001,
+                "type": "User",
+            },
+        }
+        actor = {
+            "github_login": "RuntimeAuthor",
+            "github_id": 10000001,
+            "github_type": "User",
+        }
+        comment = {
+            "id": 123,
+            "html_url": (
+                "https://github.com/letsinferlabs/runtimes/pull/31"
+                "#issuecomment-123"
+            ),
+        }
+        with mock.patch.object(
+            verification_bot, "accepted_submissions", return_value=[]
+        ):
+            consensus = shipit._bypass_consensus(
+                pr=pull,
+                candidate=candidate,
+                subject=subject,
+                root=ROOT,
+                actor=actor,
+                reason="Sole maintainer release decision",
+                comment=comment,
+            )
+
+        self.assertTrue(consensus["qualification"]["passed"])
+        self.assertEqual(consensus["qualification"]["independent_verifiers"], 0)
+        self.assertEqual(consensus["verifiers"], [])
+        self.assertIsNone(consensus["score"]["aggregate_tps"])
+        self.assertEqual(
+            consensus["waiver"]["policy"],
+            "allowlisted-maintainer-bypass-v1",
+        )
+        self.assertEqual(consensus["runtime_authors"], release["authors"])
+        with mock.patch.dict(
+            os.environ,
+            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
+            clear=True,
         ):
             generate_manifest.validate_consensus_binding(runtime, consensus)
 
