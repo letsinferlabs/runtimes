@@ -11,11 +11,13 @@ import argparse
 import base64
 import hashlib
 import http.client
+import io
 import json
 import pathlib
 import re
 import shutil
 import stat
+import sys
 import tarfile
 import tempfile
 import urllib.error
@@ -47,6 +49,9 @@ INDEX_MEDIA_TYPES = {
 MAX_LAYOUT_BYTES = 16 << 30
 MAX_LAYOUT_FILES = 100_000
 MAX_GHCR_LAYER_BYTES = 10_000_000_000
+MAX_DOCUMENT_BYTES = 4 << 20
+EXTERNAL_BLOBS_FILE = "letsinfer-external-blobs.json"
+EXTERNAL_BLOBS_SCHEMA_VERSION = 1
 CONFIG_MEDIA_TYPES = {
     "application/vnd.oci.image.config.v1+json",
     "application/vnd.docker.container.image.v1+json",
@@ -159,7 +164,10 @@ class ImageLayout:
     manifest_descriptor: dict[str, Any]
     manifest: bytes
     config_descriptor: dict[str, Any]
+    layers: tuple[dict[str, Any], ...]
     reachable: tuple[dict[str, Any], ...]
+    external_reference: str | None = None
+    external_layers: tuple[dict[str, Any], ...] = ()
 
     @property
     def manifest_digest(self) -> str:
@@ -179,15 +187,29 @@ class ImageLayout:
             "manifest_digest": self.manifest_digest,
             "manifest_bytes": len(self.manifest),
             "config_digest": self.config_digest,
-            "layer_digests": [
-                item["digest"] for item in self.reachable[1:]
-            ],
+            "layer_digests": [item["digest"] for item in self.layers],
+            "local_layer_count": len(self.reachable) - 1,
+            "external_layer_count": len(self.external_layers),
         }
+        if self.external_reference is not None:
+            value["external_reference"] = self.external_reference
         if repository is not None:
             if REPOSITORY_RE.fullmatch(repository) is None:
                 raise LayoutError("repository must be registry/contained/path")
             value["reference"] = f"{repository}@{self.manifest_digest}"
         return value
+
+
+@dataclass(frozen=True)
+class RemoteImage:
+    reference: str
+    repository: str
+    manifest_digest: str
+    manifest: dict[str, Any]
+    config_descriptor: dict[str, Any]
+    config: dict[str, Any]
+    layers: tuple[dict[str, Any], ...]
+    diff_ids: tuple[str, ...]
 
 
 class MaterializedLayout:
@@ -224,6 +246,94 @@ def _blob(root: pathlib.Path, descriptor: Mapping[str, Any], where: str) -> byte
     if digest(data) != item["digest"]:
         raise LayoutError(f"{where} blob digest differs")
     return data
+
+
+def _external_inventory(
+    root: pathlib.Path,
+    *,
+    manifest_digest: str,
+    layers: list[dict[str, Any]],
+    diff_ids: list[str],
+) -> tuple[str | None, dict[int, dict[str, Any]]]:
+    path = root / EXTERNAL_BLOBS_FILE
+    if not path.exists():
+        return None, {}
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_DOCUMENT_BYTES:
+        raise LayoutError("external OCI blob inventory is invalid")
+    value = _object(path.read_bytes(), "external OCI blob inventory")
+    if set(value) != {
+        "schema_version",
+        "source_reference",
+        "target_repository",
+        "manifest_digest",
+        "layers",
+    } or value.get("schema_version") != EXTERNAL_BLOBS_SCHEMA_VERSION:
+        raise LayoutError("external OCI blob inventory schema is invalid")
+    source_reference = value.get("source_reference")
+    target_repository = value.get("target_repository")
+    if (
+        not isinstance(source_reference, str)
+        or REFERENCE_RE.fullmatch(source_reference) is None
+        or not isinstance(target_repository, str)
+        or REPOSITORY_RE.fullmatch(target_repository) is None
+        or source_reference.rsplit("@", 1)[0] != target_repository
+        or value.get("manifest_digest") != manifest_digest
+        or not isinstance(value.get("layers"), list)
+    ):
+        raise LayoutError("external OCI blob inventory identity is invalid")
+    remote = _remote_image(source_reference, check_layers=True)
+    remote_records: set[tuple[str, int, str, str]] = {
+        (
+            str(layer["digest"]),
+            int(layer["size"]),
+            str(layer["mediaType"]),
+            remote.diff_ids[index],
+        )
+        for index, layer in enumerate(remote.layers)
+    }
+    result: dict[int, dict[str, Any]] = {}
+    for offset, raw in enumerate(value["layers"]):
+        if not isinstance(raw, Mapping) or set(raw) != {
+            "index",
+            "digest",
+            "size",
+            "mediaType",
+            "diff_id",
+        }:
+            raise LayoutError(f"external OCI layer {offset} is invalid")
+        index = raw.get("index")
+        if (
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or index < 0
+            or index >= len(layers)
+            or index in result
+        ):
+            raise LayoutError(f"external OCI layer {offset} index is invalid")
+        layer = layers[index]
+        expected = {
+            "index": index,
+            "digest": layer["digest"],
+            "size": layer["size"],
+            "mediaType": layer["mediaType"],
+            "diff_id": diff_ids[index],
+        }
+        if dict(raw) != expected or (
+            str(layer["digest"]),
+            int(layer["size"]),
+            str(layer["mediaType"]),
+            diff_ids[index],
+        ) not in remote_records:
+            raise LayoutError(f"external OCI layer {offset} differs from its source")
+        blob = root / "blobs" / "sha256" / str(layer["digest"]).removeprefix(
+            "sha256:"
+        )
+        if blob.exists():
+            raise LayoutError(f"external OCI layer {offset} is redundantly materialized")
+        result[index] = layer
+    if not result:
+        raise LayoutError("external OCI blob inventory is empty")
+    return source_reference, result
 
 
 def inspect_root(root: pathlib.Path, platform: str) -> ImageLayout:
@@ -295,13 +405,26 @@ def inspect_root(root: pathlib.Path, platform: str) -> ImageLayout:
         or any(DIGEST_RE.fullmatch(str(value)) is None for value in diff_ids)
     ):
         raise LayoutError("image configuration rootfs differs from manifest layers")
-    reachable = [config]
+    validated_layers: list[dict[str, Any]] = []
     for offset, raw in enumerate(layers):
         layer = _descriptor(raw, f"image layer {offset}")
         if layer["mediaType"] not in LAYER_MEDIA_TYPES:
             raise LayoutError(f"image layer {offset} media type is unsupported")
         if layer["size"] > MAX_GHCR_LAYER_BYTES:
             raise LayoutError(f"image layer {offset} exceeds GHCR's 10 GB limit")
+        validated_layers.append(layer)
+    external_reference, external = _external_inventory(
+        root,
+        manifest_digest=str(selected["digest"]),
+        layers=validated_layers,
+        diff_ids=[str(value) for value in diff_ids],
+    )
+    reachable = [config]
+    external_layers: list[dict[str, Any]] = []
+    for offset, layer in enumerate(validated_layers):
+        if offset in external:
+            external_layers.append(layer)
+            continue
         _blob(root, layer, f"image layer {offset}")
         reachable.append(layer)
     return ImageLayout(
@@ -310,13 +433,299 @@ def inspect_root(root: pathlib.Path, platform: str) -> ImageLayout:
         manifest_descriptor=selected,
         manifest=selected_data,
         config_descriptor=config,
+        layers=tuple(validated_layers),
         reachable=tuple(reachable),
+        external_reference=external_reference,
+        external_layers=tuple(external_layers),
     )
 
 
 def inspect_archive(archive: pathlib.Path, platform: str) -> dict[str, Any]:
     with MaterializedLayout(archive, platform) as layout:
         return layout.document()
+
+
+def _write_tar_payload(
+    source: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    target: tarfile.TarFile,
+    *,
+    expected_digest: str | None,
+) -> bytes | None:
+    handle = source.extractfile(member)
+    if handle is None:
+        raise LayoutError(f"OCI layout entry is unreadable: {member.name}")
+    value = hashlib.sha256()
+    with tempfile.SpooledTemporaryFile(max_size=8 << 20) as spool:
+        remaining = member.size
+        while remaining:
+            chunk = handle.read(min(1024 * 1024, remaining))
+            if not chunk:
+                raise LayoutError(f"OCI layout entry size differs: {member.name}")
+            value.update(chunk)
+            spool.write(chunk)
+            remaining -= len(chunk)
+        if handle.read(1):
+            raise LayoutError(f"OCI layout entry size differs: {member.name}")
+        if expected_digest is not None and "sha256:" + value.hexdigest() != expected_digest:
+            raise LayoutError(f"OCI layout blob digest differs: {member.name}")
+        record = tarfile.TarInfo(member.name)
+        record.size = member.size
+        record.mode = 0o644
+        record.mtime = 0
+        record.uid = record.gid = 0
+        record.uname = record.gname = ""
+        spool.seek(0)
+        target.addfile(record, spool)
+        if member.size <= MAX_DOCUMENT_BYTES:
+            spool.seek(0)
+            return spool.read()
+    return None
+
+
+def thin_archive(
+    archive: pathlib.Path | None,
+    output: pathlib.Path,
+    *,
+    platform: str,
+    repository: str,
+    existing_reference: str | None = None,
+) -> dict[str, Any]:
+    """Stream an OCI layout while externalizing blobs already in its target package."""
+
+    _platform(platform)
+    repository_match = REPOSITORY_RE.fullmatch(repository)
+    if repository_match is None:
+        raise LayoutError("repository must be registry/contained/path")
+    remote: RemoteImage | None = None
+    remote_by_digest: dict[str, list[tuple[dict[str, Any], str]]] = {}
+    if existing_reference:
+        reference_match = REFERENCE_RE.fullmatch(existing_reference)
+        if (
+            reference_match is None
+            or existing_reference.rsplit("@", 1)[0] != repository
+        ):
+            raise LayoutError("external Engine reference must use the target repository")
+        remote = _remote_image(
+            existing_reference, expected_platform=platform, check_layers=True
+        )
+        for index, layer in enumerate(remote.layers):
+            remote_by_digest.setdefault(str(layer["digest"]), []).append(
+                (layer, remote.diff_ids[index])
+            )
+    output = output.resolve()
+    if output.exists():
+        raise LayoutError("thin OCI output already exists")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = tempfile.NamedTemporaryFile(
+        prefix=f".{output.name}.", suffix=".tmp", dir=output.parent, delete=False
+    )
+    temporary_path = pathlib.Path(temporary.name)
+    temporary.close()
+    source_handle: BinaryIO | None = None
+    close_source = False
+    try:
+        if archive is None:
+            source_handle = sys.stdin.buffer
+        else:
+            source_handle = archive.resolve(strict=True).open("rb")
+            close_source = True
+        try:
+            source = tarfile.open(fileobj=source_handle, mode="r|*")
+        except (OSError, tarfile.TarError) as error:
+            raise LayoutError(f"cannot open OCI layout: {error}") from error
+        small: dict[str, bytes] = {}
+        input_blobs: dict[str, int] = {}
+        written_blobs: set[str] = set()
+        seen: set[str] = set()
+        local_bytes = 0
+        with source, tarfile.open(temporary_path, "w") as target:
+            for count, member in enumerate(source, start=1):
+                if count > MAX_LAYOUT_FILES:
+                    raise LayoutError("OCI layout contains too many entries")
+                path = pathlib.PurePosixPath(member.name)
+                if path.is_absolute() or any(
+                    part in {"", ".", ".."} for part in path.parts
+                ):
+                    raise LayoutError("OCI layout contains an unsafe path")
+                name = path.as_posix()
+                if name in seen:
+                    raise LayoutError("OCI layout contains duplicate entries")
+                seen.add(name)
+                if member.isdir():
+                    continue
+                if (
+                    member.issym()
+                    or member.islnk()
+                    or member.isdev()
+                    or member.isfifo()
+                    or not member.isfile()
+                    or member.size < 0
+                ):
+                    raise LayoutError("OCI layout contains an unsupported entry")
+                blob_match = re.fullmatch(r"blobs/sha256/([0-9a-f]{64})", name)
+                if blob_match is not None:
+                    blob_digest = "sha256:" + blob_match.group(1)
+                    input_blobs[blob_digest] = member.size
+                    external = remote_by_digest.get(blob_digest, [])
+                    if external:
+                        if not any(int(item[0]["size"]) == member.size for item in external):
+                            raise LayoutError("external OCI blob size differs")
+                        continue
+                    local_bytes += member.size
+                    if local_bytes > MAX_LAYOUT_BYTES:
+                        raise LayoutError("thin OCI layout exceeds the 16 GiB limit")
+                    data = _write_tar_payload(
+                        source,
+                        member,
+                        target,
+                        expected_digest=blob_digest,
+                    )
+                    written_blobs.add(blob_digest)
+                    if data is not None:
+                        small[name] = data
+                    continue
+                if name not in {"index.json", "oci-layout"}:
+                    raise LayoutError(f"OCI layout contains an unexpected entry: {name}")
+                if member.size > MAX_DOCUMENT_BYTES:
+                    raise LayoutError(f"OCI layout document is too large: {name}")
+                data = _write_tar_payload(
+                    source, member, target, expected_digest=None
+                )
+                if data is None:
+                    raise LayoutError(f"OCI layout document is unavailable: {name}")
+                small[name] = data
+
+            layout = _object(small.get("oci-layout", b""), "oci-layout")
+            if layout != {"imageLayoutVersion": "1.0.0"}:
+                raise LayoutError("unsupported OCI layout version")
+            index = _object(small.get("index.json", b""), "index.json")
+            manifests = index.get("manifests")
+            if index.get("schemaVersion") != 2 or not isinstance(manifests, list):
+                raise LayoutError("OCI index is invalid")
+            os_name, architecture = _platform(platform)
+            selected: list[dict[str, Any]] = []
+            for offset, raw in enumerate(manifests):
+                item = _descriptor(raw, f"index manifest {offset}")
+                item_platform = item.get("platform")
+                if isinstance(item_platform, Mapping) and (
+                    item_platform.get("os"), item_platform.get("architecture")
+                ) == (os_name, architecture):
+                    selected.append(item)
+                elif len(manifests) == 1 and not isinstance(item_platform, Mapping):
+                    selected.append(item)
+            if len(selected) != 1 or selected[0]["mediaType"] not in MANIFEST_MEDIA_TYPES:
+                raise LayoutError("OCI layout does not contain exactly one requested platform")
+            manifest_descriptor = selected[0]
+            manifest_name = (
+                "blobs/sha256/"
+                + str(manifest_descriptor["digest"]).removeprefix("sha256:")
+            )
+            manifest_data = small.get(manifest_name)
+            if manifest_data is None:
+                raise LayoutError("platform manifest blob is unavailable")
+            if (
+                len(manifest_data) != manifest_descriptor["size"]
+                or digest(manifest_data) != manifest_descriptor["digest"]
+            ):
+                raise LayoutError("platform manifest blob differs")
+            manifest = _object(manifest_data, "platform manifest")
+            config = _descriptor(manifest.get("config"), "image config")
+            config_name = (
+                "blobs/sha256/" + str(config["digest"]).removeprefix("sha256:")
+            )
+            config_data = small.get(config_name)
+            if config_data is None:
+                raise LayoutError("image config blob is unavailable")
+            if len(config_data) != config["size"] or digest(config_data) != config["digest"]:
+                raise LayoutError("image config blob differs")
+            image_config = _object(config_data, "image config")
+            if (image_config.get("os"), image_config.get("architecture")) != (
+                os_name,
+                architecture,
+            ):
+                raise LayoutError("image configuration platform differs")
+            raw_layers = manifest.get("layers")
+            rootfs = image_config.get("rootfs")
+            diff_ids = rootfs.get("diff_ids") if isinstance(rootfs, Mapping) else None
+            if (
+                not isinstance(raw_layers, list)
+                or not raw_layers
+                or not isinstance(diff_ids, list)
+                or len(diff_ids) != len(raw_layers)
+            ):
+                raise LayoutError("image configuration rootfs differs from manifest layers")
+            layers: list[dict[str, Any]] = []
+            for offset, raw in enumerate(raw_layers):
+                layer = _descriptor(raw, f"image layer {offset}")
+                if layer["mediaType"] not in LAYER_MEDIA_TYPES:
+                    raise LayoutError(f"image layer {offset} media type is unsupported")
+                if layer["size"] > MAX_GHCR_LAYER_BYTES:
+                    raise LayoutError(f"image layer {offset} exceeds GHCR's 10 GB limit")
+                layers.append(layer)
+            expected_blobs = {
+                str(manifest_descriptor["digest"]),
+                str(config["digest"]),
+                *(str(layer["digest"]) for layer in layers),
+            }
+            if set(input_blobs) != expected_blobs:
+                raise LayoutError("OCI layout contains unreachable or missing blobs")
+            external_records: list[dict[str, Any]] = []
+            for offset, layer in enumerate(layers):
+                candidates = remote_by_digest.get(str(layer["digest"]), [])
+                matching = [
+                    item
+                    for item in candidates
+                    if item[0] == layer and item[1] == diff_ids[offset]
+                ]
+                if matching:
+                    external_records.append(
+                        {
+                            "index": offset,
+                            "digest": layer["digest"],
+                            "size": layer["size"],
+                            "mediaType": layer["mediaType"],
+                            "diff_id": diff_ids[offset],
+                        }
+                    )
+                elif str(layer["digest"]) not in written_blobs:
+                    raise LayoutError(f"image layer {offset} blob is unavailable")
+            if remote is not None and external_records:
+                external_data = canonical_bytes(
+                    {
+                        "schema_version": EXTERNAL_BLOBS_SCHEMA_VERSION,
+                        "source_reference": remote.reference,
+                        "target_repository": repository,
+                        "manifest_digest": manifest_descriptor["digest"],
+                        "layers": external_records,
+                    }
+                )
+                record = tarfile.TarInfo(EXTERNAL_BLOBS_FILE)
+                record.size = len(external_data)
+                record.mode = 0o644
+                record.mtime = 0
+                target.addfile(record, io.BytesIO(external_data))
+        document: dict[str, Any] = {
+            "schema_version": 1,
+            "platform": platform,
+            "manifest_digest": manifest_descriptor["digest"],
+            "manifest_bytes": len(manifest_data),
+            "config_digest": config["digest"],
+            "layer_digests": [layer["digest"] for layer in layers],
+            "local_layer_count": len(layers) - len(external_records),
+            "external_layer_count": len(external_records),
+            "reference": f"{repository}@{manifest_descriptor['digest']}",
+        }
+        if remote is not None and external_records:
+            document["external_reference"] = remote.reference
+        temporary_path.replace(output)
+        return document
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+    finally:
+        if close_source and source_handle is not None:
+            source_handle.close()
 
 
 def inspect_docker_archive(
@@ -539,6 +948,91 @@ class Registry:
             connection.close()
 
 
+def _remote_image(
+    reference: str,
+    *,
+    expected_platform: str | None = None,
+    check_layers: bool = False,
+) -> RemoteImage:
+    match = REFERENCE_RE.fullmatch(reference)
+    if match is None:
+        raise LayoutError("Engine reference must be registry/repository@sha256:digest")
+    repository = f"{match['registry']}/{match['repository']}"
+    registry = Registry(registry=match["registry"], repository=match["repository"])
+    registry.authenticate("pull")
+    status, _headers, manifest_data = registry.request(
+        "GET",
+        f"/v2/{match['repository']}/manifests/{match['digest']}",
+        accept=", ".join(sorted(MANIFEST_MEDIA_TYPES)),
+    )
+    if status != 200 or len(manifest_data) > MAX_DOCUMENT_BYTES:
+        raise LayoutError(f"registry manifest fetch returned HTTP {status}")
+    if digest(manifest_data) != match["digest"]:
+        raise LayoutError("registry returned a different manifest digest")
+    manifest = _object(manifest_data, "registry manifest")
+    if manifest.get("schemaVersion") != 2:
+        raise LayoutError("registry image manifest is invalid")
+    config = _descriptor(manifest.get("config"), "registry image config")
+    if config["mediaType"] not in CONFIG_MEDIA_TYPES:
+        raise LayoutError("registry image configuration media type is unsupported")
+    state, _config_headers, config_data = registry.request(
+        "GET",
+        f"/v2/{match['repository']}/blobs/{config['digest']}",
+        limit=MAX_DOCUMENT_BYTES,
+    )
+    if (
+        state != 200
+        or len(config_data) != config["size"]
+        or digest(config_data) != config["digest"]
+    ):
+        raise LayoutError("published image configuration differs")
+    image_config = _object(config_data, "published image configuration")
+    if expected_platform is not None:
+        os_name, architecture = _platform(expected_platform)
+        if (image_config.get("os"), image_config.get("architecture")) != (
+            os_name,
+            architecture,
+        ):
+            raise LayoutError("published image platform differs")
+    raw_layers = manifest.get("layers")
+    rootfs = image_config.get("rootfs")
+    diff_ids = rootfs.get("diff_ids") if isinstance(rootfs, Mapping) else None
+    if (
+        not isinstance(raw_layers, list)
+        or not raw_layers
+        or not isinstance(rootfs, Mapping)
+        or rootfs.get("type") != "layers"
+        or not isinstance(diff_ids, list)
+        or len(diff_ids) != len(raw_layers)
+        or any(DIGEST_RE.fullmatch(str(value)) is None for value in diff_ids)
+    ):
+        raise LayoutError("published image rootfs differs from manifest layers")
+    layers: list[dict[str, Any]] = []
+    for offset, raw in enumerate(raw_layers):
+        layer = _descriptor(raw, f"registry layer {offset}")
+        if layer["mediaType"] not in LAYER_MEDIA_TYPES:
+            raise LayoutError(f"published image layer {offset} media type is unsupported")
+        if layer["size"] > MAX_GHCR_LAYER_BYTES:
+            raise LayoutError(f"published image layer {offset} exceeds GHCR's 10 GB limit")
+        if check_layers:
+            state, _layer_headers, _body = registry.request(
+                "HEAD", f"/v2/{match['repository']}/blobs/{layer['digest']}"
+            )
+            if state != 200:
+                raise LayoutError(f"published Engine blob is unavailable: {layer['digest']}")
+        layers.append(layer)
+    return RemoteImage(
+        reference=reference,
+        repository=repository,
+        manifest_digest=match["digest"],
+        manifest=manifest,
+        config_descriptor=config,
+        config=image_config,
+        layers=tuple(layers),
+        diff_ids=tuple(str(value) for value in diff_ids),
+    )
+
+
 def publish(
     archive: pathlib.Path,
     *,
@@ -561,6 +1055,17 @@ def publish(
             username=username, password=password,
         )
         registry.authenticate("pull,push")
+        if layout.external_layers:
+            if (
+                layout.external_reference is None
+                or layout.external_reference.rsplit("@", 1)[0] != repository
+            ):
+                raise LayoutError("external Engine blobs use a different repository")
+            for descriptor in layout.external_layers:
+                if not registry._blob_exists(str(descriptor["digest"])):
+                    raise LayoutError(
+                        f"external Engine blob is unavailable: {descriptor['digest']}"
+                    )
         for descriptor in layout.reachable:
             path = layout.blob(str(descriptor["digest"]))
             with path.open("rb") as handle:
@@ -698,6 +1203,12 @@ def main() -> int:
     inspect.add_argument("--platform", required=True)
     inspect.add_argument("--repository")
     inspect.add_argument("--output", type=pathlib.Path)
+    thin = commands.add_parser("thin")
+    thin.add_argument("--archive", required=True)
+    thin.add_argument("--platform", required=True)
+    thin.add_argument("--repository", required=True)
+    thin.add_argument("--existing-reference")
+    thin.add_argument("--output", required=True, type=pathlib.Path)
     push = commands.add_parser("push")
     push.add_argument("--archive", required=True, type=pathlib.Path)
     push.add_argument("--platform", required=True)
@@ -715,6 +1226,14 @@ def main() -> int:
     if arguments.command == "inspect":
         with MaterializedLayout(arguments.archive, arguments.platform) as layout:
             value = layout.document(arguments.repository)
+    elif arguments.command == "thin":
+        value = thin_archive(
+            None if arguments.archive == "-" else pathlib.Path(arguments.archive),
+            arguments.output,
+            platform=arguments.platform,
+            repository=arguments.repository,
+            existing_reference=arguments.existing_reference,
+        )
     elif arguments.command == "push":
         value = publish(
             arguments.archive, repository=arguments.repository, platform=arguments.platform,
@@ -727,7 +1246,7 @@ def main() -> int:
             expected_platform=arguments.platform,
         )
     data = canonical_bytes(value)
-    if arguments.output:
+    if arguments.command != "thin" and arguments.output:
         arguments.output.write_bytes(data)
     print(data.decode("utf-8"), end="")
     return 0

@@ -1,9 +1,13 @@
 # Contributing a runtime
 
-Start with the runtime-authoring and Engine-authoring skills shipped with
-Let's Infer core. They standardize the candidate directory, immutable model and
-Engine pins, deterministic recipe, license/source closure, README install block,
-and local checks before review.
+Install the official [Let’s Infer agent skills](https://github.com/letsinferlabs/skills)
+with `npx skills add letsinferlabs/skills`. Start every candidate with
+[`letsinfer-runtime-authoring`](https://github.com/letsinferlabs/skills/blob/main/skills/letsinfer-runtime-authoring/SKILL.md).
+When Engine executable inputs change, also use
+[`letsinfer-engine-authoring`](https://github.com/letsinferlabs/skills/blob/main/skills/letsinfer-engine-authoring/SKILL.md).
+They standardize the candidate directory, immutable model and Engine pins,
+deterministic recipe, license/source closure, README install block, and local
+checks before review.
 
 ## Choose the smallest source form
 
@@ -48,10 +52,7 @@ produces a reviewable pin patch and no verifier artifact.
 5. Two independent users run `letsinfer benchmark verify <PR URL>`. One user
    occupies one slot regardless of reruns; any blocking failure is terminal for
    that execution subject.
-6. A maintainer uses `/shipit` only after approval and green checks. `/shipit`
-   verifies every payload's trusted-finalizer attestation, publishes the exact
-   verified artifacts, verifies public pulls, records its receipt, and merges
-   the exact head.
-
-The documented maintainer waiver can replace only the second independent
-verification. See the repository README for its exact command and safeguards.
+6. Repository maintainers process publication only after approval and green
+   checks. Trusted automation verifies every payload's finalizer attestation,
+   publishes the exact verified artifacts, verifies public pulls, records its
+   receipt, and merges the exact head.

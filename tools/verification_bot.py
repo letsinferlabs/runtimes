@@ -113,6 +113,48 @@ def changed_runtime_candidates(number: int) -> list[str]:
     return runtime_candidate_names(files)
 
 
+def exact_release_promotion(pull: Mapping[str, Any]) -> bool:
+    """Recognize only a one-commit release promotion of the exact main tree."""
+
+    base = pull.get("base")
+    head = pull.get("head")
+    head_repository = head.get("repo") if isinstance(head, Mapping) else None
+    base_sha = base.get("sha") if isinstance(base, Mapping) else None
+    head_sha = head.get("sha") if isinstance(head, Mapping) else None
+    if (
+        not isinstance(base, Mapping)
+        or base.get("ref") != "release"
+        or not isinstance(head_repository, Mapping)
+        or head_repository.get("full_name") != REPOSITORY
+        or not isinstance(base_sha, str)
+        or re.fullmatch(r"[0-9a-f]{40}", base_sha) is None
+        or not isinstance(head_sha, str)
+        or re.fullmatch(r"[0-9a-f]{40}", head_sha) is None
+    ):
+        return False
+    head_commit = api(f"repos/{REPOSITORY}/git/commits/{head_sha}")
+    main = api(f"repos/{REPOSITORY}/branches/main")
+    main_record = main.get("commit") if isinstance(main, Mapping) else None
+    main_sha = main_record.get("sha") if isinstance(main_record, Mapping) else None
+    if not isinstance(main_sha, str) or re.fullmatch(r"[0-9a-f]{40}", main_sha) is None:
+        raise BotError("main branch identity is invalid")
+    main_commit = api(f"repos/{REPOSITORY}/git/commits/{main_sha}")
+    parents = head_commit.get("parents") if isinstance(head_commit, Mapping) else None
+    head_tree_record = head_commit.get("tree") if isinstance(head_commit, Mapping) else None
+    main_tree_record = main_commit.get("tree") if isinstance(main_commit, Mapping) else None
+    head_tree = head_tree_record.get("sha") if isinstance(head_tree_record, Mapping) else None
+    main_tree = main_tree_record.get("sha") if isinstance(main_tree_record, Mapping) else None
+    return (
+        isinstance(parents, list)
+        and len(parents) == 1
+        and isinstance(parents[0], Mapping)
+        and parents[0].get("sha") == base_sha
+        and isinstance(head_tree, str)
+        and re.fullmatch(r"[0-9a-f]{40}", head_tree) is not None
+        and head_tree == main_tree
+    )
+
+
 def _labels(pull: Mapping[str, Any]) -> set[str]:
     return {
         str(item.get("name"))
@@ -760,6 +802,10 @@ def process(event: Mapping[str, Any]) -> dict[str, Any]:
         if event.get("action") == "closed":
             cancel_check(pull)
             return {"processed": True, "closed": True}
+        if exact_release_promotion(pull):
+            sync_runtime_label(pull, runtime=False)
+            publish_classification_check(pull, runtime_pending=False)
+            return {"processed": True, "release_promotion": True}
         candidates = changed_runtime_candidates(int(pull["number"]))
         runtime = bool(candidates)
         sync_runtime_label(pull, runtime=runtime)

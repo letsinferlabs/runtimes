@@ -71,6 +71,33 @@ class VerificationBotTests(unittest.TestCase):
         publish.assert_called_once_with(pull, runtime_pending=False)
         process.assert_not_called()
 
+    def test_exact_release_promotion_skips_runtime_verification(self) -> None:
+        pull = {
+            "number": 17,
+            "base": {"ref": "release", "sha": "b" * 40},
+            "head": {
+                "sha": "a" * 40,
+                "repo": {"full_name": "letsinferlabs/runtimes"},
+            },
+            "labels": [{"name": "runtime"}],
+        }
+        head_commit = {"parents": [{"sha": "b" * 40}], "tree": {"sha": "c" * 40}}
+        main = {"commit": {"sha": "d" * 40}}
+        main_commit = {"tree": {"sha": "c" * 40}}
+        with mock.patch.object(bot, "api", side_effect=[head_commit, main, main_commit]):
+            self.assertTrue(bot.exact_release_promotion(pull))
+        with (
+            mock.patch.object(bot, "exact_release_promotion", return_value=True),
+            mock.patch.object(bot, "changed_runtime_candidates") as changed,
+            mock.patch.object(bot, "sync_runtime_label") as sync,
+            mock.patch.object(bot, "publish_classification_check") as publish,
+        ):
+            result = bot.process({"action": "synchronize", "pull_request": pull})
+        self.assertEqual(result, {"processed": True, "release_promotion": True})
+        changed.assert_not_called()
+        sync.assert_called_once_with(pull, runtime=False)
+        publish.assert_called_once_with(pull, runtime_pending=False)
+
     def test_non_runtime_check_does_not_claim_qualification(self) -> None:
         pull = {
             "head": {"sha": "a" * 40},

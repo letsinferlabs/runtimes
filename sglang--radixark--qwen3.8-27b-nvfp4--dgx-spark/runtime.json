@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.13",
+  "version": "0.1.0-rc.16",
   "logical_model": "qwen3.8-27b",
   "target": {
     "id": "dgx-spark",
@@ -29,15 +29,19 @@
   },
   "engine": {
     "model_format": "huggingface-snapshot",
-    "cache_provider": "sglang-radix-v1",
+    "cache_provider": "sglang-letsinfer-prefix-v1",
     "arguments": [
       "--trust-remote-code",
+      "--bf16-gemm-backend",
+      "gemv",
       "--mem-fraction-static",
-      "0.90",
+      "0.860",
       "--attention-backend",
       "flashinfer",
       "--chunked-prefill-size",
       "8192",
+      "--max-prefill-tokens",
+      "16384",
       "--disable-prefill-cuda-graph",
       "--kv-cache-dtype",
       "fp8_e4m3",
@@ -58,7 +62,7 @@
       "--speculative-draft-model-path",
       "${artifact:draft}",
       "--speculative-num-draft-tokens",
-      "8",
+      "10",
       "--reasoning-parser",
       "qwen3",
       "--tool-call-parser",
@@ -78,8 +82,8 @@
       "version": 2
     },
     "oci": {
-      "reference": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:6d800425b8b6e6c6fdc63061af384bffbfed16e6448c5801f867539df0e35b4e",
-      "immutable_id": "sha256:1552ac221f2f93d07a28f4a61c2fab21b728917167b1e49e808cafbbb4ea17c2",
+      "reference": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:f70057989f8207323ee499671496fdf8054af3b89ebb69e4a6bd799fca864d74",
+      "immutable_id": "sha256:cf79d71ed72d94d9acf35bb8602969c5c159db8abe802ff3399925f9270d8650",
       "base": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
     }
   },
@@ -87,7 +91,7 @@
     "uri": "hf://RadixArk/Qwen3.8-27B-NVFP4",
     "artifact": "model",
     "acquisition": {
-      "image": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
+      "image": "docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1"
     }
   },
   "artifacts": [
@@ -113,47 +117,41 @@
     "startup_timeout_seconds": 1800
   },
   "cache": {
-    "provider": "sglang-radix-v1",
-    "persistent": false,
-    "prewarm": false,
-    "replay_output_policy": null,
-    "config": {}
+    "provider": "sglang-letsinfer-prefix-v1",
+    "persistent": true,
+    "prewarm": true,
+    "replay_output_policy": "restored-repeat-exact",
+    "config": {
+      "durable_capacity_bytes": 68719476736,
+      "resident_capacity_bytes": 0,
+      "ttl_seconds": 604800,
+      "min_tokens": 512,
+      "direct_reads": true,
+      "capture": true,
+      "prefix_lookup": true,
+      "host_capacity_bytes": 1073741824
+    }
   },
   "serving": {
     "max_connections": 128,
     "max_active_requests": 10,
     "max_context_tokens": 262144,
     "gate": {
-      "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
-      "bench_block": "qwen38-sglang-dgx-spark-code-prose-v2",
-      "evidence_directory": "evidence/serving",
-      "results_sha256": "bb429f7699866e67c4bc282f8490e0b29672e88c5b7eed9aa8a0d3b179520321",
-      "common": {
-        "contract": "letsinfer-openai-v1-common",
-        "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
-        "evidence_reference": "evidence/serving/common-results.json",
-        "results_sha256": "8bae9b0535f27d3008475a17309391c1e38651af52b896920bb9fe5fd4808c33"
-      },
-      "engine": {
-        "contract": "sglang-radix-v1",
-        "measured_commit": "37c765da47f05ac7019508234a5c4795a8392e1b",
-        "evidence_reference": "evidence/serving/engine-results.json",
-        "results_sha256": "bb429f7699866e67c4bc282f8490e0b29672e88c5b7eed9aa8a0d3b179520321"
-      }
+      "measured_commit": "627a25b1559f4dd2971ffdffb5c74497e68aeeae"
     }
   },
   "benchmark": {
     "contract": {
-      "schema_version": 2,
+      "schema_version": 7,
       "suite": "letsinfer-code-prose-v1",
       "generator": {
         "id": "letsinfer-code-prose",
-        "version": 2
+        "version": 7
       },
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
         "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
-        "engine_image_sha256": "1552ac221f2f93d07a28f4a61c2fab21b728917167b1e49e808cafbbb4ea17c2",
+        "engine_image_sha256": "cf79d71ed72d94d9acf35bb8602969c5c159db8abe802ff3399925f9270d8650",
         "render_contract": "openai-chat-user-v1"
       },
       "request": {
@@ -171,9 +169,7 @@
           "concurrencies": [
             1,
             2,
-            4,
-            8,
-            16
+            4
           ]
         },
         {
@@ -182,9 +178,7 @@
           "concurrencies": [
             1,
             2,
-            4,
-            8,
-            16
+            4
           ]
         },
         {
@@ -193,9 +187,7 @@
           "concurrencies": [
             1,
             2,
-            4,
-            8,
-            16
+            4
           ]
         },
         {
@@ -204,12 +196,50 @@
           "concurrencies": [
             1,
             2,
-            4,
-            8,
-            16
+            4
           ]
         }
-      ]
+      ],
+      "domains": [
+        "code"
+      ],
+      "execution": {
+        "isolation": "fresh-matrix",
+        "prefix_state": "shared",
+        "samples_per_cell": 1,
+        "stream_prefix": "shared-body"
+      },
+      "short": {
+        "domains": [
+          "code",
+          "prose"
+        ],
+        "prompt_tokens": 256,
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "request": {
+          "output_tokens": 512,
+          "min_completion_tokens": 512,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      },
+      "ttft_cache": {
+        "prompt_tokens": 64000,
+        "prompt_domain": "code",
+        "repetitions": 2,
+        "request": {
+          "output_tokens": 1,
+          "min_completion_tokens": 1,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      }
     }
   }
 }

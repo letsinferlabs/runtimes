@@ -82,6 +82,21 @@ def canonical_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def engine_source_sha256(candidate: str, records: Sequence[Mapping[str, Any]]) -> str:
+    engine_tree = {
+        "schema_version": 1,
+        "candidate": candidate,
+        "files": [
+            dict(record)
+            for record in records
+            if pathlib.PurePosixPath(str(record.get("path", ""))).parts
+            and pathlib.PurePosixPath(str(record["path"])).parts[0]
+            in ENGINE_INPUT_DIRECTORIES
+        ],
+    }
+    return hashlib.sha256(canonical_bytes(engine_tree)).hexdigest()
+
+
 def _tracked_paths(root: pathlib.Path, candidate: str) -> list[str]:
     result = subprocess.run(
         ["git", "ls-files", "-z", "--", candidate],
@@ -172,9 +187,9 @@ def _manifest_at(root: pathlib.Path, base: str | None) -> dict[str, Any]:
     return value
 
 
-def runtime_repository(root: pathlib.Path, candidate: str, base: str | None = None) -> str:
-    """Keep an existing public package; route a new candidate to the shared package."""
-
+def _candidate_release(
+    root: pathlib.Path, candidate: str, base: str | None = None
+) -> Mapping[str, Any] | None:
     manifest = _manifest_at(root, base)
     matches: list[Mapping[str, Any]] = []
     models = manifest.get("models")
@@ -190,13 +205,24 @@ def runtime_repository(root: pathlib.Path, candidate: str, base: str | None = No
             if isinstance(record, Mapping):
                 matches.append(record)
     if not matches:
-        return NEW_RUNTIME_REPOSITORY
+        return None
     if len(matches) != 1:
         raise CandidatePolicyError("candidate appears multiple times in the generated manifest")
     record = matches[0]
     latest = record.get("latest")
     releases = record.get("releases")
     release = releases.get(latest) if isinstance(latest, str) and isinstance(releases, Mapping) else None
+    if not isinstance(release, Mapping):
+        raise CandidatePolicyError("existing candidate release is unavailable")
+    return release
+
+
+def runtime_repository(root: pathlib.Path, candidate: str, base: str | None = None) -> str:
+    """Keep an existing public package; route a new candidate to the shared package."""
+
+    release = _candidate_release(root, candidate, base)
+    if release is None:
+        return NEW_RUNTIME_REPOSITORY
     source = release.get("source") if isinstance(release, Mapping) else None
     match = REFERENCE_RE.fullmatch(str(source))
     if match is None or (
@@ -207,14 +233,33 @@ def runtime_repository(root: pathlib.Path, candidate: str, base: str | None = No
     return match["repository"]
 
 
+def engine_publication(
+    root: pathlib.Path, candidate: str, base: str | None = None
+) -> tuple[str, str | None]:
+    """Reuse an existing Engine package so its immutable base blobs remain local."""
+
+    release = _candidate_release(root, candidate, base)
+    if release is None:
+        return NEW_ENGINE_REPOSITORY, None
+    reference = release.get("engine_oci")
+    match = REFERENCE_RE.fullmatch(str(reference))
+    if match is None or OFFICIAL_ENGINE_RE.fullmatch(str(reference)) is None:
+        raise CandidatePolicyError("existing candidate Engine repository is not official")
+    return match["repository"], str(reference)
+
+
 def publication_repositories(
     root: pathlib.Path, candidate: str, base: str | None = None
 ) -> dict[str, str]:
-    return {
+    engine_repository, existing_reference = engine_publication(root, candidate, base)
+    result = {
         "candidate": candidate,
         "runtime_repository": runtime_repository(root, candidate, base),
-        "engine_repository": NEW_ENGINE_REPOSITORY,
+        "engine_repository": engine_repository,
     }
+    if existing_reference is not None:
+        result["engine_existing_reference"] = existing_reference
+    return result
 
 
 def _candidate_files(root: pathlib.Path, candidate: str) -> list[pathlib.Path]:
@@ -349,8 +394,11 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
         "candidate": candidate,
         "files": records,
     }
-    tracked = _tracked_paths(root, candidate)
-    actual = [f"{candidate}/{record['path']}" for record in records]
+    # Git tree order and recursive filesystem order differ when a candidate
+    # mixes files and nested directories. The inventory is a set identity;
+    # normalize both traversals before comparing it.
+    tracked = sorted(_tracked_paths(root, candidate))
+    actual = sorted(f"{candidate}/{record['path']}" for record in records)
     if not tracked:
         raise CandidatePolicyError("candidate source is not tracked by Git")
     if actual != tracked:
@@ -371,6 +419,7 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
             key=lambda item: (-item["bytes"], item["path"]),
         )[:10],
         "candidate_tree_sha256": hashlib.sha256(canonical_bytes(tree)).hexdigest(),
+        "engine_source_sha256": engine_source_sha256(candidate, records),
         "engine_reference": reference,
         "engine_config_digest": immutable_id,
         "target_platform": runtime.get("target", {}).get("platform"),
