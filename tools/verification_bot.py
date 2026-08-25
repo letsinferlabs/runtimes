@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -590,6 +591,77 @@ def runtime_publication_source(
     return f"{repository}@{manifest_digest}"
 
 
+def revoke_superseded_unscored_releases(
+    checkout: pathlib.Path,
+    *,
+    candidate: str,
+    current_version: str,
+    previous: Mapping[str, Any],
+    branch: str,
+    generated_at_unix: int | None = None,
+) -> bool:
+    """Atomically retire prior zero-score bypass releases once a score exists."""
+
+    ledger_path = checkout / "revocations.json"
+    ledger = generate_manifest.read_object(ledger_path)
+    generate_manifest.revocation_identities(checkout)
+    discovered: set[tuple[str, str]] = set()
+    for model in previous.get("models", {}).values():
+        for target in model.get("targets", {}).values():
+            record = target.get("candidates", {}).get(candidate)
+            if not isinstance(record, Mapping):
+                continue
+            for version, release in record.get("releases", {}).items():
+                verification = release.get("verification") if isinstance(release, Mapping) else None
+                source = release.get("source") if isinstance(release, Mapping) else None
+                consensus_sha = (
+                    verification.get("consensus_sha256")
+                    if isinstance(verification, Mapping)
+                    else None
+                )
+                digest = str(source).rsplit("@", 1)[-1]
+                if (
+                    version != current_version
+                    and isinstance(release, Mapping)
+                    and release.get("benchmark") is None
+                    and isinstance(verification, Mapping)
+                    and verification.get("method")
+                    == "allowlisted-maintainer-bypass-v1"
+                    and re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is not None
+                    and re.fullmatch(r"[0-9a-f]{64}", str(consensus_sha)) is not None
+                ):
+                    discovered.add((digest, str(consensus_sha)))
+    existing = {
+        (entry["runtime_oci_digest"], entry["consensus_sha256"])
+        for entry in ledger["revocations"]
+    }
+    additions = sorted(discovered - existing)
+    if not additions:
+        return False
+    combined = sorted(existing | set(additions))
+    updated = {
+        "generated_at_unix": (
+            int(time.time()) if generated_at_unix is None else generated_at_unix
+        ),
+        "revocations": [
+            {"consensus_sha256": consensus, "runtime_oci_digest": digest}
+            for digest, consensus in combined
+        ],
+        "schema_version": 1,
+        "sequence": ledger["sequence"] + len(additions),
+    }
+    data = canonical_bytes(updated)
+    ledger_path.write_bytes(data)
+    generate_manifest.revocation_identities(checkout)
+    put_content(
+        "revocations.json",
+        data,
+        branch=branch,
+        message=f"Revoke superseded unscored release for runtimes {candidate}",
+    )
+    return True
+
+
 def materialize(
     checkout: pathlib.Path,
     candidate: str,
@@ -649,6 +721,14 @@ def materialize(
     (candidate_root / "benchmark.consensus.json").write_bytes(consensus_data)
     release_path.write_bytes(release_data)
     previous = generate_manifest.read_object(checkout / "manifest.json")
+    if isinstance(consensus.get("score", {}).get("aggregate_tps"), (int, float)):
+        revoke_superseded_unscored_releases(
+            checkout,
+            candidate=candidate,
+            current_version=consensus["runtime_version"],
+            previous=previous,
+            branch=branch,
+        )
     sources = generate_manifest.sources_from_manifest(checkout / "manifest.json")
     version = consensus["runtime_version"]
     sources[(candidate, version)] = runtime_publication_source(

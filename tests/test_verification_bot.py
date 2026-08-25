@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
+import pathlib
+import tempfile
 import types
 import unittest
 from unittest import mock
@@ -12,6 +14,71 @@ from tools import verification_bot as bot
 
 
 class VerificationBotTests(unittest.TestCase):
+    def test_scored_release_revokes_prior_unscored_bypass_identity(self) -> None:
+        candidate = "engine--owner--model--target"
+        runtime_digest = "sha256:" + "1" * 64
+        consensus_sha = "2" * 64
+        previous = {
+            "models": {
+                "model": {
+                    "targets": {
+                        "target": {
+                            "candidates": {
+                                candidate: {
+                                    "releases": {
+                                        "1.0.0": {
+                                            "source": f"ghcr.io/letsinferlabs/runtime-artifacts@{runtime_digest}",
+                                            "benchmark": None,
+                                            "verification": {
+                                                "method": "allowlisted-maintainer-bypass-v1",
+                                                "consensus_sha256": consensus_sha,
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            path = root / "revocations.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "generated_at_unix": 0,
+                        "revocations": [],
+                        "schema_version": 1,
+                        "sequence": 0,
+                    }
+                )
+            )
+            with mock.patch.object(bot, "put_content", return_value="a" * 40) as put:
+                changed = bot.revoke_superseded_unscored_releases(
+                    root,
+                    candidate=candidate,
+                    current_version="1.0.1",
+                    previous=previous,
+                    branch="runtime/topic",
+                    generated_at_unix=123,
+                )
+            ledger = json.loads(path.read_text())
+        self.assertTrue(changed)
+        self.assertEqual(ledger["sequence"], 1)
+        self.assertEqual(ledger["generated_at_unix"], 123)
+        self.assertEqual(
+            ledger["revocations"],
+            [
+                {
+                    "consensus_sha256": consensus_sha,
+                    "runtime_oci_digest": runtime_digest,
+                }
+            ],
+        )
+        put.assert_called_once()
+
     def test_core_pull_request_contract_binds_base_and_head_by_name(self) -> None:
         class PullRequest:
             def __init__(self, **values):
