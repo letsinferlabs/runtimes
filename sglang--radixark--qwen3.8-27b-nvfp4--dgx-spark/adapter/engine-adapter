@@ -4,7 +4,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import pathlib
+import stat
 import sys
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -14,6 +18,52 @@ _installed_lib = _root.parent / "lib"
 sys.path.insert(0, str(_installed_lib if _installed_lib.is_dir() else _root))
 
 from engine_frontend import AdapterError, artifact_path, backend_json, expand_arguments, run
+
+
+AUTOTUNE_RELATIVE = pathlib.PurePosixPath(
+    "tuning/flashinfer/0.6.18/sm121/acc702c3fd2345ad/rank_tp0_pp0_dp0.json"
+)
+AUTOTUNE_SHA256 = "ea30460e95be5d3c14186e58048f8dc14b79a3416f73c073b6501c36ae8eae98"
+
+
+def _cache_arguments(runtime: Mapping[str, Any]) -> Sequence[str]:
+    cache = runtime.get("cache")
+    if not isinstance(cache, Mapping) or not cache.get("persistent"):
+        return ()
+    if cache.get("provider") != "sglang-letsinfer-prefix-v1":
+        raise AdapterError("unsupported persistent cache provider")
+    config = cache.get("config")
+    if not isinstance(config, Mapping):
+        raise AdapterError("persistent cache config is missing")
+    host_bytes = int(config.get("host_capacity_bytes", 1024**3))
+    host_gib = max(1, (host_bytes + 1024**3 - 1) // 1024**3)
+    extra = {
+        "durable_capacity_bytes": int(config["durable_capacity_bytes"]),
+        "ttl_seconds": int(config["ttl_seconds"]),
+        "resident_capacity_bytes": int(config.get("resident_capacity_bytes", 0)),
+        "direct_reads": bool(config.get("direct_reads", True)),
+        "prefetch_threshold": 64,
+        "hicache_storage_pass_prefix_keys": True,
+    }
+    return (
+        "--enable-hierarchical-cache",
+        "--hicache-host-memory-mode",
+        "cache",
+        "--hicache-size",
+        str(host_gib),
+        "--hicache-write-policy",
+        "write_through",
+        "--hicache-io-backend",
+        "kernel",
+        "--hicache-mem-layout",
+        "page_first",
+        "--hicache-storage-backend",
+        "letsinfer",
+        "--hicache-storage-prefetch-policy",
+        "wait_complete",
+        "--hicache-storage-backend-extra-config",
+        json.dumps(extra, sort_keys=True, separators=(",", ":")),
+    )
 
 
 def build_command(runtime: Mapping[str, Any], port: int) -> Sequence[str]:
@@ -30,12 +80,57 @@ def build_command(runtime: Mapping[str, Any], port: int) -> Sequence[str]:
         "--port",
         str(port),
         "--enable-cache-report",
+        *_cache_arguments(runtime),
         *expand_arguments(runtime),
     ]
 
 
+def _sha256(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _install_autotune_profile() -> None:
+    runtime_config = pathlib.Path(
+        os.environ.get(
+            "LETSINFER_RUNTIME_CONFIG",
+            "/opt/letsinfer/runtime-pack/runtime.json",
+        )
+    )
+    source = runtime_config.parent / AUTOTUNE_RELATIVE
+    if source.is_symlink() or not source.is_file():
+        raise AdapterError("sealed FlashInfer autotune profile is unavailable")
+    if _sha256(source) != AUTOTUNE_SHA256:
+        raise AdapterError("sealed FlashInfer autotune profile identity mismatch")
+
+    destination = (
+        pathlib.Path("/root/.cache/sglang/flashinfer/autotune")
+        / pathlib.Path(AUTOTUNE_RELATIVE).relative_to("tuning/flashinfer")
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if (
+        destination.is_file()
+        and not destination.is_symlink()
+        and _sha256(destination) == AUTOTUNE_SHA256
+    ):
+        return
+    staged = destination.with_name(f".{destination.name}.stage-{os.getpid()}")
+    try:
+        staged.write_bytes(source.read_bytes())
+        staged.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        os.replace(staged, destination)
+    finally:
+        staged.unlink(missing_ok=True)
+    if _sha256(destination) != AUTOTUNE_SHA256:
+        raise AdapterError("installed FlashInfer autotune profile identity mismatch")
+
+
 def build_environment(_runtime: Mapping[str, Any]) -> Mapping[str, str]:
-    return {}
+    _install_autotune_profile()
+    return {"SGLANG_FLASHINFER_AUTOTUNE_CACHE": "1"}
 
 
 def count_tokens(host: str, port: int, body: bytes, _model: str) -> int:

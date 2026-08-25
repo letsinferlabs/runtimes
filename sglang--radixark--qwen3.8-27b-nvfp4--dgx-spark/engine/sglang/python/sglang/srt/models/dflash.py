@@ -23,9 +23,11 @@ from sglang.srt.layers.linear import (
     QKVParallelLinear,
     RowParallelLinear,
 )
-from sglang.srt.layers.logits_processor import LogitsProcessorOutput
+from sglang.srt.layers.logits_processor import (
+    LogitsProcessorOutput,
+    should_apply_lm_head_quant_method,
+)
 from sglang.srt.layers.radix_attention import AttentionType, RadixAttention
-from sglang.srt.layers.logits_processor import should_apply_lm_head_quant_method
 from sglang.srt.layers.rotary_embedding import get_rope
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_loader.weight_utils import default_weight_loader
@@ -58,6 +60,22 @@ def _radix_topk(scores: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tenso
     if _flashinfer_top_k is not None:
         return _flashinfer_top_k(scores, k, sorted=True, deterministic=True)
     return torch.topk(scores, k, dim=-1)
+
+
+def _project_candidate_logits(
+    hidden: torch.Tensor, lm_head: nn.Module, *, num_org: int, use_quant_head: bool
+) -> torch.Tensor:
+    """Project draft hiddens through the target head, restricted to the org vocab."""
+    if not use_quant_head:
+        weight = lm_head.weight
+        return torch.matmul(hidden.to(weight.dtype), weight[:num_org].T)
+    # A packed weight can't be row-sliced to the org vocab like the dense path,
+    # and flashinfer's radix top-k rejects the crop view (non-contiguous), so
+    # mask the padded tail out of the top-k instead.
+    logits = lm_head.quant_method.apply(lm_head, hidden, None).contiguous()
+    if logits.shape[-1] > num_org:
+        logits[:, num_org:] = float("-inf")
+    return logits
 
 
 def _get_dflash_attention_type(config, *, default: AttentionType) -> AttentionType:
@@ -803,6 +821,26 @@ def _follow_maps(maps, initial_indices, edges: int):
     return torch.stack(path, dim=1)
 
 
+@torch.compile(dynamic=True, backend=get_compiler_backend(), disable=_is_npu)
+def _prefix_value_path_indices(scores: torch.Tensor, edges: int) -> torch.Tensor:
+    """Maximize expected accepted prefix length over the selector lattice."""
+    probabilities = torch.softmax(scores.float(), dim=-1)
+    continuation = torch.zeros_like(probabilities[:, 0, 0])
+    maps = []
+    for edge in range(edges, 0, -1):
+        objective = probabilities[:, edge] * (1.0 + continuation[:, None])
+        maps.append(objective.argmax(dim=-1))
+        continuation = objective.amax(dim=-1)
+
+    initial_objective = probabilities[:, 0, 0] * (1.0 + continuation)
+    index = initial_objective.argmax(dim=-1)
+    path = [index]
+    for mapping in reversed(maps):
+        index = mapping.gather(-1, index[:, None])[:, 0]
+        path.append(index)
+    return torch.stack(path, dim=1)
+
+
 class CandidateSelector(nn.Module):
     """Scores the K x K transitions between adjacent proposal slots, then walks them.
 
@@ -876,12 +914,23 @@ class CandidateSelector(nn.Module):
         rows take the argmax, selected rather than branched, so one captured graph
         serves greedy and sampling batches alike."""
         if scores.is_cuda:
-            return selector_walk_triton(
+            sampled_tokens, sampled_q = selector_walk_triton(
                 candidate_ids=candidate_ids,
                 scores=scores,
                 uniforms=uniforms,
                 temperatures=temperatures,
                 greedy_mask=greedy_mask,
+            )
+            path_indices = _prefix_value_path_indices(
+                scores, int(scores.shape[1]) - 1
+            )
+            greedy_tokens = candidate_ids.gather(
+                -1, path_indices.unsqueeze(-1)
+            )[:, :, 0]
+            greedy_q = F.one_hot(path_indices, self.top_k).float()
+            return (
+                torch.where(greedy_mask[:, None], greedy_tokens, sampled_tokens),
+                torch.where(greedy_mask[:, None, None], greedy_q, sampled_q),
             )
         top_k = self.top_k
         temps = temperatures.view(-1, 1)
@@ -962,33 +1011,37 @@ class DFlash2DraftModel(DFlashDraftModel):
         per shard, all-gather K logits/ids (not the full vocab), then a global top-k --
         identical candidates at O(tp*K) instead of O(vocab) gather bandwidth."""
         assert self.lm_head is not None, "draft_model.lm_head unset before capture"
-        lm_head = self.lm_head
         k = self.candidate_selector.top_k
-        parallel = get_parallel()
-        if parallel.tp_size == 1:
-            num_org = int(lm_head.org_vocab_size)
-            org_vocab_start = 0
-        else:
-            shard = lm_head.shard_indices
-            num_org = int(shard.num_org_elements)
-            org_vocab_start = int(shard.org_vocab_start_index)
-
-        weight = getattr(lm_head, "weight", None)
-        quant_method = getattr(lm_head, "quant_method", None)
-        if should_apply_lm_head_quant_method(lm_head, quant_method):
-            local_logits = quant_method.apply(lm_head, hidden, None)[:, :num_org]
-        elif is_dense_head_weight(weight):
-            local_logits = torch.matmul(hidden.to(weight.dtype), weight[:num_org].T)
-        else:
+        # The worker screens the head before capture, but its eager fallback
+        # (_propose_selector_block) attaches whatever the target has.
+        weight = getattr(self.lm_head, "weight", None)
+        quant_method = getattr(self.lm_head, "quant_method", None)
+        use_quant_head = should_apply_lm_head_quant_method(self.lm_head, quant_method)
+        if not use_quant_head and not is_dense_head_weight(weight):
             raise RuntimeError(
-                "DFlash2 selector requires a dense target lm_head or a supported "
-                "lm_head.quant_method."
+                "DFlash2 selector requires a dense FP16/BF16/FP32 target lm_head "
+                "or a supported lm_head.quant_method."
             )
-
-        vals, ids = _radix_topk(local_logits, k)
-        if parallel.tp_size == 1:
+        if get_parallel().tp_size == 1:
+            org = int(self.lm_head.org_vocab_size)
+            vals, ids = _radix_topk(
+                _project_candidate_logits(
+                    hidden, self.lm_head, num_org=org, use_quant_head=use_quant_head
+                ),
+                k,
+            )
             return ids.long(), self._transform_unary_logits(vals)
-        global_ids = ids.long() + org_vocab_start
+        shard = self.lm_head.shard_indices
+        vals, ids = _radix_topk(
+            _project_candidate_logits(
+                hidden,
+                self.lm_head,
+                num_org=int(shard.num_org_elements),
+                use_quant_head=use_quant_head,
+            ),
+            k,
+        )
+        global_ids = ids.long() + int(shard.org_vocab_start_index)
         gathered_vals = tensor_model_parallel_all_gather(vals.float(), dim=-1)
         gathered_ids = tensor_model_parallel_all_gather(global_ids, dim=-1)
         top_vals, sel = torch.topk(gathered_vals, k, dim=-1)
