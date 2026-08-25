@@ -33,6 +33,9 @@ RECOMMENDATION_POLICY = {
     "tie_breakers": ["score", "version", "candidate"],
 }
 CONTRACT_MIGRATION_METHOD = "runtime-contract-migration-v1"
+BENCHMARK_SCHEMA_VERSIONS = {4, 5, 6}
+SHARED_BENCHMARK_SCHEMA_VERSIONS = {5, 6}
+TTFT_CACHE_BENCHMARK_SCHEMA_VERSION = 6
 
 
 class ManifestError(ValueError):
@@ -282,22 +285,36 @@ def benchmark_subject(runtime: dict[str, Any]) -> dict[str, Any]:
 def validate_benchmark_binding(
     runtime: dict[str, Any], record: dict[str, Any]
 ) -> None:
-    if record.get("schema_version") != 4:
+    schema_version = record.get("schema_version")
+    if schema_version not in BENCHMARK_SCHEMA_VERSIONS:
         raise ManifestError(f"benchmark schema is unsupported: {runtime['id']}")
     subject = benchmark_subject(runtime)
     if record.get("subject") != subject:
         raise ManifestError(f"benchmark subject differs from runtime: {runtime['id']}")
-    contract_sha = hashlib.sha256(
-        canonical_bytes(runtime["benchmark"]["contract"])
-    ).hexdigest()
+    contract = runtime["benchmark"]["contract"]
+    contract_sha = hashlib.sha256(canonical_bytes(contract)).hexdigest()
     if record.get("benchmark_contract_sha256") != contract_sha:
         raise ManifestError(
             f"benchmark contract identity differs from runtime: {runtime['id']}"
         )
+    if (
+        schema_version in SHARED_BENCHMARK_SCHEMA_VERSIONS
+        and record.get("benchmark_contract") != contract
+    ):
+        raise ManifestError(
+            f"embedded benchmark contract differs from runtime: {runtime['id']}"
+        )
     results = record.get("results")
     if not isinstance(results, list) or not results:
         raise ManifestError(f"benchmark results are unavailable: {runtime['id']}")
-    results_sha = hashlib.sha256(canonical_bytes(results)).hexdigest()
+    if schema_version == TTFT_CACHE_BENCHMARK_SCHEMA_VERSION:
+        ttft_cache = record.get("ttft_cache")
+        if not isinstance(ttft_cache, dict):
+            raise ManifestError(f"benchmark TTFT cache result is unavailable: {runtime['id']}")
+        bound_results = {"results": results, "ttft_cache": ttft_cache}
+    else:
+        bound_results = results
+    results_sha = hashlib.sha256(canonical_bytes(bound_results)).hexdigest()
     if record.get("results_sha256") != results_sha:
         raise ManifestError(f"benchmark results identity differs: {runtime['id']}")
     timestamp_ns = record.get("timestamp_unix_ns")
@@ -948,6 +965,7 @@ def generate(
         raise ManifestError("pre-community qualification migration is invalid")
     migration_entries = contract_migration_entries(migration)
     consumed_migrations: set[str] = set()
+    retained_historical_migrations: set[str] = set()
     targets: dict[str, Any] = {}
     models: dict[str, Any] = {}
     for item in items:
@@ -964,6 +982,9 @@ def generate(
             target_id, {"recommended": None, "candidates": {}}
         )
         releases = history.get((runtime["logical_model"], target_id, candidate), {})
+        retained_historical_migrations.update(
+            f"{candidate}@{version}" for version in releases
+        )
         normalized_releases: dict[str, Any] = {}
         for version, old_release in releases.items():
             if "qualified" not in old_release:
@@ -1128,11 +1149,15 @@ def generate(
             "latest": latest,
             "releases": dict(sorted(releases.items(), key=lambda item: _version_key(item[0]))),
         }
-    unused_migrations = sorted(set(migration_entries) - consumed_migrations)
-    if unused_migrations:
+    orphaned_migrations = sorted(
+        set(migration_entries)
+        - consumed_migrations
+        - retained_historical_migrations
+    )
+    if orphaned_migrations:
         raise ManifestError(
             "runtime contract migration does not identify a current candidate: "
-            + unused_migrations[0]
+            + orphaned_migrations[0]
         )
     for model in models.values():
         for target in model["targets"].values():
