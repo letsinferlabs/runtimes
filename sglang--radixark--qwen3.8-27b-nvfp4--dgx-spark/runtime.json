@@ -82,8 +82,8 @@
       "version": 2
     },
     "oci": {
-      "reference": "localhost:5000/letsinfer/weschera-qwen38@sha256:210c475c3662dcaa99627c65663a553f8ac07d1ffdcf9ed8e118b547cd6ed07c",
-      "immutable_id": "sha256:36ae770e38f2f30bc51a0b7be8be247189e0764fcfa5df50bf1230f222a97eac",
+      "reference": "localhost:5000/letsinfer/weschera-qwen38@sha256:73eb60ded2ef19d0479026f401f865dd83985978eded579ba81079d7602c943a",
+      "immutable_id": "sha256:ae13a398c52e9a723a934eac45d159dba8c520f082f38c1eacfe9bae06fe13ed",
       "base": "docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1"
     }
   },
@@ -148,7 +148,7 @@
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
         "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
-        "engine_image_sha256": "36ae770e38f2f30bc51a0b7be8be247189e0764fcfa5df50bf1230f222a97eac",
+        "engine_image_sha256": "ae13a398c52e9a723a934eac45d159dba8c520f082f38c1eacfe9bae06fe13ed",
         "render_contract": "openai-chat-user-v1"
       },
       "request": {
