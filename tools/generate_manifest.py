@@ -36,6 +36,15 @@ CONTRACT_MIGRATION_METHOD = "runtime-contract-migration-v1"
 BENCHMARK_SCHEMA_VERSIONS = {4, 5, 6}
 SHARED_BENCHMARK_SCHEMA_VERSIONS = {5, 6}
 TTFT_CACHE_BENCHMARK_SCHEMA_VERSION = 6
+REVOCATION_REASON_CODES = {
+    "compromised-verifier-key",
+    "fraudulent-evidence",
+    "incorrect-target",
+    "invalid-benchmark-contract",
+    "output-correctness-failure",
+    "safety-failure",
+    "structurally-invalid-evidence",
+}
 
 
 class ManifestError(ValueError):
@@ -997,21 +1006,72 @@ def revocation_identities(root: pathlib.Path) -> set[tuple[str, str]]:
         raise ManifestError("revocation ledger schema is invalid")
     result: set[tuple[str, str]] = set()
     previous: tuple[str, str] | None = None
-    for entry in value["revocations"]:
+    for index, entry in enumerate(value["revocations"]):
+        where = f"revocations[{index}]"
         identity = (
             entry.get("runtime_oci_digest") if isinstance(entry, dict) else None,
             entry.get("consensus_sha256") if isinstance(entry, dict) else None,
         )
+        actor = entry.get("actor") if isinstance(entry, dict) else None
+        verification_ids = (
+            entry.get("verification_ids") if isinstance(entry, dict) else None
+        )
+        replacement = entry.get("replacement") if isinstance(entry, dict) else None
         if (
             not isinstance(entry, dict)
+            or set(entry)
+            != {
+                "runtime_oci_digest",
+                "consensus_sha256",
+                "actor",
+                "revoked_at_unix",
+                "reason_code",
+                "verification_ids",
+                "replacement",
+            }
             or not isinstance(identity[0], str)
             or re.fullmatch(r"sha256:[0-9a-f]{64}", identity[0]) is None
             or not isinstance(identity[1], str)
             or SHA256_RE.fullmatch(identity[1]) is None
+            or not isinstance(actor, dict)
+            or set(actor) != {"github_login", "github_id", "github_type"}
+            or not isinstance(actor.get("github_login"), str)
+            or re.fullmatch(
+                r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", actor["github_login"]
+            )
+            is None
+            or not isinstance(actor.get("github_id"), int)
+            or isinstance(actor.get("github_id"), bool)
+            or actor["github_id"] <= 0
+            or actor.get("github_type") not in {"User", "Organization", "Bot"}
+            or not isinstance(entry.get("revoked_at_unix"), int)
+            or isinstance(entry.get("revoked_at_unix"), bool)
+            or entry["revoked_at_unix"] <= 0
+            or entry.get("reason_code") not in REVOCATION_REASON_CODES
+            or not isinstance(verification_ids, list)
+            or not verification_ids
+            or any(
+                not isinstance(item, str) or SHA256_RE.fullmatch(item) is None
+                for item in verification_ids
+            )
+            or verification_ids != sorted(set(verification_ids))
+            or (
+                replacement is not None
+                and (
+                    not isinstance(replacement, dict)
+                    or set(replacement) != {"candidate", "version", "source"}
+                    or not isinstance(replacement.get("candidate"), str)
+                    or CANDIDATE_RE.fullmatch(replacement["candidate"]) is None
+                    or not isinstance(replacement.get("version"), str)
+                    or VERSION_RE.fullmatch(replacement["version"]) is None
+                    or not isinstance(replacement.get("source"), str)
+                    or OCI_RE.fullmatch(replacement["source"]) is None
+                )
+            )
             or identity in result
             or (previous is not None and identity < previous)
         ):
-            raise ManifestError("revocation ledger release identity is invalid")
+            raise ManifestError(f"{where} schema or release identity is invalid")
         result.add(identity)
         previous = identity
     return result

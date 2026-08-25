@@ -596,6 +596,8 @@ def revoke_superseded_unscored_releases(
     *,
     candidate: str,
     current_version: str,
+    replacement_source: str,
+    actor: Mapping[str, Any],
     previous: Mapping[str, Any],
     branch: str,
     generated_at_unix: int | None = None,
@@ -632,21 +634,30 @@ def revoke_superseded_unscored_releases(
                 ):
                     discovered.add((digest, str(consensus_sha)))
     existing = {
-        (entry["runtime_oci_digest"], entry["consensus_sha256"])
+        (entry["runtime_oci_digest"], entry["consensus_sha256"]): entry
         for entry in ledger["revocations"]
     }
-    additions = sorted(discovered - existing)
+    additions = sorted(discovered - set(existing))
     if not additions:
         return False
-    combined = sorted(existing | set(additions))
+    timestamp = int(time.time()) if generated_at_unix is None else generated_at_unix
+    for digest, consensus in additions:
+        existing[(digest, consensus)] = {
+            "actor": dict(actor),
+            "consensus_sha256": consensus,
+            "reason_code": "structurally-invalid-evidence",
+            "replacement": {
+                "candidate": candidate,
+                "source": replacement_source,
+                "version": current_version,
+            },
+            "revoked_at_unix": timestamp,
+            "runtime_oci_digest": digest,
+            "verification_ids": [consensus],
+        }
     updated = {
-        "generated_at_unix": (
-            int(time.time()) if generated_at_unix is None else generated_at_unix
-        ),
-        "revocations": [
-            {"consensus_sha256": consensus, "runtime_oci_digest": digest}
-            for digest, consensus in combined
-        ],
+        "generated_at_unix": timestamp,
+        "revocations": [existing[identity] for identity in sorted(existing)],
         "schema_version": 1,
         "sequence": ledger["sequence"] + len(additions),
     }
@@ -721,21 +732,27 @@ def materialize(
     (candidate_root / "benchmark.consensus.json").write_bytes(consensus_data)
     release_path.write_bytes(release_data)
     previous = generate_manifest.read_object(checkout / "manifest.json")
-    if isinstance(consensus.get("score", {}).get("aggregate_tps"), (int, float)):
-        revoke_superseded_unscored_releases(
-            checkout,
-            candidate=candidate,
-            current_version=consensus["runtime_version"],
-            previous=previous,
-            branch=branch,
-        )
     sources = generate_manifest.sources_from_manifest(checkout / "manifest.json")
     version = consensus["runtime_version"]
-    sources[(candidate, version)] = runtime_publication_source(
+    current_source = runtime_publication_source(
         checkout,
         candidate,
         str(consensus["subject"]["runtime_oci_manifest_digest"]),
     )
+    sources[(candidate, version)] = current_source
+    if isinstance(consensus.get("score", {}).get("aggregate_tps"), (int, float)):
+        actor = consensus.get("waiver", {}).get("actor") or consensus.get("author")
+        if not isinstance(actor, Mapping):
+            raise BotError("scored qualification lacks a revocation actor")
+        revoke_superseded_unscored_releases(
+            checkout,
+            candidate=candidate,
+            current_version=version,
+            replacement_source=current_source,
+            actor=actor,
+            previous=previous,
+            branch=branch,
+        )
     manifest = generate_manifest.generate(checkout, sources, previous)
     final_commit = put_content(
         "manifest.json",
