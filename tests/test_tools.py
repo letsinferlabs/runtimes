@@ -79,6 +79,25 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(manifest_path.read_bytes(), expected)
 
+    def test_unqualified_candidate_does_not_enter_catalog_projection(self) -> None:
+        manifest_path = ROOT / "manifest.json"
+        sources = generate_manifest.sources_from_manifest(manifest_path)
+        previous = generate_manifest.read_object(manifest_path)
+        items = generate_manifest.candidates(ROOT, sources)
+        unqualified = copy.deepcopy(items[0])
+        unqualified["runtime"]["id"] = "engine--owner--unqualified--target"
+        unqualified["runtime"]["logical_model"] = "unqualified"
+        unqualified["runtime"]["target"]["id"] = "unqualified-target"
+        unqualified["qualified"] = False
+        unqualified["consensus"] = None
+        unqualified["source"] = None
+        unqualified["release_metadata"]["provenance"] = None
+        with mock.patch.object(
+            generate_manifest, "candidates", return_value=[*items, unqualified]
+        ):
+            generated = generate_manifest.generate(ROOT, sources, previous)
+        self.assertEqual(generated, previous)
+
     def test_orphan_contract_migration_is_rejected(self) -> None:
         manifest_path = ROOT / "manifest.json"
         sources = generate_manifest.sources_from_manifest(manifest_path)
