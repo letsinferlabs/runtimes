@@ -129,18 +129,19 @@ class ManifestToolTests(unittest.TestCase):
 
     def test_scored_maintainer_bypasses_mark_author_benchmark_source(self) -> None:
         manifest = generate_manifest.read_object(ROOT / "manifest.json")
-        expected = {
-            (
-                "qwen3.8-27b",
-                "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-                "0.1.0-rc.17",
-            ),
-            (
-                "deepseek-v4-flash",
-                "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-                "0.1.0-rc.35",
-            ),
-        }
+        expected: set[tuple[str, str, str]] = set()
+        for consensus_path in ROOT.glob("*/benchmark.consensus.json"):
+            consensus = generate_manifest.read_object(consensus_path)
+            if consensus["score"]["policy"] != "letsinfer-throughput-geomean-of-author-run-v1":
+                continue
+            runtime = generate_manifest.read_object(consensus_path.with_name("runtime.json"))
+            expected.add(
+                (
+                    runtime["logical_model"],
+                    runtime["id"],
+                    runtime["version"],
+                )
+            )
         observed: set[tuple[str, str, str]] = set()
         for model_id, model in manifest["models"].items():
             for target in model["targets"].values():
