@@ -51,6 +51,8 @@
       "extra_buffer",
       "--max-mamba-cache-size",
       "40",
+      "--quantization",
+      "modelopt_mixed",
       "--moe-a2a-backend",
       "none",
       "--moe-runner-backend",

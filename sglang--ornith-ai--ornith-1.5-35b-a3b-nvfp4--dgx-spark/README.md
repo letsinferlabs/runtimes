@@ -32,8 +32,8 @@ The candidate reuses the exact SGLang Engine already qualified on DGX Spark.
 That Engine includes Qwen3.5-MoE mixed-ModelOpt support, SM121 FlashInfer
 kernels, hybrid Mamba scheduling, reasoning/tool parsers, and Let's Infer's
 persistent NVMe HiCache backend. The initial production recipe uses four
-active requests, chunked prefill, the FlashInfer CuteDSL MoE runner, and no
-separate draft checkpoint.
+active requests, chunked prefill, the explicit `modelopt_mixed` loader, the
+FlashInfer CuteDSL MoE runner, and no separate draft checkpoint.
 
 ## Persistent cache
 
