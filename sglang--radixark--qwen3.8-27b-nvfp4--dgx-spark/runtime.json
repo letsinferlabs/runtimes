@@ -135,7 +135,10 @@
   "serving": {
     "max_connections": 128,
     "max_active_requests": 10,
-    "max_context_tokens": 262144
+    "max_context_tokens": 262144,
+    "gate": {
+      "measured_commit": "e49ae9202275a1fb26efafaf14c70c6ae160df75"
+    }
   },
   "benchmark": {
     "contract": {
