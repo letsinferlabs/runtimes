@@ -639,7 +639,21 @@ class PublicationPolicyTests(unittest.TestCase):
         self.assertTrue(consensus["qualification"]["passed"])
         self.assertEqual(consensus["qualification"]["independent_verifiers"], 0)
         self.assertEqual(consensus["verifiers"], [])
-        self.assertIsNone(consensus["score"]["aggregate_tps"])
+        benchmark = generate_manifest.read_object(ROOT / candidate / "benchmark.json")
+        self.assertEqual(
+            consensus["score"],
+            {
+                "policy": "letsinfer-throughput-geomean-of-author-run-v1",
+                "aggregate_tps": generate_manifest.benchmark_score(benchmark),
+            },
+        )
+        self.assertEqual(len(consensus["results"]), 1)
+        self.assertEqual(consensus["results"][0]["source"], "author-benchmark-v1")
+        self.assertEqual(consensus["results"][0]["benchmark_id"], benchmark["id"])
+        self.assertEqual(
+            consensus["results"][0]["benchmark_record_sha256"],
+            generate_manifest.sha256_file(ROOT / candidate / "benchmark.json"),
+        )
         self.assertEqual(
             consensus["waiver"]["policy"],
             "allowlisted-maintainer-bypass-v1",

@@ -466,6 +466,20 @@ def _bypass_consensus(
             accepted_comments=submissions,
         )
     else:
+        benchmark_path = root / candidate / "benchmark.json"
+        benchmark = generate_manifest.read_object(benchmark_path)
+        generate_manifest.validate_benchmark_binding(runtime, benchmark)
+        author_result = {
+            "source": "author-benchmark-v1",
+            "benchmark_id": benchmark["id"],
+            "benchmark_record_sha256": generate_manifest.sha256_file(
+                benchmark_path
+            ),
+            "results_sha256": benchmark["results_sha256"],
+            "results": benchmark["results"],
+        }
+        if "ttft_cache" in benchmark:
+            author_result["ttft_cache"] = benchmark["ttft_cache"]
         consensus = {
             "schema_version": community_verification.SCHEMA_VERSION,
             "candidate_id": candidate,
@@ -487,10 +501,10 @@ def _bypass_consensus(
                 "blocking_failures": [],
             },
             "verifiers": [],
-            "results": [],
+            "results": [author_result],
             "score": {
-                "policy": "letsinfer-throughput-geomean-of-verifier-means-v1",
-                "aggregate_tps": None,
+                "policy": "letsinfer-throughput-geomean-of-author-run-v1",
+                "aggregate_tps": generate_manifest.benchmark_score(benchmark),
             },
             "verifications": [],
         }
