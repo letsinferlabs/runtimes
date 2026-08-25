@@ -60,6 +60,52 @@ jobs:
           changed=$(git diff --name-only "$BASE_SHA"...HEAD -- \
             '*/benchmark.consensus.json' '*/release.json' 'manifest.json')
           test -z "$changed" && exit 0
+          if python3 - "$BASE_SHA" <<'PY'
+          import json, pathlib, subprocess, sys
+
+          base = sys.argv[1]
+          rows = subprocess.check_output(
+              [
+                  'git', 'diff', '--name-status', f'{base}...HEAD', '--',
+                  '*/benchmark.consensus.json', '*/release.json', 'manifest.json',
+              ],
+              text=True,
+          ).splitlines()
+          changes = [tuple(row.split('\t', 1)) for row in rows]
+          deleted = [
+              path for status, path in changes
+              if status == 'D' and path.endswith('/benchmark.consensus.json')
+          ]
+          if len(deleted) != 1:
+              raise SystemExit(1)
+          candidate = deleted[0].split('/', 1)[0]
+          release_path = f'{candidate}/release.json'
+          if set(changes) != {('D', deleted[0]), ('M', release_path)}:
+              raise SystemExit(1)
+          runtime_path = f'{candidate}/runtime.json'
+          old_runtime = json.loads(subprocess.check_output(
+              ['git', 'show', f'{base}:{runtime_path}'], text=True,
+          ))
+          new_runtime = json.loads(pathlib.Path(runtime_path).read_text())
+          old_release = json.loads(subprocess.check_output(
+              ['git', 'show', f'{base}:{release_path}'], text=True,
+          ))
+          new_release = json.loads(pathlib.Path(release_path).read_text())
+          reset_release = dict(old_release)
+          reset_release['provenance'] = None
+          if (
+              old_runtime.get('id') != new_runtime.get('id')
+              or old_runtime.get('version') == new_runtime.get('version')
+              or not isinstance(old_release.get('provenance'), dict)
+              or new_release != reset_release
+              or pathlib.Path(deleted[0]).exists()
+          ):
+              raise SystemExit(1)
+          raise SystemExit(0)
+          PY
+          then
+            exit 0
+          fi
           protected=false
           if printf '%s\n' "$changed" | grep -Eq 'benchmark\.consensus\.json$'; then
             protected=true
