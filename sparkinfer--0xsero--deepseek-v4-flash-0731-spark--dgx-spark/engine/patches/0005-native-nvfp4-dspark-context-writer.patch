@@ -1,0 +1,17 @@
+--- a/opt/vllm/vllm/models/deepseek_v4/nvidia/dspark.py
++++ b/opt/vllm/vllm/models/deepseek_v4/nvidia/dspark.py
+@@ -51,0 +52 @@
++from ..attention import _use_padded_nvfp4_cache
+@@ -264 +265,6 @@
+-        # fp8_ds_mla UE8M0 paged layout
++        # Packed MLA paged layout. The record format must match the attention
++        # backend's reader: native 432-byte NVFP4 records when
++        # VLLM_DSV4_PADDED_NVFP4=0, else the 584-byte padded FP8-compat
++        # record. Omitting use_nvfp4 (schema default False) writes FP8-compat
++        # records into an NVFP4-record cache, corrupting the draft's context
++        # KV and collapsing DSpark acceptance to ~0%.
+@@ -275,0 +282,4 @@
++            (
++                attn.kv_cache_dtype == "nvfp4_ds_mla"
++                and not _use_padded_nvfp4_cache()
++            ),

@@ -1,0 +1,24 @@
+--- a/opt/vllm/vllm/models/deepseek_v4/nvidia/b12x.py
++++ b/opt/vllm/vllm/models/deepseek_v4/nvidia/b12x.py
+@@ -297,13 +297,18 @@
+     width = int(swa_indices.shape[-1])
+     if indexed_indices is not None:
+         width += int(indexed_indices.shape[-1])
+     decode_split_cap = max(1, _cdiv(width, _DECODE_SPLIT_TILE))
+-    # Keep the legacy 64-wide split cap for decode, but let the b12x contract
+-    # select the smaller batched-prefill split count when rows > decode max.
++    # Extend is a prefill path even when long-prefix reuse leaves <=256 rows.
++    # Keep the legacy narrow split contract for decode, but force every extend
++    # through the bounded batched-prefill contract so a short suffix cannot
++    # exceed the workspace reserved by the full-batch warmup.
++    split_contract_rows = max(1, rows)
++    if mode == "extend":
++        split_contract_rows = max(split_contract_rows, 257)
+     num_splits_cap = compressed_mla_split_chunks_for_contract(
+-        rows=max(1, rows),
++        rows=split_contract_rows,
+         width=width,
+         max_chunks=decode_split_cap,
+     )
+ 
+     plan = plan_compressed_mla_scratch(
