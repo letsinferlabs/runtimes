@@ -1,3 +1,17 @@
+> **Run this model with [Let's Infer](https://letsinfer.ai/).**
+>
+> Install Let's Infer first:
+>
+> ```sh
+> curl -fsSL https://letsinfer.ai/install.sh | sh
+> ```
+>
+> Then install this model:
+>
+> ```sh
+> letsinfer install qwen3.8-27b
+> ```
+
 # Qwen3.8 27B NVFP4 / SGLang / DGX Spark
 
 Run Qwen3.8 27B on one NVIDIA DGX Spark through Let's Infer's stable local
