@@ -153,9 +153,14 @@ Every runtime PR first runs a no-code sentinel. A default-branch `workflow_run`
 builder—not the contributor-editable PR workflow—then checks out the exact
 proposal as untrusted input. It has read-only permissions and no secrets. It
 audits candidate size and contents, builds the runtime twice, and, for
-`build-engine`, independently builds the Engine OCI twice plus its package
-inventory. It cannot publish a package and retains only one byte-verified OCI
-layout.
+`build-engine`, independently builds a new Engine-source identity twice plus
+its package inventory. The finalizer attests a small reusable proof keyed by
+the exact Engine-source bytes and trusted build contract. Later PR heads with
+that same identity restore the attested OCI layout and inventory instead of
+running BuildKit again, then still receive a new exact-head bundle. A changed
+Engine source or build contract always misses and performs both no-cache
+builds. The builder cannot publish a package and retains only one byte-verified
+OCI layout.
 
 A second default-branch `workflow_run` finalizer treats the proposal and raw
 outputs as untrusted data. It independently reclassifies the base-to-head diff,
@@ -290,8 +295,9 @@ The default public runners are `ubuntu-24.04-arm` for isolated builds and
 `ubuntu-24.04` for finalization. Repositories with large Engine images should
 set `LETSINFER_VERIFIER_RUNNER` and `LETSINFER_FINALIZER_RUNNER` to isolated
 GitHub-hosted larger-runner labels with adequate disk. Raw outputs expire after
-one day and finalized verifier bundles after 30 days; an expired bundle is
-rebuilt only from the same exact head and must reproduce every recorded digest.
+one day; finalized verifier bundles and their small unchanged-Engine proofs
+expire after 30 days. A missing or expired proof is a cache miss and performs
+the ordinary two-build reproducibility check.
 
 The release fails closed when an Engine digest, model revision, benchmark
 identity, catalog source, signature key, or recommendation is inconsistent.

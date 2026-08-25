@@ -113,6 +113,15 @@ jobs:
           ref: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
           path: core-contract
           persist-credentials: false
+      - name: Verify finalizer-attested restored Engine output
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          python3 tools/engine_reuse.py verify-restored --root . \
+            --raw "$RUNNER_TEMP/raw"
       - name: Validate metadata and prepare a pin patch when needed
         id: pin
         env:
@@ -142,6 +151,8 @@ jobs:
               raise SystemExit("raw artifact metadata differs from triggering run")
           with pathlib.Path(sys.argv[6]).open("a") as output:
               output.write(f"candidate={value['candidate']}\nmode={value['mode']}\nbase={base}\n")
+              audit=json.loads(pathlib.Path(os.environ["RUNNER_TEMP"] + "/raw/candidate-audit.json").read_text())
+              output.write(f"engine_source_sha256={audit['engine_source_sha256']}\n")
           PY
           base=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["proposal_base_sha"])' "$RUNNER_TEMP/raw/build.json")
           python3 tools/candidate_policy.py classify --root ../proposal \
@@ -248,6 +259,7 @@ jobs:
             --finalizer-run-id "$GITHUB_RUN_ID" \
             --finalizer-workflow-sha "$FINALIZER_WORKFLOW_SHA"
       - name: Upload immutable verifier bundle
+        id: bundle
         if: steps.pin.outputs.changed != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -261,6 +273,42 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/bundle/*
+      - name: Create reusable unchanged-Engine proof
+        if: >-
+          steps.pin.outputs.changed != 'true' &&
+          steps.pin.outputs.mode == 'build-engine'
+        env:
+          FINALIZER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          python3 tools/engine_reuse.py create-proof \
+            --root . \
+            --raw "$RUNNER_TEMP/raw" --bundle "$RUNNER_TEMP/bundle" \
+            --output "$RUNNER_TEMP/engine-proof" \
+            --bundle-artifact-id "${{ steps.bundle.outputs.artifact-id }}" \
+            --bundle-artifact-digest "${{ steps.bundle.outputs.artifact-digest }}" \
+            --bundle-artifact-name "verification-bundle-pr-${{ steps.event.outputs.number }}-${{ steps.event.outputs.head }}" \
+            --finalizer-run-id "$GITHUB_RUN_ID" \
+            --finalizer-workflow-sha "$FINALIZER_WORKFLOW_SHA"
+      - name: Upload reusable unchanged-Engine proof
+        if: >-
+          steps.pin.outputs.changed != 'true' &&
+          steps.pin.outputs.mode == 'build-engine'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: engine-proof-${{ steps.pin.outputs.engine_source_sha256 }}
+          path: ${{ runner.temp }}/engine-proof
+          if-no-files-found: error
+          retention-days: 30
+      - name: Attest reusable unchanged-Engine proof
+        if: >-
+          steps.pin.outputs.changed != 'true' &&
+          steps.pin.outputs.mode == 'build-engine'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/engine-proof/*
       - name: Publish verifier bundle check
         if: always()
         env:

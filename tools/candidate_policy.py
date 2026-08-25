@@ -82,6 +82,21 @@ def canonical_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def engine_source_sha256(candidate: str, records: Sequence[Mapping[str, Any]]) -> str:
+    engine_tree = {
+        "schema_version": 1,
+        "candidate": candidate,
+        "files": [
+            dict(record)
+            for record in records
+            if pathlib.PurePosixPath(str(record.get("path", ""))).parts
+            and pathlib.PurePosixPath(str(record["path"])).parts[0]
+            in ENGINE_INPUT_DIRECTORIES
+        ],
+    }
+    return hashlib.sha256(canonical_bytes(engine_tree)).hexdigest()
+
+
 def _tracked_paths(root: pathlib.Path, candidate: str) -> list[str]:
     result = subprocess.run(
         ["git", "ls-files", "-z", "--", candidate],
@@ -371,6 +386,7 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
             key=lambda item: (-item["bytes"], item["path"]),
         )[:10],
         "candidate_tree_sha256": hashlib.sha256(canonical_bytes(tree)).hexdigest(),
+        "engine_source_sha256": engine_source_sha256(candidate, records),
         "engine_reference": reference,
         "engine_config_digest": immutable_id,
         "target_platform": runtime.get("target", {}).get("platform"),
