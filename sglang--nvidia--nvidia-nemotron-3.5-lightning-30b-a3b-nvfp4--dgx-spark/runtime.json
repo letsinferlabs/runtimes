@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "logical_model": "nemotron-3.5-lightning",
   "target": {
     "id": "dgx-spark",
@@ -159,7 +159,7 @@
       },
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
-        "model_sha256": "623c34567aebb18582765289fbe23d901c62704d6518d71866e0e58db892b5b7",
+        "model_sha256": "6e99dfe39b6f28f4987de47ff7c14cb274aa5c78f533d8f124699879dc289025",
         "engine_image_sha256": "2a9a393634cbe7514d636942db4d76d5725fbfcad6839b5813661719301c1ab1",
         "render_contract": "openai-chat-user-v1"
       },
