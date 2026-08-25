@@ -1,0 +1,222 @@
+{
+  "schema_version": 5,
+  "id": "sglang--inclusionai--ling-3.0-flash-int4--dgx-spark",
+  "version": "0.1.0-rc.1",
+  "logical_model": "ling-3.0-flash",
+  "target": {
+    "id": "dgx-spark",
+    "platform": "linux/arm64",
+    "accelerator": {
+      "vendor": "nvidia",
+      "architecture": "sm_121",
+      "count": 1,
+      "partitioning": "full-device"
+    },
+    "memory": {
+      "topology": "unified",
+      "minimum_total_gib": 118
+    },
+    "placement": {
+      "strategy": "single",
+      "node_count": 1,
+      "interconnect": {
+        "kind": "any",
+        "rdma_required": false,
+        "minimum_speed_mbps": 0,
+        "minimum_mtu": 0
+      }
+    }
+  },
+  "engine": {
+    "id": "sglang",
+    "protocol": {
+      "version": 2
+    },
+    "oci": {
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:842c6ca4622d1577df6ad81491158c57f652a57b57f8c6899a195e737d22fb31",
+      "immutable_id": "sha256:8fcff9bf42b70e17af5ec78a9913f315fb6769ee585108b9b71ba140283f163a",
+      "base": "docker.io/lmsysorg/sglang@sha256:fc960102f1d2581b7dfa44885f6afcdfb107e84782e318cf33bbb2f219d0bd16"
+    },
+    "model_format": "huggingface-snapshot",
+    "cache_provider": "sglang-radix-v1",
+    "arguments": [
+      "--trust-remote-code",
+      "--mem-fraction-static",
+      "0.75",
+      "--chunked-prefill-size",
+      "8192",
+      "--kv-cache-dtype",
+      "fp8_e4m3",
+      "--max-running-requests",
+      "6",
+      "--max-mamba-cache-size",
+      "32",
+      "--context-length",
+      "262144",
+      "--speculative-algorithm",
+      "DSPARK",
+      "--speculative-draft-model-path",
+      "${artifact:draft}",
+      "--enable-linear-replayssm-spec",
+      "--linear-replayssm-cache-len",
+      "32",
+      "--tool-call-parser",
+      "ling3",
+      "--reasoning-parser",
+      "ling3",
+      "--enable-fp32-lm-head",
+      "--disable-shared-experts-fusion",
+      "--random-seed",
+      "308534008"
+    ],
+    "environment": {
+      "FLASHINFER_DISABLE_VERSION_CHECK": "1",
+      "SGLANG_ENABLE_SPEC_V2": "1",
+      "SGLANG_JIT_DEEPGEMM_PRECOMPILE": "1",
+      "TRITON_CACHE_DIR": "/root/.triton"
+    }
+  },
+  "model": {
+    "uri": "hf://inclusionAI/Ling-3.0-flash-int4",
+    "artifact": "model",
+    "acquisition": {
+      "image": "docker.io/lmsysorg/sglang@sha256:fc960102f1d2581b7dfa44885f6afcdfb107e84782e318cf33bbb2f219d0bd16"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "model",
+      "uri": "hf://inclusionAI/Ling-3.0-flash-int4",
+      "format": "huggingface-snapshot",
+      "revision": "7a27e9eb8179b2c2eb71eb214f0dab14ec6a63f2"
+    },
+    {
+      "name": "draft",
+      "uri": "hf://inclusionAI/Ling-3.0-flash-dspark",
+      "format": "huggingface-snapshot",
+      "revision": "8e5d9988c9b09de13f1f7c9d999ff2bfa533a149"
+    }
+  ],
+  "container": {
+    "memory_bytes": 120259084288,
+    "shm_bytes": 34359738368,
+    "min_available_gib": 105,
+    "runtime_min_available_gib": 10,
+    "startup_timeout_seconds": 3600
+  },
+  "cache": {
+    "provider": "sglang-radix-v1",
+    "persistent": false,
+    "prewarm": false,
+    "replay_output_policy": null,
+    "config": {}
+  },
+  "serving": {
+    "max_connections": 128,
+    "max_active_requests": 6,
+    "max_context_tokens": 262144,
+    "gate": null
+  },
+  "benchmark": {
+    "contract": {
+      "schema_version": 7,
+      "suite": "letsinfer-code-prose-v1",
+      "generator": {
+        "id": "letsinfer-code-prose",
+        "version": 7
+      },
+      "domains": [
+        "code"
+      ],
+      "execution": {
+        "isolation": "fresh-matrix",
+        "prefix_state": "shared",
+        "samples_per_cell": 1,
+        "stream_prefix": "shared-body"
+      },
+      "short": {
+        "domains": [
+          "code",
+          "prose"
+        ],
+        "prompt_tokens": 256,
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "request": {
+          "output_tokens": 512,
+          "min_completion_tokens": 512,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 308534008
+        }
+      },
+      "ttft_cache": {
+        "prompt_tokens": 64000,
+        "prompt_domain": "code",
+        "repetitions": 2,
+        "request": {
+          "output_tokens": 1,
+          "min_completion_tokens": 1,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 308534008
+        }
+      },
+      "tokenizer": {
+        "capability": "engine-rendered-chat-count-v1",
+        "model_sha256": "10defcee072e7d42a7256b44c7f8ffc0249f7fce89015214b880561a48eb307b",
+        "engine_image_sha256": "8fcff9bf42b70e17af5ec78a9913f315fb6769ee585108b9b71ba140283f163a",
+        "render_contract": "openai-chat-user-v1"
+      },
+      "request": {
+        "output_tokens": 128,
+        "min_completion_tokens": 128,
+        "require_natural_stop": false,
+        "temperature": 0,
+        "seed": 308534008
+      },
+      "sample_interval_seconds": 5,
+      "cases": [
+        {
+          "id": "32k",
+          "prompt_tokens": 32768,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "64k",
+          "prompt_tokens": 65536,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "128k",
+          "prompt_tokens": 131072,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "256k",
+          "prompt_tokens": 260000,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        }
+      ]
+    }
+  }
+}
