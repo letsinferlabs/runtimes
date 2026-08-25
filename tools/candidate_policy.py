@@ -187,9 +187,9 @@ def _manifest_at(root: pathlib.Path, base: str | None) -> dict[str, Any]:
     return value
 
 
-def runtime_repository(root: pathlib.Path, candidate: str, base: str | None = None) -> str:
-    """Keep an existing public package; route a new candidate to the shared package."""
-
+def _candidate_release(
+    root: pathlib.Path, candidate: str, base: str | None = None
+) -> Mapping[str, Any] | None:
     manifest = _manifest_at(root, base)
     matches: list[Mapping[str, Any]] = []
     models = manifest.get("models")
@@ -205,13 +205,24 @@ def runtime_repository(root: pathlib.Path, candidate: str, base: str | None = No
             if isinstance(record, Mapping):
                 matches.append(record)
     if not matches:
-        return NEW_RUNTIME_REPOSITORY
+        return None
     if len(matches) != 1:
         raise CandidatePolicyError("candidate appears multiple times in the generated manifest")
     record = matches[0]
     latest = record.get("latest")
     releases = record.get("releases")
     release = releases.get(latest) if isinstance(latest, str) and isinstance(releases, Mapping) else None
+    if not isinstance(release, Mapping):
+        raise CandidatePolicyError("existing candidate release is unavailable")
+    return release
+
+
+def runtime_repository(root: pathlib.Path, candidate: str, base: str | None = None) -> str:
+    """Keep an existing public package; route a new candidate to the shared package."""
+
+    release = _candidate_release(root, candidate, base)
+    if release is None:
+        return NEW_RUNTIME_REPOSITORY
     source = release.get("source") if isinstance(release, Mapping) else None
     match = REFERENCE_RE.fullmatch(str(source))
     if match is None or (
@@ -222,14 +233,33 @@ def runtime_repository(root: pathlib.Path, candidate: str, base: str | None = No
     return match["repository"]
 
 
+def engine_publication(
+    root: pathlib.Path, candidate: str, base: str | None = None
+) -> tuple[str, str | None]:
+    """Reuse an existing Engine package so its immutable base blobs remain local."""
+
+    release = _candidate_release(root, candidate, base)
+    if release is None:
+        return NEW_ENGINE_REPOSITORY, None
+    reference = release.get("engine_oci")
+    match = REFERENCE_RE.fullmatch(str(reference))
+    if match is None or OFFICIAL_ENGINE_RE.fullmatch(str(reference)) is None:
+        raise CandidatePolicyError("existing candidate Engine repository is not official")
+    return match["repository"], str(reference)
+
+
 def publication_repositories(
     root: pathlib.Path, candidate: str, base: str | None = None
 ) -> dict[str, str]:
-    return {
+    engine_repository, existing_reference = engine_publication(root, candidate, base)
+    result = {
         "candidate": candidate,
         "runtime_repository": runtime_repository(root, candidate, base),
-        "engine_repository": NEW_ENGINE_REPOSITORY,
+        "engine_repository": engine_repository,
     }
+    if existing_reference is not None:
+        result["engine_existing_reference"] = existing_reference
+    return result
 
 
 def _candidate_files(root: pathlib.Path, candidate: str) -> list[pathlib.Path]:
