@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.16",
+  "version": "0.1.0-rc.17",
   "logical_model": "qwen3.8-27b",
   "target": {
     "id": "dgx-spark",

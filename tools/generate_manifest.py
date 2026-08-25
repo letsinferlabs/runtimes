@@ -631,26 +631,71 @@ def validate_consensus_binding(
         score = consensus.get("score")
         aggregate_tps = score.get("aggregate_tps") if isinstance(score, dict) else None
         results = consensus.get("results")
+        numeric_score = (
+            isinstance(aggregate_tps, (int, float))
+            and not isinstance(aggregate_tps, bool)
+            and math.isfinite(float(aggregate_tps))
+            and aggregate_tps > 0
+        )
+        legacy_unscored = (
+            expected_verifiers == 0
+            and isinstance(score, dict)
+            and score.get("policy")
+            == "letsinfer-throughput-geomean-of-verifier-means-v1"
+            and aggregate_tps is None
+            and results == []
+        )
+        author_scored = False
+        if (
+            expected_verifiers == 0
+            and isinstance(score, dict)
+            and score.get("policy")
+            == "letsinfer-throughput-geomean-of-author-run-v1"
+            and numeric_score
+            and isinstance(results, list)
+            and len(results) == 1
+            and isinstance(results[0], dict)
+        ):
+            author = results[0]
+            required = {
+                "source",
+                "benchmark_id",
+                "benchmark_record_sha256",
+                "results_sha256",
+                "results",
+            }
+            fields = set(author)
+            bound_results = (
+                {"results": author.get("results"), "ttft_cache": author.get("ttft_cache")}
+                if "ttft_cache" in author
+                else author.get("results")
+            )
+            author_scored = (
+                (fields == required or fields == required | {"ttft_cache"})
+                and author.get("source") == "author-benchmark-v1"
+                and SHA256_RE.fullmatch(str(author.get("benchmark_id"))) is not None
+                and SHA256_RE.fullmatch(str(author.get("benchmark_record_sha256")))
+                is not None
+                and SHA256_RE.fullmatch(str(author.get("results_sha256"))) is not None
+                and isinstance(author.get("results"), list)
+                and bool(author["results"])
+                and author["results_sha256"]
+                == hashlib.sha256(canonical_bytes(bound_results)).hexdigest()
+                and aggregate_tps == benchmark_score({"results": author["results"]})
+            )
+        verifier_scored = (
+            expected_verifiers > 0
+            and isinstance(score, dict)
+            and score.get("policy")
+            == "letsinfer-throughput-geomean-of-verifier-means-v1"
+            and numeric_score
+            and isinstance(results, list)
+            and bool(results)
+        )
         if (
             not isinstance(score, dict)
             or set(score) != {"policy", "aggregate_tps"}
-            or score.get("policy")
-            != "letsinfer-throughput-geomean-of-verifier-means-v1"
-            or not isinstance(results, list)
-            or (
-                expected_verifiers == 0
-                and (aggregate_tps is not None or results != [])
-            )
-            or (
-                expected_verifiers > 0
-                and (
-                    not isinstance(aggregate_tps, (int, float))
-                    or isinstance(aggregate_tps, bool)
-                    or not math.isfinite(float(aggregate_tps))
-                    or aggregate_tps <= 0
-                    or not results
-                )
-            )
+            or not (legacy_unscored or author_scored or verifier_scored)
         ):
             raise ManifestError(f"runtime maintainer bypass score is invalid: {candidate}")
     if waived:
@@ -846,6 +891,32 @@ def candidates(
         qualified = consensus is not None
         if qualified:
             validate_consensus_binding(runtime, consensus)
+            score = consensus.get("score")
+            if (
+                isinstance(score, dict)
+                and score.get("policy")
+                == "letsinfer-throughput-geomean-of-author-run-v1"
+            ):
+                author_results = consensus.get("results")
+                author = (
+                    author_results[0]
+                    if isinstance(author_results, list)
+                    and len(author_results) == 1
+                    and isinstance(author_results[0], dict)
+                    else None
+                )
+                if (
+                    benchmark is None
+                    or not isinstance(author, dict)
+                    or author.get("benchmark_id") != benchmark.get("id")
+                    or author.get("benchmark_record_sha256")
+                    != sha256_file(benchmark_path)
+                    or author.get("results_sha256")
+                    != benchmark.get("results_sha256")
+                ):
+                    raise ManifestError(
+                        f"runtime maintainer benchmark differs: {candidate}"
+                    )
             validate_provenance(candidate, provenance, consensus)
         source_key = (candidate, runtime["version"])
         if qualified and require_sources and source_key not in sources:
