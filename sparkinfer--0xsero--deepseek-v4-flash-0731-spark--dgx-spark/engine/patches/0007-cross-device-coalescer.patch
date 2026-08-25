@@ -1,0 +1,10 @@
+--- a/opt/recipe/scripts/coalesce_rank_sliced_exl3.py
++++ b/opt/recipe/scripts/coalesce_rank_sliced_exl3.py
+@@ -131 +131,6 @@
+-        os.link(source, temporary)
++        try:
++            os.link(source, temporary)
++        except OSError:
++            # source is on a different filesystem (e.g. shared network folder):
++            # no hardlink possible, fall back to copying.
++            shutil.copy2(source, temporary)
