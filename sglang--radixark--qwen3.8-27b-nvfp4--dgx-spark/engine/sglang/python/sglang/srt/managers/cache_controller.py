@@ -550,7 +550,7 @@ class HiCacheController:
 
             if (
                 self.storage_backend_type
-                in ["hf3fs", "mooncake", "eic", "nixl", "simm", "mori"]
+                in ["hf3fs", "mooncake", "eic", "nixl", "simm", "mori", "letsinfer"]
             ) or (
                 self.storage_backend_type == "dynamic"
                 and bool(self.storage_config.extra_config.get("interface_v1", 0))
@@ -940,7 +940,7 @@ class HiCacheController:
         backend = self.storage_backend_type
 
         # Multi-pool zero-copy backends.
-        if backend == "mooncake":
+        if backend in {"mooncake", "letsinfer"}:
             if self.storage_config.should_split_heads:
                 logger.warning(
                     "HiCache draft L3 disabled: should_split_heads not yet "

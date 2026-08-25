@@ -158,7 +158,7 @@ class StorageBackendFactory:
         mem_pool_host: Any,
     ) -> HiCacheStorage:
         """Create built-in backend with original initialization logic."""
-        if backend_name in ("file", "sim"):
+        if backend_name in ("file", "sim", "letsinfer"):
             return backend_class(storage_config)
         elif backend_name == "nixl":
             return backend_class(storage_config)
@@ -200,6 +200,12 @@ StorageBackendFactory.register_backend(
 
 StorageBackendFactory.register_backend(
     "sim", "sglang.srt.mem_cache.storage.sim_storage", "SimHiCacheStorage"
+)
+
+StorageBackendFactory.register_backend(
+    "letsinfer",
+    "sglang.srt.mem_cache.storage.letsinfer_nvme",
+    "LetsInferNVMeStorage",
 )
 
 StorageBackendFactory.register_backend(

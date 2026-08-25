@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
 import stat
@@ -25,6 +26,46 @@ AUTOTUNE_RELATIVE = pathlib.PurePosixPath(
 AUTOTUNE_SHA256 = "ea30460e95be5d3c14186e58048f8dc14b79a3416f73c073b6501c36ae8eae98"
 
 
+def _cache_arguments(runtime: Mapping[str, Any]) -> Sequence[str]:
+    cache = runtime.get("cache")
+    if not isinstance(cache, Mapping) or not cache.get("persistent"):
+        return ()
+    if cache.get("provider") != "sglang-letsinfer-prefix-v1":
+        raise AdapterError("unsupported persistent cache provider")
+    config = cache.get("config")
+    if not isinstance(config, Mapping):
+        raise AdapterError("persistent cache config is missing")
+    staging_bytes = int(config.get("staging_capacity_bytes", 1024**3))
+    staging_gib = max(1, (staging_bytes + 1024**3 - 1) // 1024**3)
+    extra = {
+        "durable_capacity_bytes": int(config["durable_capacity_bytes"]),
+        "ttl_seconds": int(config["ttl_seconds"]),
+        "resident_capacity_bytes": int(config.get("resident_capacity_bytes", 0)),
+        "direct_reads": bool(config.get("direct_reads", True)),
+        "prefetch_threshold": 64,
+        "hicache_storage_pass_prefix_keys": True,
+    }
+    return (
+        "--enable-hierarchical-cache",
+        "--hicache-host-memory-mode",
+        "buffer_only",
+        "--hicache-size",
+        str(staging_gib),
+        "--hicache-write-policy",
+        "write_through",
+        "--hicache-io-backend",
+        "kernel",
+        "--hicache-mem-layout",
+        "page_first",
+        "--hicache-storage-backend",
+        "letsinfer",
+        "--hicache-storage-prefetch-policy",
+        "wait_complete",
+        "--hicache-storage-backend-extra-config",
+        json.dumps(extra, sort_keys=True, separators=(",", ":")),
+    )
+
+
 def build_command(runtime: Mapping[str, Any], port: int) -> Sequence[str]:
     return [
         "python3",
@@ -39,6 +80,7 @@ def build_command(runtime: Mapping[str, Any], port: int) -> Sequence[str]:
         "--port",
         str(port),
         "--enable-cache-report",
+        *_cache_arguments(runtime),
         *expand_arguments(runtime),
     ]
 

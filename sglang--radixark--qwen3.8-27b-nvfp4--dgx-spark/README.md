@@ -5,17 +5,20 @@ OpenAI-compatible API.
 
 ## Features
 
-- **One-command installation** — Let's Infer downloads the exact model,
+- **One-command installation** -- Let's Infer downloads the exact model,
   DFlash2 drafter, runtime pack, and Engine OCI, then starts the API.
-- **262K context** — qualified with a 262,144-token context ceiling.
-- **Native SGLang scheduling** — up to 10 active requests behind 128 gateway
+- **262K context** -- qualified with a 262,144-token context ceiling.
+- **Native SGLang scheduling** -- up to 10 active requests behind 128 gateway
   connections, with dynamic admission and queueing.
-- **Speculative decoding** — the pinned DFlash2 drafter produces up to eight
+- **Speculative decoding** -- the pinned DFlash2 drafter produces up to ten
   draft tokens per step.
-- **DGX Spark tuning** — FlashInfer attention, FP8 KV cache, chunked prefill,
+- **DGX Spark tuning** -- FlashInfer attention, FP8 KV cache, chunked prefill,
   Mamba cache policy, and target-specific Engine configuration are sealed in
   the candidate.
-- **Reproducible evidence** — the canonical code-and-prose contract binds every
+- **Persistent NVMe prefix cache** -- attention KV, draft KV, and Mamba state
+  are stored through Let's Infer's CRC-checked, atomic, byte-LRU prefix store
+  and restored across Engine restarts.
+- **Reproducible evidence** -- the canonical code-and-prose contract binds every
   verifier result to the exact model, engine, target, and serving recipe.
 
 ## Hugging Face artifacts
@@ -46,13 +49,14 @@ the pinned Engine OCI. You do not download or place the weights separately.
 
 ## Reproduce this
 
-After installing the qualified runtime, run its complete canonical C1
-code-and-prose context set through the unified gateway:
+After installing the qualified runtime, run its complete cache-aware benchmark:
 
 ```bash
-letsinfer benchmark qwen3.8-27b --c1
+letsinfer benchmark qwen3.8-27b
 ```
 
-Let's Infer materializes the standard prompts with the exact Engine tokenizer,
-starts each cell with an isolated lifecycle and cache, records Watchdog
-telemetry, and validates the generated `benchmark.json`.
+The current schema-7 contract runs short code and prose at C1/C2/C4, plus
+code at C1/C2/C4 across 32K, 64K, 128K, and 256K. It finishes with one
+exact 64K cold/warm TTFT pair. Let's Infer owns the prompts, shared-prefix
+ordering, lifecycle, Watchdog telemetry,
+cache-hit validation, and the final `benchmark.json`.

@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.15",
+  "version": "0.1.0-rc.16",
   "logical_model": "qwen3.8-27b",
   "target": {
     "id": "dgx-spark",
@@ -29,13 +29,13 @@
   },
   "engine": {
     "model_format": "huggingface-snapshot",
-    "cache_provider": "sglang-radix-v1",
+    "cache_provider": "sglang-letsinfer-prefix-v1",
     "arguments": [
       "--trust-remote-code",
       "--bf16-gemm-backend",
       "gemv",
       "--mem-fraction-static",
-      "0.945",
+      "0.920",
       "--attention-backend",
       "flashinfer",
       "--chunked-prefill-size",
@@ -82,8 +82,8 @@
       "version": 2
     },
     "oci": {
-      "reference": "localhost:5000/letsinfer/weschera-qwen38@sha256:02f1f5c2ca8e1afbd3c9b80ee3b0d243634f4767e6b369b090a3a99338324510",
-      "immutable_id": "sha256:edd140304b418dbbe09b6e9e4d3485a117f6b245b9903b02ac1926419a50ff23",
+      "reference": "localhost:5000/letsinfer/weschera-qwen38@sha256:210c475c3662dcaa99627c65663a553f8ac07d1ffdcf9ed8e118b547cd6ed07c",
+      "immutable_id": "sha256:36ae770e38f2f30bc51a0b7be8be247189e0764fcfa5df50bf1230f222a97eac",
       "base": "docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1"
     }
   },
@@ -117,32 +117,38 @@
     "startup_timeout_seconds": 1800
   },
   "cache": {
-    "provider": "sglang-radix-v1",
-    "persistent": false,
-    "prewarm": false,
-    "replay_output_policy": null,
-    "config": {}
+    "provider": "sglang-letsinfer-prefix-v1",
+    "persistent": true,
+    "prewarm": true,
+    "replay_output_policy": "restored-repeat-exact",
+    "config": {
+      "durable_capacity_bytes": 68719476736,
+      "resident_capacity_bytes": 0,
+      "staging_capacity_bytes": 1073741824,
+      "ttl_seconds": 604800,
+      "min_tokens": 512,
+      "direct_reads": true,
+      "capture": true,
+      "prefix_lookup": true
+    }
   },
   "serving": {
     "max_connections": 128,
     "max_active_requests": 10,
-    "max_context_tokens": 262144,
-    "gate": {
-      "measured_commit": "c7f70de30370c95469a63893156ddf0f0d11098f"
-    }
+    "max_context_tokens": 262144
   },
   "benchmark": {
     "contract": {
-      "schema_version": 2,
+      "schema_version": 7,
       "suite": "letsinfer-code-prose-v1",
       "generator": {
         "id": "letsinfer-code-prose",
-        "version": 2
+        "version": 7
       },
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
         "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
-        "engine_image_sha256": "edd140304b418dbbe09b6e9e4d3485a117f6b245b9903b02ac1926419a50ff23",
+        "engine_image_sha256": "36ae770e38f2f30bc51a0b7be8be247189e0764fcfa5df50bf1230f222a97eac",
         "render_contract": "openai-chat-user-v1"
       },
       "request": {
@@ -160,9 +166,7 @@
           "concurrencies": [
             1,
             2,
-            4,
-            8,
-            16
+            4
           ]
         },
         {
@@ -171,9 +175,7 @@
           "concurrencies": [
             1,
             2,
-            4,
-            8,
-            16
+            4
           ]
         },
         {
@@ -182,9 +184,7 @@
           "concurrencies": [
             1,
             2,
-            4,
-            8,
-            16
+            4
           ]
         },
         {
@@ -193,12 +193,50 @@
           "concurrencies": [
             1,
             2,
-            4,
-            8,
-            16
+            4
           ]
         }
-      ]
+      ],
+      "domains": [
+        "code"
+      ],
+      "execution": {
+        "isolation": "fresh-matrix",
+        "prefix_state": "shared",
+        "samples_per_cell": 1,
+        "stream_prefix": "shared-body"
+      },
+      "short": {
+        "domains": [
+          "code",
+          "prose"
+        ],
+        "prompt_tokens": 256,
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "request": {
+          "output_tokens": 512,
+          "min_completion_tokens": 512,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      },
+      "ttft_cache": {
+        "prompt_tokens": 64000,
+        "prompt_domain": "code",
+        "repetitions": 2,
+        "request": {
+          "output_tokens": 1,
+          "min_completion_tokens": 1,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      }
     }
   }
 }
