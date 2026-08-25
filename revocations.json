@@ -1,6 +1,1 @@
-{
-  "generated_at_unix": 0,
-  "revocations": [],
-  "schema_version": 1,
-  "sequence": 0
-}
+{"generated_at_unix":1787648309,"revocations":[{"consensus_sha256":"05c11b5103f16452590097e57d00658810aada4a193e07694e67ba2269211670","runtime_oci_digest":"sha256:c89e6c9b3dde40235097a799e43d8949136de0239ac85bf337da42259ee970c1"}],"schema_version":1,"sequence":1}

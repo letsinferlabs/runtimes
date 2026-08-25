@@ -100,7 +100,7 @@
     }
   },
   "benchmark_contract_sha256": "d8cc77b7c1215ab49596f871ad29a4c57e04bbcc583ee4704703ff7bced15c32",
-  "id": "7158a9621721d2e301e3716207df47679ca16d5f2eb30b6d62bb99f9037e3a67",
+  "id": "45dd00dfe87ff1b3abc99a98eb4b84a3ca7764cf28cc30c29aebe55e00f71ef7",
   "installation_id": "1eea96444ebe3454cca623bf85e7320a72003058c765ece697a7d9a6a9f2b61b",
   "results": [
     {
@@ -1762,7 +1762,7 @@
     "engine_oci": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:f70057989f8207323ee499671496fdf8054af3b89ebb69e4a6bd799fca864d74",
     "model_revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4",
     "model_uri": "hf://RadixArk/Qwen3.8-27B-NVFP4",
-    "runtime_version": "0.1.0-rc.16",
+    "runtime_version": "0.1.0-rc.17",
     "target": "dgx-spark",
     "target_contract_sha256": "e3f21b216fb6729c17ec8bf73864bb236592f1b5d7cc0a8f0b7b991271b14b60"
   },
