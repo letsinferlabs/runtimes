@@ -13,6 +13,7 @@ concurrency:
 # no secrets, no package writes, no attestations, and a read-only token.
 permissions:
   actions: read
+  attestations: read
   contents: read
 
 jobs:
@@ -98,8 +99,6 @@ jobs:
           ref: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
           path: core-contract
           persist-credentials: false
-      - name: Set up the isolated BuildKit builder
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Classify the proposal
         id: candidate
         env:
@@ -115,15 +114,11 @@ jobs:
           python3 tools/candidate_policy.py repositories --root ../proposal \
             --base "$BASE_SHA" --candidate "$candidate" \
             --github-output "$GITHUB_OUTPUT" --output "$RUNNER_TEMP/repositories.json"
-      - name: Audit source and build the runtime twice
+      - name: Audit exact candidate and Engine source
+        id: audit
         env:
           CANDIDATE: ${{ steps.candidate.outputs.candidate }}
           MODE: ${{ steps.candidate.outputs.mode }}
-          PR_NUMBER: ${{ steps.event.outputs.number }}
-          HEAD_SHA: ${{ steps.event.outputs.head }}
-          BASE_SHA: ${{ steps.event.outputs.base }}
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
-          RUNTIME_REPOSITORY: ${{ steps.candidate.outputs.runtime_repository }}
           PYTHONDONTWRITEBYTECODE: "1"
         working-directory: trusted
         run: |
@@ -134,6 +129,42 @@ jobs:
           python3 tools/candidate_policy.py audit --root ../proposal \
             --candidate "$CANDIDATE" --mode "$MODE" \
             --output "$raw/candidate-audit.json"
+          python3 tools/engine_reuse.py contract --root . \
+            --github-output "$GITHUB_OUTPUT"
+          source=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine_source_sha256"])' "$raw/candidate-audit.json")
+          echo "engine_source_sha256=$source" >> "$GITHUB_OUTPUT"
+      - name: Restore finalizer-attested unchanged Engine output
+        id: engine_reuse
+        if: steps.candidate.outputs.mode == 'build-engine'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          python3 tools/engine_reuse.py restore --root . \
+            --raw "$RUNNER_TEMP/raw" --github-output "$GITHUB_OUTPUT"
+      - name: Set up the isolated BuildKit builder
+        if: >-
+          steps.candidate.outputs.mode == 'build-engine' &&
+          steps.engine_reuse.outputs.reused != 'true'
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build the exact runtime twice
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.candidate }}
+          MODE: ${{ steps.candidate.outputs.mode }}
+          PR_NUMBER: ${{ steps.event.outputs.number }}
+          HEAD_SHA: ${{ steps.event.outputs.head }}
+          BASE_SHA: ${{ steps.event.outputs.base }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUNTIME_REPOSITORY: ${{ steps.candidate.outputs.runtime_repository }}
+          ENGINE_BUILD_CONTRACT_SHA256: ${{ steps.audit.outputs.engine_build_contract_sha256 }}
+          ENGINE_REUSED: ${{ steps.engine_reuse.outputs.reused }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          raw="$RUNNER_TEMP/raw"
           ../core-contract/bin/letsinfer pack "../proposal/$CANDIDATE" \
             --output "$raw/runtime-a.letsinfer"
           ../core-contract/bin/letsinfer pack "../proposal/$CANDIDATE" \
@@ -154,13 +185,17 @@ jobs:
               "proposal_base_sha": os.environ["BASE_SHA"],
               "build_workflow_sha": os.environ["WORKFLOW_SHA"],
               "build_workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "engine_build_contract_sha256": os.environ["ENGINE_BUILD_CONTRACT_SHA256"],
+              "engine_reused": os.environ["ENGINE_REUSED"] == "true",
               "candidate": candidate,
               "mode": mode,
           }
           pathlib.Path(path).write_text(json.dumps(value, sort_keys=True, separators=(",", ":"))+"\n")
           PY
       - name: Build the exact Engine OCI twice
-        if: steps.candidate.outputs.mode == 'build-engine'
+        if: >-
+          steps.candidate.outputs.mode == 'build-engine' &&
+          steps.engine_reuse.outputs.reused != 'true'
         env:
           CANDIDATE: ${{ steps.candidate.outputs.candidate }}
           ENGINE_REPOSITORY: ${{ steps.candidate.outputs.engine_repository }}

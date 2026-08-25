@@ -53,6 +53,22 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow.count("--build-context letsinfer-tools=."), 3)
         self.assertNotIn("--build-context letsinfer-tools=../proposal", workflow)
 
+    def test_unchanged_engine_uses_a_finalizer_attested_proof(self) -> None:
+        build = (ROOT / ".github/workflows/build-verifier.yml").read_text(
+            encoding="utf-8"
+        )
+        finalizer = (ROOT / ".github/workflows/finalize-verifier.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("attestations: read", build)
+        self.assertIn("tools/engine_reuse.py restore", build)
+        self.assertIn("steps.engine_reuse.outputs.reused != 'true'", build)
+        self.assertIn("engine_build_contract_sha256", build)
+        self.assertIn("tools/engine_reuse.py verify-restored", finalizer)
+        self.assertIn("tools/engine_reuse.py create-proof", finalizer)
+        self.assertIn("engine-proof-${{ steps.pin.outputs.engine_source_sha256 }}", finalizer)
+        self.assertIn("Attest reusable unchanged-Engine proof", finalizer)
+
     def test_verification_bot_uses_a_read_only_attestation_token(self) -> None:
         workflow = (
             ROOT / ".github/workflows/community-verification.yml"
