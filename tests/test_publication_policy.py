@@ -257,11 +257,16 @@ class PublicationPolicyTests(unittest.TestCase):
             existing_repositories["engine_repository"],
             f"ghcr.io/letsinferlabs/engines/{existing}",
         )
+        catalog = generate_manifest.read_object(ROOT / "manifest.json")
+        candidate_record = catalog["models"]["qwen3.8-27b"]["targets"][
+            "dgx-spark"
+        ]["candidates"][existing]
+        published_engine = candidate_record["releases"][
+            candidate_record["latest"]
+        ]["engine_oci"]
         self.assertEqual(
             existing_repositories["engine_existing_reference"],
-            generate_manifest.read_object(ROOT / existing / "runtime.json")["engine"][
-                "oci"
-            ]["reference"],
+            published_engine,
         )
         repositories = candidate_policy.publication_repositories(
             ROOT, "newengine--owner--model--target"
