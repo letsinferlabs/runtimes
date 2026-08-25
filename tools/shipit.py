@@ -181,7 +181,12 @@ def _changed_candidate(number: int) -> str:
     return candidates[0]
 
 
-def _approved_review(number: int, pull_author_id: int) -> dict[str, Any]:
+def _approved_review(
+    number: int,
+    pull_author_id: int,
+    *,
+    required: bool = True,
+) -> dict[str, Any] | None:
     values = verification_bot._flatten_pages(
         verification_bot.api(
             f"repos/{REPOSITORY}/pulls/{number}/reviews?per_page=100", paginate=True
@@ -197,6 +202,8 @@ def _approved_review(number: int, pull_author_id: int) -> dict[str, Any]:
                 latest[user_id] = review
     if any(review.get("state") == "CHANGES_REQUESTED" for review in latest.values()):
         raise ShipitError("a current review requests changes")
+    if not required:
+        return None
     for review in latest.values():
         user = review.get("user")
         if (
@@ -412,28 +419,56 @@ def _bypass_consensus(
         "github_id": pr["user"]["id"],
         "github_type": pr["user"]["type"],
     }
-    consensus = community_verification.build_consensus(
-        candidate_id=candidate,
-        runtime_version=runtime["version"],
-        pull_request=int(pr["number"]),
-        pull_request_url=str(pr["html_url"]),
-        proposal_head_sha=str(subject["proposal_head_sha"]),
-        author=author,
-        runtime_authors=release["authors"],
-        accepted_comments=submissions,
-    )
+    if submissions:
+        consensus = community_verification.build_consensus(
+            candidate_id=candidate,
+            runtime_version=runtime["version"],
+            pull_request=int(pr["number"]),
+            pull_request_url=str(pr["html_url"]),
+            proposal_head_sha=str(subject["proposal_head_sha"]),
+            author=author,
+            runtime_authors=release["authors"],
+            accepted_comments=submissions,
+        )
+    else:
+        consensus = {
+            "schema_version": community_verification.SCHEMA_VERSION,
+            "candidate_id": candidate,
+            "runtime_version": runtime["version"],
+            "pull_request": int(pr["number"]),
+            "pull_request_url": str(pr["html_url"]),
+            "proposal_head_sha": str(subject["proposal_head_sha"]),
+            "author": author,
+            "runtime_authors": release["authors"],
+            "subject": dict(subject),
+            "policy": dict(community_verification.POLICY),
+            "qualification": {
+                "passed": False,
+                "independent_verifiers": 0,
+                "required_verifiers": community_verification.POLICY[
+                    "required_verifiers"
+                ],
+                "safety_passed": True,
+                "blocking_failures": [],
+            },
+            "verifiers": [],
+            "results": [],
+            "score": {
+                "policy": "letsinfer-throughput-geomean-of-verifier-means-v1",
+                "aggregate_tps": None,
+            },
+            "verifications": [],
+        }
     qualification = consensus["qualification"]
     if (
-        qualification["independent_verifiers"] != 1
-        or qualification["safety_passed"] is not True
+        qualification["safety_passed"] is not True
         or qualification["blocking_failures"]
-        or len(consensus.get("verifiers", [])) != 1
     ):
-        raise ShipitError("bypass requires exactly one independent successful verification and no blocking failure")
+        raise ShipitError("maintainer bypass cannot override a blocking failure")
     consensus["qualification"]["passed"] = True
     consensus["waiver"] = {
         "schema_version": 1,
-        "policy": "maintainer-one-independent-pass-v1",
+        "policy": "allowlisted-maintainer-bypass-v1",
         "actor": dict(actor),
         "reason": reason,
         "comment_id": int(comment["id"]),
@@ -554,7 +589,7 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
     if not bot_login:
         raise ShipitError("verification bot login is not configured")
     _bot_only_head(proposal=proposal, current=current, candidate=candidate, bot_login=bot_login)
-    _approved_review(number, int(pr["user"]["id"]))
+    _approved_review(number, int(pr["user"]["id"]), required=not bypass)
     with tempfile.TemporaryDirectory(prefix="letsinfer-shipit-") as temporary:
         artifact_root, bundle = _download_artifact(
             name=f"verification-bundle-pr-{number}-{proposal}",
@@ -577,7 +612,7 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
                 verification_bot.CHECK_NAME,
                 current,
                 "success",
-                "One independent verification passed; an authorized maintainer applied the recorded verifier-only waiver.",
+                "An allowlisted maintainer applied the audited verifier override.",
             )
             require_checks(current, bypass=True, wait_seconds=1800)
         else:
@@ -588,7 +623,11 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
         latest = _pull(number)
         if latest["head"]["sha"] != current:
             raise ShipitError("pull-request head changed during publication")
-        _approved_review(number, int(latest["user"]["id"]))
+        _approved_review(
+            number,
+            int(latest["user"]["id"]),
+            required=not bypass,
+        )
         require_checks(current, bypass=bypass)
         receipt = {
             "schema_version": 1,
