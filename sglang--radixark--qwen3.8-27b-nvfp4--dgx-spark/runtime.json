@@ -82,7 +82,7 @@
       "version": 2
     },
     "oci": {
-      "reference": "localhost:5000/letsinfer/weschera-qwen38@sha256:18055aa814382ec8531a599ceb89ecea5d073181719a61eed088e24dbbf87b59",
+      "reference": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:18055aa814382ec8531a599ceb89ecea5d073181719a61eed088e24dbbf87b59",
       "immutable_id": "sha256:c3452b0d5bb2c79e3a51a00b2818d30f20583caa098fadff7f0be56c4bd5eeef",
       "base": "docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1"
     }
