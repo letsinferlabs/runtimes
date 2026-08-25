@@ -157,6 +157,16 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn('git rev-parse "${HEAD_SHA}^"', workflow)
         self.assertIn('= "$BASE_SHA"', workflow)
 
+    def test_new_runtime_version_may_only_clear_stale_bot_qualification(self) -> None:
+        workflow = (ROOT / ".github/workflows/validate.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("'*/benchmark.consensus.json'", workflow)
+        self.assertIn("set(changes) != {('D', deleted[0]), ('M', release_path)}", workflow)
+        self.assertIn("reset_release['provenance'] = None", workflow)
+        self.assertIn("old_runtime.get('version') == new_runtime.get('version')", workflow)
+        self.assertIn("new_release != reset_release", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
