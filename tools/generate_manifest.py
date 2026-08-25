@@ -33,6 +33,9 @@ RECOMMENDATION_POLICY = {
     "tie_breakers": ["score", "version", "candidate"],
 }
 CONTRACT_MIGRATION_METHOD = "runtime-contract-migration-v1"
+BENCHMARK_SCHEMA_VERSIONS = {4, 5, 6}
+SHARED_BENCHMARK_SCHEMA_VERSIONS = {5, 6}
+TTFT_CACHE_BENCHMARK_SCHEMA_VERSION = 6
 
 
 class ManifestError(ValueError):
@@ -282,22 +285,36 @@ def benchmark_subject(runtime: dict[str, Any]) -> dict[str, Any]:
 def validate_benchmark_binding(
     runtime: dict[str, Any], record: dict[str, Any]
 ) -> None:
-    if record.get("schema_version") != 4:
+    schema_version = record.get("schema_version")
+    if schema_version not in BENCHMARK_SCHEMA_VERSIONS:
         raise ManifestError(f"benchmark schema is unsupported: {runtime['id']}")
     subject = benchmark_subject(runtime)
     if record.get("subject") != subject:
         raise ManifestError(f"benchmark subject differs from runtime: {runtime['id']}")
-    contract_sha = hashlib.sha256(
-        canonical_bytes(runtime["benchmark"]["contract"])
-    ).hexdigest()
+    contract = runtime["benchmark"]["contract"]
+    contract_sha = hashlib.sha256(canonical_bytes(contract)).hexdigest()
     if record.get("benchmark_contract_sha256") != contract_sha:
         raise ManifestError(
             f"benchmark contract identity differs from runtime: {runtime['id']}"
         )
+    if (
+        schema_version in SHARED_BENCHMARK_SCHEMA_VERSIONS
+        and record.get("benchmark_contract") != contract
+    ):
+        raise ManifestError(
+            f"embedded benchmark contract differs from runtime: {runtime['id']}"
+        )
     results = record.get("results")
     if not isinstance(results, list) or not results:
         raise ManifestError(f"benchmark results are unavailable: {runtime['id']}")
-    results_sha = hashlib.sha256(canonical_bytes(results)).hexdigest()
+    if schema_version == TTFT_CACHE_BENCHMARK_SCHEMA_VERSION:
+        ttft_cache = record.get("ttft_cache")
+        if not isinstance(ttft_cache, dict):
+            raise ManifestError(f"benchmark TTFT cache result is unavailable: {runtime['id']}")
+        bound_results = {"results": results, "ttft_cache": ttft_cache}
+    else:
+        bound_results = results
+    results_sha = hashlib.sha256(canonical_bytes(bound_results)).hexdigest()
     if record.get("results_sha256") != results_sha:
         raise ManifestError(f"benchmark results identity differs: {runtime['id']}")
     timestamp_ns = record.get("timestamp_unix_ns")
@@ -575,7 +592,22 @@ def validate_consensus_binding(
     candidate = runtime["id"]
     waiver = consensus.get("waiver")
     waived = waiver is not None
-    expected_verifiers = 1 if waived else 2
+    waiver_policy = waiver.get("policy") if isinstance(waiver, dict) else None
+    if waiver_policy == "maintainer-one-independent-pass-v1":
+        expected_verifiers = 1
+    elif waiver_policy == "allowlisted-maintainer-bypass-v1":
+        expected_verifiers = consensus.get("qualification", {}).get(
+            "independent_verifiers"
+        )
+        if (
+            not isinstance(expected_verifiers, int)
+            or isinstance(expected_verifiers, bool)
+            or expected_verifiers < 0
+            or expected_verifiers > 2
+        ):
+            raise ManifestError(f"runtime maintainer bypass is invalid: {candidate}")
+    else:
+        expected_verifiers = 2
     qualification = consensus.get("qualification")
     if (
         consensus.get("schema_version") != 2
@@ -595,6 +627,32 @@ def validate_consensus_binding(
         or len(consensus["verifiers"]) != expected_verifiers
     ):
         raise ManifestError(f"runtime consensus is not qualified: {candidate}")
+    if waiver_policy == "allowlisted-maintainer-bypass-v1":
+        score = consensus.get("score")
+        aggregate_tps = score.get("aggregate_tps") if isinstance(score, dict) else None
+        results = consensus.get("results")
+        if (
+            not isinstance(score, dict)
+            or set(score) != {"policy", "aggregate_tps"}
+            or score.get("policy")
+            != "letsinfer-throughput-geomean-of-verifier-means-v1"
+            or not isinstance(results, list)
+            or (
+                expected_verifiers == 0
+                and (aggregate_tps is not None or results != [])
+            )
+            or (
+                expected_verifiers > 0
+                and (
+                    not isinstance(aggregate_tps, (int, float))
+                    or isinstance(aggregate_tps, bool)
+                    or not math.isfinite(float(aggregate_tps))
+                    or aggregate_tps <= 0
+                    or not results
+                )
+            )
+        ):
+            raise ManifestError(f"runtime maintainer bypass score is invalid: {candidate}")
     if waived:
         configured = os.environ.get("LETSINFER_VERIFIER_BYPASS_GITHUB_IDS", "")
         values = configured.split(",") if configured else []
@@ -618,7 +676,11 @@ def validate_consensus_binding(
                 "issued_at",
             }
             or waiver.get("schema_version") != 1
-            or waiver.get("policy") != "maintainer-one-independent-pass-v1"
+            or waiver.get("policy")
+            not in {
+                "maintainer-one-independent-pass-v1",
+                "allowlisted-maintainer-bypass-v1",
+            }
             or not isinstance(waiver.get("reason"), str)
             or not waiver["reason"].strip()
             or len(waiver["reason"].encode("utf-8")) > 1000
@@ -903,6 +965,7 @@ def generate(
         raise ManifestError("pre-community qualification migration is invalid")
     migration_entries = contract_migration_entries(migration)
     consumed_migrations: set[str] = set()
+    retained_historical_migrations: set[str] = set()
     targets: dict[str, Any] = {}
     models: dict[str, Any] = {}
     for item in items:
@@ -919,6 +982,9 @@ def generate(
             target_id, {"recommended": None, "candidates": {}}
         )
         releases = history.get((runtime["logical_model"], target_id, candidate), {})
+        retained_historical_migrations.update(
+            f"{candidate}@{version}" for version in releases
+        )
         normalized_releases: dict[str, Any] = {}
         for version, old_release in releases.items():
             if "qualified" not in old_release:
@@ -1022,6 +1088,7 @@ def generate(
         if item["qualified"]:
             consensus = item["consensus"]
             consensus_path = f"{candidate}/benchmark.consensus.json"
+            consensus_score = consensus["score"]["aggregate_tps"]
             release = {
                 "authors": item["release_metadata"]["authors"],
                 "source": item["source"],
@@ -1029,17 +1096,26 @@ def generate(
                 "engine_oci": runtime["engine"]["oci"]["reference"],
                 "model_uri": runtime["model"]["uri"],
                 "license": item["release_metadata"]["license"],
-                "benchmark": {
-                    "id": consensus["consensus_id"],
-                    "suite": runtime["benchmark"]["contract"]["suite"],
-                    "score": consensus["score"]["aggregate_tps"],
-                },
+                "benchmark": (
+                    None
+                    if consensus_score is None
+                    else {
+                        "id": consensus["consensus_id"],
+                        "suite": runtime["benchmark"]["contract"]["suite"],
+                        "score": consensus_score,
+                    }
+                ),
                 "provenance": item["release_metadata"]["provenance"],
                 "verification": {
                     "method": (
-                        "maintainer-waiver-one-independent-v1"
-                        if consensus.get("waiver") is not None
-                        else "community-two-independent-v1"
+                        "allowlisted-maintainer-bypass-v1"
+                        if consensus.get("waiver", {}).get("policy")
+                        == "allowlisted-maintainer-bypass-v1"
+                        else (
+                            "maintainer-waiver-one-independent-v1"
+                            if consensus.get("waiver") is not None
+                            else "community-two-independent-v1"
+                        )
                     ),
                     "consensus_path": consensus_path,
                     "consensus_sha256": sha256_file(root / consensus_path),
@@ -1073,11 +1149,15 @@ def generate(
             "latest": latest,
             "releases": dict(sorted(releases.items(), key=lambda item: _version_key(item[0]))),
         }
-    unused_migrations = sorted(set(migration_entries) - consumed_migrations)
-    if unused_migrations:
+    orphaned_migrations = sorted(
+        set(migration_entries)
+        - consumed_migrations
+        - retained_historical_migrations
+    )
+    if orphaned_migrations:
         raise ManifestError(
             "runtime contract migration does not identify a current candidate: "
-            + unused_migrations[0]
+            + orphaned_migrations[0]
         )
     for model in models.values():
         for target in model["targets"].values():

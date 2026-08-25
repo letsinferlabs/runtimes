@@ -25,7 +25,10 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request_target", workflow)
         self.assertNotIn("secrets.", workflow)
         self.assertIn("raw-verifier-pr-", workflow)
-        self.assertIn('pull.get("merge_commit_sha") != identity["trigger_sha"]', workflow)
+        self.assertIn('head != identity["trigger_sha"]', workflow)
+        self.assertNotIn(
+            'pull.get("merge_commit_sha") != identity["trigger_sha"]', workflow
+        )
         self.assertIn("path: trusted", workflow)
         self.assertIn("working-directory: trusted", workflow)
 
@@ -33,15 +36,39 @@ class EngineWorkflowTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/build-verifier.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("dest=$raw/engine.oci.tar", workflow)
-        self.assertIn("dest=$raw/engine-b.oci.tar", workflow)
+        self.assertEqual(workflow.count("tools/oci_layout.py thin --archive -"), 2)
+        self.assertEqual(workflow.count("type=oci,dest=-"), 2)
+        self.assertIn("ENGINE_EXISTING_REFERENCE", workflow)
         self.assertIn('cmp "$raw/engine-a-plan.json" "$raw/engine-b-plan.json"', workflow)
         self.assertNotIn("type=docker,dest=", workflow)
         self.assertIn("--build-arg SOURCE_DATE_EPOCH=0", workflow)
         self.assertIn("rewrite-timestamp=true", workflow)
+        self.assertIn("A second no-cache build from the same checkout", workflow)
+        self.assertIn("os.utime(path, (946684800, 946684800)", workflow)
+        first = workflow.index('--output "$raw/engine.oci.tar"')
+        perturb = workflow.index("os.utime(path, (946684800, 946684800)")
+        second = workflow.index('--output "$raw/engine-b.oci.tar"')
+        self.assertLess(first, perturb)
+        self.assertLess(perturb, second)
         self.assertIn("--target letsinfer-engine-inventory", workflow)
         self.assertEqual(workflow.count("--build-context letsinfer-tools=."), 3)
         self.assertNotIn("--build-context letsinfer-tools=../proposal", workflow)
+
+    def test_unchanged_engine_uses_a_finalizer_attested_proof(self) -> None:
+        build = (ROOT / ".github/workflows/build-verifier.yml").read_text(
+            encoding="utf-8"
+        )
+        finalizer = (ROOT / ".github/workflows/finalize-verifier.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("attestations: read", build)
+        self.assertIn("tools/engine_reuse.py restore", build)
+        self.assertIn("steps.engine_reuse.outputs.reused != 'true'", build)
+        self.assertIn("engine_build_contract_sha256", build)
+        self.assertIn("tools/engine_reuse.py verify-restored", finalizer)
+        self.assertIn("tools/engine_reuse.py create-proof", finalizer)
+        self.assertIn("engine-proof-${{ steps.pin.outputs.engine_source_sha256 }}", finalizer)
+        self.assertIn("Attest reusable unchanged-Engine proof", finalizer)
 
     def test_verification_bot_uses_a_read_only_attestation_token(self) -> None:
         workflow = (
@@ -64,10 +91,31 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("without executing proposal code", workflow)
         self.assertIn("tools/verifier_bundle.py finalize", workflow)
         self.assertIn("engine-pin-pr-", workflow)
+        self.assertIn("engine-pin-request.json", workflow)
+        self.assertIn("Attest deterministic Engine pin request", workflow)
         self.assertIn("runtime/verifier-bundle", workflow)
         self.assertIn('run.get("head_branch") != "main"', workflow)
         self.assertIn("actions/attest@", workflow)
         self.assertNotIn("working-directory: proposal", workflow)
+
+    def test_engine_pin_updater_preserves_the_trust_boundary(self) -> None:
+        workflow = (ROOT / ".github/workflows/auto-pin-engine.yml").read_text(
+            encoding="utf-8"
+        )
+        updater = (ROOT / "tools/engine_pin_updater.py").read_text(encoding="utf-8")
+        self.assertIn("workflows: [Finalize verifier artifact]", workflow)
+        self.assertIn("attestations: read", workflow)
+        self.assertIn("runtime-verification-bot", workflow)
+        self.assertIn("engine-pin-pr-", workflow)
+        self.assertIn("gh attestation verify", workflow)
+        self.assertIn("same_repository == 'true'", workflow)
+        self.assertIn("same_repository == 'false'", workflow)
+        self.assertNotIn("path: proposal", workflow)
+        self.assertNotIn("packages: write", workflow)
+        self.assertNotIn("contents: write", workflow)
+        self.assertIn("expectedHeadOid", updater)
+        self.assertIn("createCommitOnBranch", updater)
+        self.assertIn("runtime.json", updater)
 
     def test_shipit_is_the_only_engine_registry_publisher(self) -> None:
         self.assertFalse((ROOT / ".github/workflows/publish-engine.yml").exists())
@@ -97,6 +145,17 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("artifact-metadata: write", workflow)
         self.assertIn("actions/attest@", workflow)
         self.assertNotIn("actions/attest-build-provenance@", workflow)
+
+    def test_release_promotion_requires_the_exact_current_main_tree(self) -> None:
+        workflow = (ROOT / ".github/workflows/validate.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('test "$BASE_REF" = release', workflow)
+        self.assertIn("git fetch --no-tags --depth=1 origin main", workflow)
+        self.assertIn('git rev-parse "${HEAD_SHA}^{tree}"', workflow)
+        self.assertIn('git rev-parse "FETCH_HEAD^{tree}"', workflow)
+        self.assertIn('git rev-parse "${HEAD_SHA}^"', workflow)
+        self.assertIn('= "$BASE_SHA"', workflow)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,6 @@ import datetime
 import functools
 import hashlib
 import logging
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -40,31 +39,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FLASHINFER_AUTOTUNE_WORKAROUND_SKIPS = frozenset()
-FLASHINFER_AUTOTUNE_PROFILE_DIR = Path(__file__).with_name("flashinfer_profiles")
-
-
-def install_bundled_flashinfer_autotune_profile(
-    cache_path: Path, *, flashinfer_version: str, arch: str
-) -> None:
-    """Atomically install a target-qualified profile when one is bundled."""
-    profile_path = FLASHINFER_AUTOTUNE_PROFILE_DIR / f"{flashinfer_version}-{arch}.json"
-    if not profile_path.is_file():
-        return
-
-    profile = profile_path.read_bytes()
-    if cache_path.is_file() and cache_path.read_bytes() == profile:
-        return
-
-    with tempfile.NamedTemporaryFile(
-        dir=cache_path.parent,
-        prefix=f".{cache_path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as temp:
-        temp.write(profile)
-        temp_path = Path(temp.name)
-    temp_path.replace(cache_path)
-    logger.info("Installed bundled FlashInfer autotune profile: %s", profile_path)
 
 
 def get_flashinfer_autotune_skip_ops(model_runner: ModelRunner) -> set[str]:
@@ -189,14 +163,10 @@ def flashinfer_autotune_cache_path(model_runner: ModelRunner) -> Path:
         / cache_key
     )
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = (
+    return (
         cache_dir
         / f"rank_tp{mr.ps.tp_rank}_pp{mr.ps.pp_rank}_dp{mr.ps.dp_rank or 0}.json"
     )
-    install_bundled_flashinfer_autotune_profile(
-        cache_path, flashinfer_version=flashinfer_version, arch=arch
-    )
-    return cache_path
 
 
 @contextlib.contextmanager

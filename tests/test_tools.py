@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from tools import (
     benchmark_artifact,
@@ -77,6 +78,22 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(manifest_path.read_bytes(), expected)
 
+    def test_orphan_contract_migration_is_rejected(self) -> None:
+        manifest_path = ROOT / "manifest.json"
+        sources = generate_manifest.sources_from_manifest(manifest_path)
+        previous = generate_manifest.read_object(manifest_path)
+        migration = generate_manifest.read_object(ROOT / "qualification-migration.json")
+        entries = generate_manifest.contract_migration_entries(migration)
+        entries["orphan--candidate@0.1.0"] = copy.deepcopy(next(iter(entries.values())))
+        with mock.patch.object(
+            generate_manifest, "contract_migration_entries", return_value=entries
+        ):
+            with self.assertRaisesRegex(
+                generate_manifest.ManifestError,
+                "does not identify a current candidate: orphan--candidate@0.1.0",
+            ):
+                generate_manifest.generate(ROOT, sources, previous)
+
     def test_release_metadata_preserves_multiple_runtime_authors(self) -> None:
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         qwen = manifest["models"]["qwen3.8-27b"]["targets"]["dgx-spark"]
@@ -101,7 +118,7 @@ class ManifestToolTests(unittest.TestCase):
         )
 
     def test_contract_migration_is_bound_to_unchanged_execution_and_sealed_evidence(self) -> None:
-        candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        candidate = "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
         migration = generate_manifest.read_object(ROOT / "qualification-migration.json")
         entry = migration["contract_migrations"][f"{candidate}@{runtime['version']}"]
@@ -367,7 +384,15 @@ class ManifestToolTests(unittest.TestCase):
             benchmark_path = root / "benchmark.json"
             consensus_path = root / "benchmark.consensus.json"
             release_path = root / "release.json"
-            runtime_path.write_bytes(generate_manifest.canonical_bytes(runtime))
+            runtime_bytes = generate_manifest.canonical_bytes(runtime)
+            reference = (
+                "ghcr.io/letsinferlabs/engines/example@sha256:" + "7" * 64
+            )
+            immutable_id = "sha256:" + "6" * 64
+            _, _, expected_runtime_bytes = pin_engine.update_bytes(
+                runtime_bytes, reference, immutable_id
+            )
+            runtime_path.write_bytes(runtime_bytes)
             benchmark_path.write_text("sealed evidence\n", encoding="utf-8")
             consensus_path.write_text("sealed consensus\n", encoding="utf-8")
             release_path.write_text(
@@ -375,13 +400,13 @@ class ManifestToolTests(unittest.TestCase):
             )
             _, changed = pin_engine.pin_runtime(
                 runtime_path,
-                "ghcr.io/letsinferlabs/engines/example@sha256:" + "7" * 64,
-                "sha256:" + "6" * 64,
+                reference,
+                immutable_id,
             )
             self.assertTrue(changed)
             self.assertFalse(benchmark_path.exists())
             self.assertFalse(consensus_path.exists())
-            self.assertTrue(runtime_path.read_text(encoding="utf-8").startswith("{\n  \""))
+            self.assertEqual(runtime_path.read_bytes(), expected_runtime_bytes)
             pinned = json.loads(runtime_path.read_text(encoding="utf-8"))
             self.assertIsNone(json.loads(release_path.read_text())["provenance"])
             self.assertEqual(
