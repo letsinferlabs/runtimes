@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "authors": [
+    {
+      "github_login": "NVIDIA-NeMo",
+      "github_id": 213689629,
+      "github_type": "Organization"
+    },
+    {
+      "github_login": "MiaAI-Lab",
+      "github_id": 83042094,
+      "github_type": "User"
+    },
+    {
+      "github_login": "letsinferlabs",
+      "github_id": 317451145,
+      "github_type": "Organization"
+    }
+  ],
+  "license": "AGPL-3.0-only",
+  "provenance": null
+}
