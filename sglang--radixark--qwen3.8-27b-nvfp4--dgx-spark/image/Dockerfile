@@ -39,7 +39,7 @@ RUN chmod 0555 /opt/letsinfer/bin/engine-adapter && \
     chmod 0444 /opt/letsinfer/lib/engine_frontend.py
 
 LABEL org.opencontainers.image.source="https://github.com/letsinferlabs/runtimes" \
-      org.opencontainers.image.revision="387312e1402f3660b3eecad708e5c04fb59fa62a" \
+      org.opencontainers.image.revision="ae209b30d7a86f16ff4adf5765abbdf8a38c4d51" \
       ai.letsinfer.runtime="sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark" \
       ai.letsinfer.feature="dflash2-prefix-value,letsinfer-nvme-hicache" \
       ai.letsinfer.build.reproducibility="source-date-epoch-v1" \
