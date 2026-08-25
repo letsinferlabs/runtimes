@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "id": "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "logical_model": "nemotron-3.5-lightning",
   "target": {
     "id": "dgx-spark",
@@ -107,7 +107,9 @@
     "max_connections": 128,
     "max_active_requests": 48,
     "max_context_tokens": 1048576,
-    "gate": null
+    "gate": {
+      "measured_commit": "d59c1ddf70ee17fcc41c053ed38bd60bc6cc28cc"
+    }
   },
   "benchmark": {
     "contract": {
