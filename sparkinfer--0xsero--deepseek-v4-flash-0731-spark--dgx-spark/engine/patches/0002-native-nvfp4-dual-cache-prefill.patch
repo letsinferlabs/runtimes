@@ -1,0 +1,173 @@
+--- a/sparkinfer/attention/_shared/mla/prefill_mg.py
++++ b/sparkinfer/attention/_shared/mla/prefill_mg.py
+@@ -470,0 +471,4 @@
++    extra_kv_cache_u8: cute.Tensor | None = None,
++    extra_page_block_size: Int32 = Int32(1),
++    extra_stride_kv_block: Int64 = Int64(0),
++    use_extra_section: Int32 = Int32(0),
+@@ -486,0 +491 @@
++    has_extra_cache = extra_kv_cache_u8 is not None
+@@ -493,0 +499,14 @@
++        if cutlass.const_expr(has_extra_cache):
++            # DSV4 dual-cache NVFP4: tiles >= num_main_tiles read the rope
++            # from the EXTRA cache (own page size / block stride). Both base
++            # pointers are raw Int64s, so the per-lane dynamic select is
++            # legal (cute.Tensor cannot re-bind in a dynamic branch).
++            extra_rope_base = _nvfp4_rope_base_off(
++                idx,
++                extra_page_block_size,
++                extra_stride_kv_block,
++                fp8_rope=fp8_rope,
++            )
++            rope_ptr = get_ptr_as_int64(kv_cache_u8, rope_base)
++            if use_extra_section != Int32(0):
++                rope_ptr = get_ptr_as_int64(extra_kv_cache_u8, extra_rope_base)
+@@ -524,4 +543,18 @@
+-            b0 = _ld_global_glm_rope_u32(kv_cache_u8, rope_base, ko + tid * Int32(2))
+-            b1 = _ld_global_glm_rope_u32(
+-                kv_cache_u8, rope_base, ko + tid * Int32(2) + Int32(8)
+-            )
++            if cutlass.const_expr(has_extra_cache):
++                # Dual-cache NVFP4: load through the section-selected pointer.
++                b0 = ld_global_nc_u32(
++                    rope_ptr + Int64(ko + tid * Int32(2)) * Int64(2)
++                )
++                b1 = ld_global_nc_u32(
++                    rope_ptr
++                    + Int64(ko + tid * Int32(2) + Int32(8)) * Int64(2)
++                )
++            else:
++                b0 = _ld_global_glm_rope_u32(
++                    kv_cache_u8, rope_base, ko + tid * Int32(2)
++                )
++                b1 = _ld_global_glm_rope_u32(
++                    kv_cache_u8,
++                    rope_base,
++                    ko + tid * Int32(2) + Int32(8),
++                )
+@@ -2584,16 +2617,41 @@
+-                            io_issue_gather_dsv4_nope(
+-                                extra_kv_cache_u8,
+-                                extra_row,
+-                                kv_fp8_addr + buf * kv_fp8_buf,
+-                                kv_sc_addr + buf * kv_sc_buf,
+-                                mbar_base + buf,
+-                                g_start,
+-                                g_end,
+-                                Int32(self.pbs_extra),
+-                                stride_extra_kv_block,
+-                                io_lane,
+-                                kv_l2_policy,
+-                                bi=t.bi,
+-                                kv_smem_stride=L.kv_smem_stride,
+-                                io_threads=_PREFILL_IO_THREADS,
+-                            )
++                            if cutlass.const_expr(is_glm or is_nvfp4):
++                                # NVFP4 EXTRA gather: same GLM-style record
++                                # staging as the MAIN cache (432B E2M1+E4M3
++                                # records), re-based onto the extra cache's
++                                # own indices / page size / block stride.
++                                io_issue_gather_glm_mg(
++                                    extra_kv_cache_u8,
++                                    extra_row,
++                                    kv_fp8_addr + buf * kv_fp8_buf,
++                                    mbar_base + buf,
++                                    g_start,
++                                    g_end,
++                                    Int32(self.pbs_extra),
++                                    stride_extra_kv_block,
++                                    io_lane,
++                                    kv_l2_policy,
++                                    bi=t.bi,
++                                    kv_smem_stride=L.kv_smem_stride,
++                                    io_threads=_PREFILL_IO_THREADS,
++                                    scale_format=t.scale_format,
++                                    fp8_rope=t.fp8_rope,
++                                    per_token_latent_scale=t.latent_scale_per_token,
++                                    kv_sc_dst_addr=kv_sc_addr + buf * kv_sc_buf,
++                                )
++                            else:
++                                io_issue_gather_dsv4_nope(
++                                    extra_kv_cache_u8,
++                                    extra_row,
++                                    kv_fp8_addr + buf * kv_fp8_buf,
++                                    kv_sc_addr + buf * kv_sc_buf,
++                                    mbar_base + buf,
++                                    g_start,
++                                    g_end,
++                                    Int32(self.pbs_extra),
++                                    stride_extra_kv_block,
++                                    io_lane,
++                                    kv_l2_policy,
++                                    bi=t.bi,
++                                    kv_smem_stride=L.kv_smem_stride,
++                                    io_threads=_PREFILL_IO_THREADS,
++                                )
+@@ -2605,16 +2663,42 @@
+-                            io_issue_gather_dsv4_nope(
+-                                kv_cache_u8,
+-                                topk_row,
+-                                kv_fp8_addr + buf * kv_fp8_buf,
+-                                kv_sc_addr + buf * kv_sc_buf,
+-                                mbar_base + buf,
+-                                g_start,
+-                                g_end,
+-                                Int32(self.page_block_size),
+-                                stride_kv_block,
+-                                io_lane,
+-                                kv_l2_policy,
+-                                bi=t.bi,
+-                                kv_smem_stride=L.kv_smem_stride,
+-                                io_threads=_PREFILL_IO_THREADS,
+-                            )
++                            if cutlass.const_expr(is_glm or is_nvfp4):
++                                # DUAL main tiles: same NVFP4/GLM record
++                                # staging as the prologue (the DSV4 nope
++                                # gather assumes the FP8 576B record layout
++                                # and would stage 464B rows into the 288B
++                                # NVFP4 smem rows -> smem scribble).
++                                io_issue_gather_glm_mg(
++                                    kv_cache_u8,
++                                    topk_row,
++                                    kv_fp8_addr + buf * kv_fp8_buf,
++                                    mbar_base + buf,
++                                    g_start,
++                                    g_end,
++                                    Int32(self.page_block_size),
++                                    stride_kv_block,
++                                    io_lane,
++                                    kv_l2_policy,
++                                    bi=t.bi,
++                                    kv_smem_stride=L.kv_smem_stride,
++                                    io_threads=_PREFILL_IO_THREADS,
++                                    scale_format=t.scale_format,
++                                    fp8_rope=t.fp8_rope,
++                                    per_token_latent_scale=t.latent_scale_per_token,
++                                    kv_sc_dst_addr=kv_sc_addr + buf * kv_sc_buf,
++                                )
++                            else:
++                                io_issue_gather_dsv4_nope(
++                                    kv_cache_u8,
++                                    topk_row,
++                                    kv_fp8_addr + buf * kv_fp8_buf,
++                                    kv_sc_addr + buf * kv_sc_buf,
++                                    mbar_base + buf,
++                                    g_start,
++                                    g_end,
++                                    Int32(self.page_block_size),
++                                    stride_kv_block,
++                                    io_lane,
++                                    kv_l2_policy,
++                                    bi=t.bi,
++                                    kv_smem_stride=L.kv_smem_stride,
++                                    io_threads=_PREFILL_IO_THREADS,
++                                )
+@@ -2959,0 +3044,8 @@
++                        extra_kv_cache_u8=(
++                            extra_kv_cache_u8
++                            if cutlass.const_expr(has_extra)
++                            else None
++                        ),
++                        extra_page_block_size=Int32(self.pbs_extra),
++                        extra_stride_kv_block=stride_extra_kv_block,
++                        use_extra_section=Int32(ci >= num_main_tiles),
