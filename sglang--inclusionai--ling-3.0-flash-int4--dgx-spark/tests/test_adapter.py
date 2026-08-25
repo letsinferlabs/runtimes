@@ -51,6 +51,28 @@ class AdapterTests(unittest.TestCase):
             "32",
         )
 
+    def test_tokenize_patch_is_fail_closed_and_runtime_bound(self) -> None:
+        patch = (
+            ROOT
+            / "engine"
+            / "patches"
+            / "0001-bound-tokenize-response-context.patch"
+        ).read_text()
+        dockerfile = (ROOT / "image" / "Dockerfile").read_text()
+        runtime = json.loads((ROOT / "runtime.json").read_text())
+
+        self.assertIn("max_model_len > context_length", patch)
+        self.assertIn("max_model_len = context_length", patch)
+        self.assertIn(
+            "f1791dbe89245cf80f2ae3c3f052e944c0b602deaf45909a31d2e4aabfc95711",
+            dockerfile,
+        )
+        self.assertIn(
+            "e36cc8f7e196cea4e5616309c7c320a02b33bd0144c16a91f01e628df16a2c06",
+            dockerfile,
+        )
+        self.assertNotIn("SGLANG_ENABLE_SPEC_V2", runtime["engine"]["environment"])
+
 
 if __name__ == "__main__":
     unittest.main()
