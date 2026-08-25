@@ -86,7 +86,7 @@
     "uri": "hf://ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
     "artifact": "model",
     "acquisition": {
-      "image": "docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1"
+      "image": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:f70057989f8207323ee499671496fdf8054af3b89ebb69e4a6bd799fca864d74"
     }
   },
   "artifacts": [
