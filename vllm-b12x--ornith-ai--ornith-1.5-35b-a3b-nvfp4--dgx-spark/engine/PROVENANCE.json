@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "base_image": "docker.io/eugr/spark-vllm-b12x@sha256:25fe41c2e85993b4e0534b3c72f68bf327c5d2726fbe1640cf6b220715d3b0e3",
+  "base_image_configuration": "sha256:b72c96d38e98fe98160129c8b5f09d33f2a0610053120a3152872fe617bb677a",
+  "base_image_created": "2026-08-15T15:22:11.863390625-07:00",
+  "base_image_tag": "nightly-20260815",
+  "base_vllm_version": "0.1.dev20003+gad848fc41.d20260815",
+  "upstream": {
+    "sparkbench_repository": "shawnmarck/sparkbench",
+    "sparkbench_commit": "253c5e44d83c79db18daf0c0e40d73c27940e682",
+    "mia_repository": "MiaAI-Lab/Ornith-1.5-35B-A3B-DGX-Spark",
+    "mia_commit": "9fd7fe7896230550fad1c773e85ad765292cfde5",
+    "eugr_repository": "eugr/spark-vllm-docker",
+    "eugr_build_script_commit": "358bf26e3d7d315450a6159ccdc0b38cbbd6b855",
+    "vllm_repository": "local-inference-lab/vllm",
+    "vllm_commit": "ad848fc4141f201489db18d5453c50b312245a0a",
+    "b12x_repository": "lukealonso/b12x",
+    "b12x_commit": "a63f07e90fd449b693cafbe6aef1a73309595bf7",
+    "flashinfer_commit": "8044d94bf9acc5369857baf88d28906bb32bf264"
+  },
+  "overlays": [
+    {
+      "path": "engine/overlays/kernel.py",
+      "sha256": "c7c0437bc5337021578d5842b656cef436ada6c5f95635ad68382bd34a4486fa",
+      "base_sha256": "4df9df5e434e9f014094452333621e1943162845d610ebfe61f288ca30d85c09",
+      "purpose": "Mia W4A16 output-drain and SM121 kernel fixes"
+    },
+    {
+      "path": "engine/overlays/route_pack.py",
+      "sha256": "3d444809990e7cb559089b664406f8c1b95cf43bde62caa57d7d7441287cef7a",
+      "base_sha256": "c9d3813b83970217945e000ea2814a2d3e51a151a8ca25b301e44ca5370daf39",
+      "purpose": "Mia CUDA-graph-safe grow-only route workspace"
+    }
+  ],
+  "letsinfer_features": [
+    "engine-protocol-v2-adapter",
+    "exact-rendered-chat-token-count",
+    "host-copy-persistent-hybrid-prefix-cache",
+    "atomic-crc-prefix-store"
+  ],
+  "notes": "The base digest is the Docker Hub nightly that was latest during the upstream August 20 measurement window; Let's Infer measurements remain independent."
+}

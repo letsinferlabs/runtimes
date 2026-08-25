@@ -1,6 +1,6 @@
 {
   "schema_version": 5,
-  "id": "sglang--ornith-ai--ornith-1.5-35b-a3b-nvfp4--dgx-spark",
+  "id": "vllm-b12x--ornith-ai--ornith-1.5-35b-a3b-nvfp4--dgx-spark",
   "version": "0.1.0-rc.1",
   "logical_model": "ornith-1.5-35b-a3b",
   "target": {
@@ -29,66 +29,52 @@
   },
   "engine": {
     "model_format": "huggingface-snapshot",
-    "cache_provider": "sglang-letsinfer-prefix-v1",
+    "cache_provider": "vllm-b12x-letsinfer-prefix-v1",
     "arguments": [
+      "--tensor-parallel-size",
+      "1",
       "--trust-remote-code",
-      "--bf16-gemm-backend",
-      "gemv",
-      "--mem-fraction-static",
-      "0.860",
-      "--chunked-prefill-size",
-      "8192",
-      "--max-prefill-tokens",
-      "16384",
-      "--disable-prefill-cuda-graph",
+      "--language-model-only",
+      "--enable-prefix-caching",
+      "--enable-chunked-prefill",
       "--kv-cache-dtype",
-      "fp8_e4m3",
-      "--mamba-ssm-dtype",
-      "bfloat16",
-      "--mamba-full-memory-ratio",
-      "4.21",
-      "--mamba-radix-cache-strategy",
-      "extra_buffer",
-      "--max-mamba-cache-size",
-      "40",
-      "--quantization",
-      "modelopt_mixed",
-      "--moe-a2a-backend",
-      "none",
-      "--moe-runner-backend",
-      "flashinfer_cutedsl",
-      "--max-running-requests",
-      "4",
-      "--context-length",
+      "fp8",
+      "--spec-method",
+      "mtp",
+      "--spec-tokens",
+      "1",
+      "--max-num-seqs",
+      "24",
+      "--max-num-batched-tokens",
+      "8192",
+      "--moe-backend",
+      "b12x",
+      "--gpu-memory-utilization",
+      "0.85",
+      "--max-model-len",
       "262144",
-      "--reasoning-parser",
-      "qwen3",
+      "--enable-auto-tool-choice",
       "--tool-call-parser",
-      "qwen3_coder",
-      "--sampling-defaults",
-      "model",
-      "--random-seed",
-      "42042"
+      "qwen3_xml",
+      "--reasoning-parser",
+      "qwen3"
     ],
-    "environment": {
-      "SGLANG_FLASHINFER_AUTOTUNE_CACHE": "1",
-      "TRITON_CACHE_DIR": "/root/.triton"
-    },
-    "id": "sglang",
+    "environment": {},
+    "id": "vllm-b12x",
     "protocol": {
       "version": 2
     },
     "oci": {
-      "reference": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:f70057989f8207323ee499671496fdf8054af3b89ebb69e4a6bd799fca864d74",
-      "immutable_id": "sha256:cf79d71ed72d94d9acf35bb8602969c5c159db8abe802ff3399925f9270d8650",
-      "base": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "immutable_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "base": "docker.io/eugr/spark-vllm-b12x@sha256:25fe41c2e85993b4e0534b3c72f68bf327c5d2726fbe1640cf6b220715d3b0e3"
     }
   },
   "model": {
     "uri": "hf://ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
     "artifact": "model",
     "acquisition": {
-      "image": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:f70057989f8207323ee499671496fdf8054af3b89ebb69e4a6bd799fca864d74"
+      "image": "docker.io/eugr/spark-vllm-b12x@sha256:25fe41c2e85993b4e0534b3c72f68bf327c5d2726fbe1640cf6b220715d3b0e3"
     }
   },
   "artifacts": [
@@ -102,13 +88,12 @@
   "container": {
     "memory_bytes": 120259084288,
     "shm_bytes": 34359738368,
-    "cpuset_cpus": "5-9,15-19",
     "min_available_gib": 100,
     "runtime_min_available_gib": 4,
     "startup_timeout_seconds": 1800
   },
   "cache": {
-    "provider": "sglang-letsinfer-prefix-v1",
+    "provider": "vllm-b12x-letsinfer-prefix-v1",
     "persistent": true,
     "prewarm": false,
     "replay_output_policy": "restored-repeat-exact",
@@ -116,16 +101,17 @@
       "durable_capacity_bytes": 68719476736,
       "resident_capacity_bytes": 0,
       "ttl_seconds": 604800,
-      "min_tokens": 512,
+      "min_tokens": 60000,
+      "max_tokens": 61000,
       "direct_reads": true,
-      "capture": true,
-      "prefix_lookup": true,
-      "host_capacity_bytes": 1073741824
+      "native_capacity_bytes": 0,
+      "capture_tail_tokens": 1024,
+      "exact_capsules": false
     }
   },
   "serving": {
-    "max_connections": 64,
-    "max_active_requests": 4,
+    "max_connections": 128,
+    "max_active_requests": 24,
     "max_context_tokens": 262144
   },
   "benchmark": {
@@ -139,7 +125,7 @@
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
         "model_sha256": "368f2a846af1b2a026f98725134836f28a10c78cede664d582ba656ecfeb0d72",
-        "engine_image_sha256": "cf79d71ed72d94d9acf35bb8602969c5c159db8abe802ff3399925f9270d8650",
+        "engine_image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
         "render_contract": "openai-chat-user-v1"
       },
       "request": {
@@ -154,43 +140,25 @@
         {
           "id": "32k",
           "prompt_tokens": 32768,
-          "concurrencies": [
-            1,
-            2,
-            4
-          ]
+          "concurrencies": [1, 2, 4]
         },
         {
           "id": "64k",
           "prompt_tokens": 65536,
-          "concurrencies": [
-            1,
-            2,
-            4
-          ]
+          "concurrencies": [1, 2, 4]
         },
         {
           "id": "128k",
           "prompt_tokens": 131072,
-          "concurrencies": [
-            1,
-            2,
-            4
-          ]
+          "concurrencies": [1, 2, 4]
         },
         {
           "id": "256k",
           "prompt_tokens": 260000,
-          "concurrencies": [
-            1,
-            2,
-            4
-          ]
+          "concurrencies": [1, 2, 4]
         }
       ],
-      "domains": [
-        "code"
-      ],
+      "domains": ["code"],
       "execution": {
         "isolation": "fresh-matrix",
         "prefix_state": "shared",
@@ -198,16 +166,9 @@
         "stream_prefix": "shared-body"
       },
       "short": {
-        "domains": [
-          "code",
-          "prose"
-        ],
+        "domains": ["code", "prose"],
         "prompt_tokens": 256,
-        "concurrencies": [
-          1,
-          2,
-          4
-        ],
+        "concurrencies": [1, 2, 4],
         "request": {
           "output_tokens": 512,
           "min_completion_tokens": 512,
