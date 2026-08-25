@@ -467,19 +467,41 @@ def _bypass_consensus(
         )
     else:
         benchmark_path = root / candidate / "benchmark.json"
-        benchmark = generate_manifest.read_object(benchmark_path)
-        generate_manifest.validate_benchmark_binding(runtime, benchmark)
-        author_result = {
-            "source": "author-benchmark-v1",
-            "benchmark_id": benchmark["id"],
-            "benchmark_record_sha256": generate_manifest.sha256_file(
-                benchmark_path
-            ),
-            "results_sha256": benchmark["results_sha256"],
-            "results": benchmark["results"],
-        }
-        if "ttft_cache" in benchmark:
-            author_result["ttft_cache"] = benchmark["ttft_cache"]
+        author_result: dict[str, Any] | None = None
+        if benchmark_path.is_file():
+            benchmark = generate_manifest.read_object(benchmark_path)
+            generate_manifest.validate_benchmark_binding(runtime, benchmark)
+            author_result = {
+                "source": "author-benchmark-v1",
+                "benchmark_id": benchmark["id"],
+                "benchmark_record_sha256": generate_manifest.sha256_file(
+                    benchmark_path
+                ),
+                "results_sha256": benchmark["results_sha256"],
+                "results": benchmark["results"],
+            }
+            if "ttft_cache" in benchmark:
+                author_result["ttft_cache"] = benchmark["ttft_cache"]
+        else:
+            manifest = generate_manifest.read_object(root / "manifest.json")
+            model = manifest.get("models", {}).get(runtime["logical_model"])
+            target = (
+                model.get("targets", {}).get(runtime["target"]["id"])
+                if isinstance(model, Mapping)
+                else None
+            )
+            existing = (
+                target.get("candidates", {})
+                if isinstance(target, Mapping)
+                else {}
+            )
+            if any(
+                isinstance(record, Mapping) and bool(record.get("releases"))
+                for record in existing.values()
+            ):
+                raise ShipitError(
+                    "maintainer bypass requires benchmark.json for an existing model"
+                )
         consensus = {
             "schema_version": community_verification.SCHEMA_VERSION,
             "candidate_id": candidate,
@@ -501,10 +523,18 @@ def _bypass_consensus(
                 "blocking_failures": [],
             },
             "verifiers": [],
-            "results": [author_result],
+            "results": [] if author_result is None else [author_result],
             "score": {
-                "policy": "letsinfer-throughput-geomean-of-author-run-v1",
-                "aggregate_tps": generate_manifest.benchmark_score(benchmark),
+                "policy": (
+                    "letsinfer-throughput-geomean-of-verifier-means-v1"
+                    if author_result is None
+                    else "letsinfer-throughput-geomean-of-author-run-v1"
+                ),
+                "aggregate_tps": (
+                    None
+                    if author_result is None
+                    else generate_manifest.benchmark_score(benchmark)
+                ),
             },
             "verifications": [],
         }

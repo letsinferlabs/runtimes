@@ -666,6 +666,91 @@ class PublicationPolicyTests(unittest.TestCase):
         ):
             generate_manifest.validate_consensus_binding(runtime, consensus)
 
+    def test_maintainer_bypass_bootstraps_new_model_without_a_benchmark(self) -> None:
+        source_candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        candidate = "sglang--owner--new-model--dgx-spark"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            candidate_root = root / candidate
+            candidate_root.mkdir()
+            runtime = generate_manifest.read_object(
+                ROOT / source_candidate / "runtime.json"
+            )
+            runtime["id"] = candidate
+            runtime["logical_model"] = "new-model"
+            runtime["model"]["uri"] = "hf://owner/new-model"
+            runtime["artifacts"][0]["uri"] = "hf://owner/new-model"
+            (candidate_root / "runtime.json").write_bytes(
+                generate_manifest.canonical_bytes(runtime)
+            )
+            shutil.copy2(
+                ROOT / source_candidate / "release.json",
+                candidate_root / "release.json",
+            )
+            shutil.copy2(ROOT / "manifest.json", root / "manifest.json")
+            release = generate_manifest.read_object(candidate_root / "release.json")
+            subject = {
+                "candidate_id": candidate,
+                "runtime_version": runtime["version"],
+                "proposal_head_sha": "a" * 40,
+                "engine_oci_manifest_digest": runtime["engine"]["oci"][
+                    "reference"
+                ].rsplit("@", 1)[-1],
+                "benchmark_contract_sha256": hashlib.sha256(
+                    generate_manifest.canonical_bytes(
+                        runtime["benchmark"]["contract"]
+                    )
+                ).hexdigest(),
+                "target_contract_sha256": hashlib.sha256(
+                    generate_manifest.canonical_bytes(runtime["target"])
+                ).hexdigest(),
+            }
+            pull = {
+                "number": 32,
+                "html_url": "https://github.com/letsinferlabs/runtimes/pull/32",
+                "user": {"login": "RuntimeAuthor", "id": 10000001, "type": "User"},
+            }
+            actor = {
+                "github_login": "RuntimeAuthor",
+                "github_id": 10000001,
+                "github_type": "User",
+            }
+            comment = {
+                "id": 124,
+                "html_url": (
+                    "https://github.com/letsinferlabs/runtimes/pull/32"
+                    "#issuecomment-124"
+                ),
+            }
+            with mock.patch.object(
+                verification_bot, "accepted_submissions", return_value=[]
+            ):
+                consensus = shipit._bypass_consensus(
+                    pr=pull,
+                    candidate=candidate,
+                    subject=subject,
+                    root=root,
+                    actor=actor,
+                    reason="Bootstrap an attested new model before its author benchmark",
+                    comment=comment,
+                )
+
+        self.assertEqual(consensus["results"], [])
+        self.assertEqual(
+            consensus["score"],
+            {
+                "policy": "letsinfer-throughput-geomean-of-verifier-means-v1",
+                "aggregate_tps": None,
+            },
+        )
+        self.assertEqual(consensus["runtime_authors"], release["authors"])
+        with mock.patch.dict(
+            os.environ,
+            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
+            clear=True,
+        ):
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+
 
 if __name__ == "__main__":
     unittest.main()
