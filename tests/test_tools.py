@@ -108,6 +108,37 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(release["license"], "AGPL-3.0-only")
 
+    def test_scored_maintainer_bypasses_mark_author_benchmark_source(self) -> None:
+        manifest = generate_manifest.read_object(ROOT / "manifest.json")
+        expected = {
+            (
+                "qwen3.8-27b",
+                "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
+                "0.1.0-rc.17",
+            ),
+            (
+                "deepseek-v4-flash",
+                "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
+                "0.1.0-rc.35",
+            ),
+        }
+        observed: set[tuple[str, str, str]] = set()
+        for model_id, model in manifest["models"].items():
+            for target in model["targets"].values():
+                for candidate_id, candidate in target["candidates"].items():
+                    for version, release in candidate["releases"].items():
+                        source = release["verification"].get("benchmark_source")
+                        if source is not None:
+                            self.assertEqual(source, "author-benchmark-v1")
+                            self.assertEqual(
+                                release["verification"]["method"],
+                                "allowlisted-maintainer-bypass-v1",
+                            )
+                            self.assertEqual(release["verification"]["verifiers"], [])
+                            self.assertIsNotNone(release["benchmark"])
+                            observed.add((model_id, candidate_id, version))
+        self.assertEqual(observed, expected)
+
     def test_every_candidate_validates_without_a_publication_source(self) -> None:
         records = generate_manifest.candidates(ROOT, {}, require_sources=False)
         self.assertEqual(

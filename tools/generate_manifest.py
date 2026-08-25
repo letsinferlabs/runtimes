@@ -1160,6 +1160,14 @@ def generate(
             consensus = item["consensus"]
             consensus_path = f"{candidate}/benchmark.consensus.json"
             consensus_score = consensus["score"]["aggregate_tps"]
+            author_benchmark = bool(
+                consensus.get("waiver", {}).get("policy")
+                == "allowlisted-maintainer-bypass-v1"
+                and consensus.get("verifiers") == []
+                and consensus.get("score", {}).get("policy")
+                == "letsinfer-throughput-geomean-of-author-run-v1"
+                and consensus_score is not None
+            )
             release = {
                 "authors": item["release_metadata"]["authors"],
                 "source": item["source"],
@@ -1192,6 +1200,11 @@ def generate(
                     "consensus_sha256": sha256_file(root / consensus_path),
                     "verifiers": consensus["verifiers"],
                     **(
+                        {"benchmark_source": "author-benchmark-v1"}
+                        if author_benchmark
+                        else {}
+                    ),
+                    **(
                         {"waiver": consensus["waiver"]}
                         if consensus.get("waiver") is not None
                         else {}
@@ -1200,9 +1213,20 @@ def generate(
             }
             existing = releases.get(runtime["version"])
             if existing is not None and existing != release:
-                raise ManifestError(
-                    f"immutable release changed for {candidate}@{runtime['version']}"
-                )
+                comparable = copy.deepcopy(existing)
+                existing_verification = comparable.get("verification")
+                if (
+                    author_benchmark
+                    and isinstance(existing_verification, dict)
+                    and "benchmark_source" not in existing_verification
+                ):
+                    existing_verification["benchmark_source"] = (
+                        "author-benchmark-v1"
+                    )
+                if comparable != release:
+                    raise ManifestError(
+                        f"immutable release changed for {candidate}@{runtime['version']}"
+                    )
             releases[runtime["version"]] = release
         releases = {
             version: release
