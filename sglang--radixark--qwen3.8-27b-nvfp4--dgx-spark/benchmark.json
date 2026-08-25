@@ -1,41 +1,61 @@
 {
   "benchmark_contract": {
+    "schema_version": 7,
+    "suite": "letsinfer-code-prose-v1",
+    "generator": {
+      "id": "letsinfer-code-prose",
+      "version": 7
+    },
+    "tokenizer": {
+      "capability": "engine-rendered-chat-count-v1",
+      "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
+      "engine_image_sha256": "43b62ac465f72b108bc0b5887c15a8b08d5e89cd516de228142dae820aab832f",
+      "render_contract": "openai-chat-user-v1"
+    },
+    "request": {
+      "output_tokens": 128,
+      "min_completion_tokens": 128,
+      "require_natural_stop": false,
+      "temperature": 0,
+      "seed": 42042
+    },
+    "sample_interval_seconds": 5,
     "cases": [
       {
-        "concurrencies": [
-          1,
-          2,
-          4
-        ],
         "id": "32k",
-        "prompt_tokens": 32768
-      },
-      {
+        "prompt_tokens": 32768,
         "concurrencies": [
           1,
           2,
           4
-        ],
+        ]
+      },
+      {
         "id": "64k",
-        "prompt_tokens": 65536
-      },
-      {
+        "prompt_tokens": 65536,
         "concurrencies": [
           1,
           2,
           4
-        ],
+        ]
+      },
+      {
         "id": "128k",
-        "prompt_tokens": 131072
-      },
-      {
+        "prompt_tokens": 131072,
         "concurrencies": [
           1,
           2,
           4
-        ],
+        ]
+      },
+      {
         "id": "256k",
-        "prompt_tokens": 260000
+        "prompt_tokens": 260000,
+        "concurrencies": [
+          1,
+          2,
+          4
+        ]
       }
     ],
     "domains": [
@@ -47,60 +67,40 @@
       "samples_per_cell": 1,
       "stream_prefix": "shared-body"
     },
-    "generator": {
-      "id": "letsinfer-code-prose",
-      "version": 7
-    },
-    "request": {
-      "min_completion_tokens": 128,
-      "output_tokens": 128,
-      "require_natural_stop": false,
-      "seed": 42042,
-      "temperature": 0
-    },
-    "sample_interval_seconds": 5,
-    "schema_version": 7,
     "short": {
-      "concurrencies": [
-        1,
-        2,
-        4
-      ],
       "domains": [
         "code",
         "prose"
       ],
       "prompt_tokens": 256,
+      "concurrencies": [
+        1,
+        2,
+        4
+      ],
       "request": {
-        "min_completion_tokens": 512,
         "output_tokens": 512,
+        "min_completion_tokens": 512,
         "require_natural_stop": false,
-        "seed": 42042,
-        "temperature": 0
+        "temperature": 0,
+        "seed": 42042
       }
     },
-    "suite": "letsinfer-code-prose-v1",
-    "tokenizer": {
-      "capability": "engine-rendered-chat-count-v1",
-      "engine_image_sha256": "c3452b0d5bb2c79e3a51a00b2818d30f20583caa098fadff7f0be56c4bd5eeef",
-      "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
-      "render_contract": "openai-chat-user-v1"
-    },
     "ttft_cache": {
-      "prompt_domain": "code",
       "prompt_tokens": 64000,
+      "prompt_domain": "code",
       "repetitions": 2,
       "request": {
-        "min_completion_tokens": 1,
         "output_tokens": 1,
+        "min_completion_tokens": 1,
         "require_natural_stop": false,
-        "seed": 42042,
-        "temperature": 0
+        "temperature": 0,
+        "seed": 42042
       }
     }
   },
-  "benchmark_contract_sha256": "58fb00ec0c5f959429aee2655a3d06f544c687db2a40244918e87acac272b875",
-  "id": "b727744c646e4486a5b245f07f6345b8fabc96e5bf6f1262ffb1dd3877540e64",
+  "benchmark_contract_sha256": "a53e2fd6ef916aa1a6e9c9924dc2d94ab005441b462de61ceb71f111689b64cc",
+  "id": "50bebd8ab703c167d9e7b6bb50eb96ca9605df9c90f9fb4f642c63533bc65b26",
   "installation_id": "1eea96444ebe3454cca623bf85e7320a72003058c765ece697a7d9a6a9f2b61b",
   "results": [
     {
@@ -1759,7 +1759,7 @@
   "schema_version": 6,
   "subject": {
     "candidate_id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-    "engine_oci": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:18055aa814382ec8531a599ceb89ecea5d073181719a61eed088e24dbbf87b59",
+    "engine_oci": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:586d65d5479ba1c30f97855d2fcdd49d194cecc79a6df530a377d61bbf011bda",
     "model_revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4",
     "model_uri": "hf://RadixArk/Qwen3.8-27B-NVFP4",
     "runtime_version": "0.1.0-rc.16",

@@ -1,4 +1,4 @@
-FROM docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1 AS letsinfer-engine-inventory-build
+FROM docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6 AS letsinfer-engine-inventory-build
 
 COPY --from=letsinfer-tools tools/engine_sbom.py /tmp/letsinfer-engine-sbom.py
 RUN python3 /tmp/letsinfer-engine-sbom.py snapshot \
@@ -17,7 +17,7 @@ RUN cargo build --release --locked --features python \
     && install -D -m 0555 target/release/libletsinfer_prefix_store.so \
       /opt/letsinfer/lib/letsinfer_prefix_store.so
 
-FROM docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1
+FROM docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6
 
 ARG SOURCE_DATE_EPOCH=0
 
@@ -39,7 +39,6 @@ RUN chmod 0555 /opt/letsinfer/bin/engine-adapter && \
     chmod 0444 /opt/letsinfer/lib/engine_frontend.py
 
 LABEL org.opencontainers.image.source="https://github.com/letsinferlabs/runtimes" \
-      org.opencontainers.image.revision="ae209b30d7a86f16ff4adf5765abbdf8a38c4d51" \
       ai.letsinfer.runtime="sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark" \
       ai.letsinfer.feature="dflash2-prefix-value,letsinfer-nvme-hicache" \
       ai.letsinfer.build.reproducibility="source-date-epoch-v1" \
