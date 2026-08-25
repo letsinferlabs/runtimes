@@ -31,6 +31,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 class ManifestToolTests(unittest.TestCase):
     def test_changed_candidate_selection_is_flat_and_shared_changes_fan_out(self) -> None:
         qwen = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        ornith = "sglang--ornith-ai--ornith-1.5-35b-a3b-nvfp4--dgx-spark"
         deepseek = "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark"
         sparkinfer = "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark"
         self.assertEqual(
@@ -39,7 +40,7 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(
             changed_candidates.changed(ROOT, ["tools/generate_manifest.py"]),
-            sorted((deepseek, qwen, sparkinfer)),
+            sorted((deepseek, ornith, qwen, sparkinfer)),
         )
 
     def test_runtime_oci_plan_is_deterministic_and_pull_compatible(self) -> None:
@@ -164,6 +165,7 @@ class ManifestToolTests(unittest.TestCase):
             {record["runtime"]["id"] for record in records},
             {
                 "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
+                "sglang--ornith-ai--ornith-1.5-35b-a3b-nvfp4--dgx-spark",
                 "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
                 "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
             },
