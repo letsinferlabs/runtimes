@@ -9,7 +9,7 @@
     "tokenizer": {
       "capability": "engine-rendered-chat-count-v1",
       "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
-      "engine_image_sha256": "43b62ac465f72b108bc0b5887c15a8b08d5e89cd516de228142dae820aab832f",
+      "engine_image_sha256": "cf79d71ed72d94d9acf35bb8602969c5c159db8abe802ff3399925f9270d8650",
       "render_contract": "openai-chat-user-v1"
     },
     "request": {
@@ -99,8 +99,8 @@
       }
     }
   },
-  "benchmark_contract_sha256": "a53e2fd6ef916aa1a6e9c9924dc2d94ab005441b462de61ceb71f111689b64cc",
-  "id": "50bebd8ab703c167d9e7b6bb50eb96ca9605df9c90f9fb4f642c63533bc65b26",
+  "benchmark_contract_sha256": "d8cc77b7c1215ab49596f871ad29a4c57e04bbcc583ee4704703ff7bced15c32",
+  "id": "7158a9621721d2e301e3716207df47679ca16d5f2eb30b6d62bb99f9037e3a67",
   "installation_id": "1eea96444ebe3454cca623bf85e7320a72003058c765ece697a7d9a6a9f2b61b",
   "results": [
     {
@@ -1759,7 +1759,7 @@
   "schema_version": 6,
   "subject": {
     "candidate_id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-    "engine_oci": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:586d65d5479ba1c30f97855d2fcdd49d194cecc79a6df530a377d61bbf011bda",
+    "engine_oci": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:f70057989f8207323ee499671496fdf8054af3b89ebb69e4a6bd799fca864d74",
     "model_revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4",
     "model_uri": "hf://RadixArk/Qwen3.8-27B-NVFP4",
     "runtime_version": "0.1.0-rc.16",
