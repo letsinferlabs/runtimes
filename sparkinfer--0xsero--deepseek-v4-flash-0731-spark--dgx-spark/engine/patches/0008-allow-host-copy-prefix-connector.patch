@@ -1,0 +1,33 @@
+--- a/opt/vllm/vllm/config/vllm.py
++++ b/opt/vllm/vllm/config/vllm.py
+@@ -965,6 +965,30 @@
+         if self.model_config is not None and (self.model_config.enable_cumem_allocator):
+             return
+ 
++        # This Engine's external connector never exports, pins, or registers
++        # device addresses. Captures and restores synchronize CUDA work and
++        # copy complete KV records through host buffers, so CUDA VMM remapping
++        # cannot leave a stale device-memory registration. Keep this exemption
++        # exact to the connector, module, and address mode vendored into this
++        # immutable image; every other connector retains the conservative
++        # rejection below.
++        connector_extra = (
++            self.kv_transfer_config.kv_connector_extra_config or {}
++        )
++        if (
++            self.kv_transfer_config.kv_connector
++            == "LetsInferPrefixConnector"
++            and self.kv_transfer_config.kv_connector_module_path
++            == "letsinfer_prefix_connector.connector"
++            and connector_extra.get("device_address_mode")
++            == "host-copy-no-device-registration-v1"
++        ):
++            logger.info(
++                "Allowing expandable segments for the host-copy-only "
++                "LetsInferPrefixConnector"
++            )
++            return
++
+         raise ValueError(
+             f"KV connector {self.kv_transfer_config.kv_connector} is "
+             "incompatible with PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "

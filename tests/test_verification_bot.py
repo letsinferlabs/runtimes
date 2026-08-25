@@ -17,7 +17,15 @@ class VerificationBotTests(unittest.TestCase):
     def test_scored_release_revokes_prior_unscored_bypass_identity(self) -> None:
         candidate = "engine--owner--model--target"
         runtime_digest = "sha256:" + "1" * 64
+        replacement_source = (
+            "ghcr.io/letsinferlabs/runtime-artifacts@sha256:" + "3" * 64
+        )
         consensus_sha = "2" * 64
+        actor = {
+            "github_login": "Maintainer",
+            "github_id": 41,
+            "github_type": "User",
+        }
         previous = {
             "models": {
                 "model": {
@@ -60,6 +68,8 @@ class VerificationBotTests(unittest.TestCase):
                     root,
                     candidate=candidate,
                     current_version="1.0.1",
+                    replacement_source=replacement_source,
+                    actor=actor,
                     previous=previous,
                     branch="runtime/topic",
                     generated_at_unix=123,
@@ -72,8 +82,17 @@ class VerificationBotTests(unittest.TestCase):
             ledger["revocations"],
             [
                 {
+                    "actor": actor,
                     "consensus_sha256": consensus_sha,
+                    "reason_code": "structurally-invalid-evidence",
+                    "replacement": {
+                        "candidate": candidate,
+                        "source": replacement_source,
+                        "version": "1.0.1",
+                    },
+                    "revoked_at_unix": 123,
                     "runtime_oci_digest": runtime_digest,
+                    "verification_ids": [consensus_sha],
                 }
             ],
         )

@@ -1,0 +1,7 @@
+--- a/opt/vllm/serve-ds4-flash.sh
++++ b/opt/vllm/serve-ds4-flash.sh
+@@ -469,2 +469,2 @@
+-  --default-chat-template-kwargs.thinking=false
+-  --default-chat-template-kwargs.reasoning_effort=high
++  --default-chat-template-kwargs.thinking=${DEFAULT_CHAT_TEMPLATE_KWARGS_THINKING:-false}
++  --default-chat-template-kwargs.reasoning_effort=${DEFAULT_CHAT_TEMPLATE_KWARGS_EFFORT:-high}

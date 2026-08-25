@@ -1,0 +1,13 @@
+--- a/sparkinfer/moe/fused_moe/_impl.py
++++ b/sparkinfer/moe/fused_moe/_impl.py
+@@ -2735,0 +2736 @@
++            _TensorAllocSpec("expert_counts", (route_E,), torch.int32),
+@@ -2741 +2741,0 @@
+-                    _TensorAllocSpec("expert_counts", (route_E,), torch.int32),
+@@ -10248,5 +10248 @@
+-            expert_counts=(
+-                _require_binding_field(binding, "expert_counts")
+-                if full_rotation
+-                else None
+-            ),
++            expert_counts=_require_binding_field(binding, "expert_counts"),

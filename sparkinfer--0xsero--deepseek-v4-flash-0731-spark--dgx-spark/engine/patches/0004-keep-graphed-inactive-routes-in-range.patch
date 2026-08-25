@@ -1,0 +1,28 @@
+--- a/sparkinfer/moe/_shared/kernels/tiny_decode.py
++++ b/sparkinfer/moe/_shared/kernels/tiny_decode.py
+@@ -234 +234,8 @@
+-            eid = Int64(Int32(topk_ids[rt_idx]))
++            route_eid = Int32(topk_ids[rt_idx])
++            route_active = route_eid >= Int32(0) and route_eid < Int32(c["weight_E"])
++            # vLLM represents CUDA-graph padding and non-local EP routes with
++            # an expert id outside [0, weight_E). Keep every address in range;
++            # inactive routes retain the pre-zeroed intermediate and output.
++            eid = Int64(0)
++            if route_active:
++                eid = Int64(route_eid)
+@@ -295 +302 @@
+-            if cgrp == Int32(0):
++            if route_active and cgrp == Int32(0):
+@@ -329 +336,8 @@
+-            eid = Int64(Int32(topk_ids[rt_idx]))
++            route_eid = Int32(topk_ids[rt_idx])
++            route_active = route_eid >= Int32(0) and route_eid < Int32(c["weight_E"])
++            # vLLM represents CUDA-graph padding and non-local EP routes with
++            # an expert id outside [0, weight_E). Keep every address in range;
++            # inactive routes retain the pre-zeroed intermediate and output.
++            eid = Int64(0)
++            if route_active:
++                eid = Int64(route_eid)
+@@ -436 +450 @@
+-            if cgrp == Int32(0):
++            if route_active and cgrp == Int32(0):
