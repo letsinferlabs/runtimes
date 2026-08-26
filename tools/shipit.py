@@ -890,6 +890,42 @@ def _update_behind_receipt_head(
     pull = _pull(number)
     if pull.get("mergeable_state") != "behind":
         return current
+    head = pull.get("head")
+    live_head = head.get("sha") if isinstance(head, Mapping) else None
+    if isinstance(live_head, str) and live_head != current:
+        fetch = subprocess.run(
+            ["git", "fetch", "--no-tags", "origin", f"pull/{number}/head"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        fetched = (
+            subprocess.check_output(
+                ["git", "rev-parse", "FETCH_HEAD"], cwd=root, text=True
+            ).strip()
+            if fetch.returncode == 0
+            else ""
+        )
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", current, live_head],
+            cwd=root,
+            check=False,
+        )
+        unchanged = subprocess.run(
+            ["git", "diff", "--quiet", current, live_head, "--", candidate],
+            cwd=root,
+            check=False,
+        )
+        if (
+            fetched != live_head
+            or ancestor.returncode != 0
+            or unchanged.returncode != 0
+        ):
+            raise ShipitError(
+                "newer proposal head changed its published runtime candidate"
+            )
+        current = live_head
     verification_bot.api(
         f"repos/{REPOSITORY}/pulls/{number}/update-branch",
         method="PUT",
