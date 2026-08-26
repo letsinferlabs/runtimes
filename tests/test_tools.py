@@ -454,6 +454,35 @@ class ManifestToolTests(unittest.TestCase):
             "7" * 64,
         )
 
+    def test_schema_six_engine_distribution_is_pinned(self) -> None:
+        runtime = json.loads(
+            (
+                ROOT
+                / "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark/runtime.json"
+            ).read_text(encoding="utf-8")
+        )
+        runtime["schema_version"] = 6
+        runtime["engine"]["distribution"] = {
+            "kind": "oci-container",
+            **runtime["engine"].pop("oci"),
+        }
+        changed, execution_changed = pin_engine.update(
+            runtime,
+            "ghcr.io/letsinferlabs/engine-images@sha256:" + "9" * 64,
+            "sha256:" + "8" * 64,
+            "sha256:" + "7" * 64,
+        )
+        self.assertTrue(changed)
+        self.assertTrue(execution_changed)
+        self.assertEqual(runtime["engine"]["distribution"]["kind"], "oci-container")
+        self.assertEqual(
+            runtime["engine"]["distribution"]["payload_id"], "sha256:" + "7" * 64
+        )
+        self.assertEqual(
+            runtime["benchmark"]["contract"]["tokenizer"]["engine_payload_sha256"],
+            "7" * 64,
+        )
+
     def test_pinning_changed_engine_removes_stale_bound_benchmark(self) -> None:
         source = (
             ROOT
