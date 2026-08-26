@@ -752,12 +752,12 @@ def _existing_publication_receipt(
     consensus: Mapping[str, Any],
     bot_login: str,
 ) -> dict[str, Any] | None:
-    comments = verification_bot.api(
-        f"repos/{REPOSITORY}/issues/{number}/comments?per_page=100",
-        paginate=True,
+    comments = verification_bot._flatten_pages(
+        verification_bot.api(
+            f"repos/{REPOSITORY}/issues/{number}/comments?per_page=100",
+            paginate=True,
+        )
     )
-    if not isinstance(comments, list):
-        raise ShipitError("publication comment response is invalid")
     provenance = release.get("provenance")
     subject = consensus.get("subject")
     if not isinstance(provenance, Mapping) or not isinstance(subject, Mapping):
