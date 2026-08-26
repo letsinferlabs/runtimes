@@ -168,7 +168,9 @@ class ManifestToolTests(unittest.TestCase):
                             self.assertEqual(release["verification"]["verifiers"], [])
                             self.assertIsNotNone(release["benchmark"])
                             observed.add((model_id, candidate_id, version))
-        self.assertEqual(observed, expected)
+        # Historical scored releases remain in the append-only catalog after
+        # their current candidate moves to a newer unscored schema release.
+        self.assertLessEqual(expected, observed)
 
     def test_every_candidate_validates_without_a_publication_source(self) -> None:
         records = generate_manifest.candidates(ROOT, {}, require_sources=False)
