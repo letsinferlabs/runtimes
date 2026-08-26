@@ -1,17 +1,1 @@
-{
-  "schema_version": 2,
-  "authors": [
-    {
-      "github_login": "ml-explore",
-      "github_id": 102832242,
-      "github_type": "Organization"
-    },
-    {
-      "github_login": "TaimurAyaz",
-      "github_id": 7026217,
-      "github_type": "User"
-    }
-  ],
-  "license": "AGPL-3.0-only",
-  "provenance": null
-}
+{"authors":[{"github_id":102832242,"github_login":"ml-explore","github_type":"Organization"},{"github_id":7026217,"github_login":"TaimurAyaz","github_type":"User"}],"license":"AGPL-3.0-only","provenance":{"consensus_sha256":"9ba11fc2bc80de9177cf0d5bfb865e2e06f38e01931cf83691510e85e025f2f8","execution_sha256":"bf6503604816e89001623c69b1a5b26d2233153e1d16f5f443fbe42da045cb96","proposal_head_sha":"56f231d5e29b689ba9e6b645c4ecb7ceded9edb0","pull_request":106,"pull_request_url":"https://github.com/letsinferlabs/runtimes/pull/106","qualified_commit_sha":"4d1d5effb34abeeb356d9c1e00b5ca9695ef1a56","repository":"letsinferlabs/runtimes"},"schema_version":2}
