@@ -237,6 +237,15 @@ def _bypassed_community_wrapper(
     item: Mapping[str, Any], *, head: str, checks: Mapping[str, Mapping[str, Any]]
 ) -> bool:
     authoritative = checks.get(verification_bot.CHECK_NAME)
+    return (
+        isinstance(authoritative, Mapping)
+        and authoritative.get("status") == "completed"
+        and authoritative.get("conclusion") == "success"
+        and _community_wrapper_for_head(item, head=head)
+    )
+
+
+def _community_wrapper_for_head(item: Mapping[str, Any], *, head: str) -> bool:
     app = item.get("app")
     match = re.fullmatch(
         r"https://github\.com/letsinferlabs/runtimes/actions/runs/"
@@ -248,9 +257,6 @@ def _bypassed_community_wrapper(
         or not isinstance(app, Mapping)
         or app.get("slug") != "github-actions"
         or match is None
-        or not isinstance(authoritative, Mapping)
-        or authoritative.get("status") != "completed"
-        or authoritative.get("conclusion") != "success"
     ):
         return False
     run = verification_bot.api(
@@ -262,6 +268,64 @@ def _bypassed_community_wrapper(
         and run.get("head_sha") == head
         and run.get("event") in {"pull_request_target", "issue_comment"}
     )
+
+
+def finalize_bypassed_community_check(
+    head: str, *, wait_seconds: int = 1800
+) -> None:
+    """Complete the authoritative check after its workflow wrapper has settled.
+
+    Materializing waived consensus creates a new pull-request head. The community
+    workflow can publish a newer pending check after shipit first records the
+    override. Wait for that trusted wrapper, then update its authoritative check
+    in place so branch protection cannot observe the stale pending run.
+    """
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        runs = _check_runs(head)
+        authoritative = next(
+            (
+                item
+                for item in runs
+                if item.get("name") == verification_bot.CHECK_NAME
+            ),
+            None,
+        )
+        wrappers = [
+            item
+            for item in runs
+            if item.get("name") == "process"
+            and _community_wrapper_for_head(item, head=head)
+        ]
+        if (
+            isinstance(authoritative, Mapping)
+            and wrappers
+            and all(item.get("status") == "completed" for item in wrappers)
+        ):
+            check_id = authoritative.get("id")
+            if not isinstance(check_id, int) or check_id <= 0:
+                raise ShipitError("community verification check identity is invalid")
+            verification_bot.api(
+                f"repos/{REPOSITORY}/check-runs/{check_id}",
+                method="PATCH",
+                value={
+                    "status": "completed",
+                    "conclusion": "success",
+                    "output": {
+                        "title": "Maintainer verification override applied",
+                        "summary": (
+                            "An allowlisted maintainer applied the audited "
+                            "verifier override."
+                        ),
+                    },
+                },
+            )
+            return
+        if time.monotonic() >= deadline:
+            raise ShipitError(
+                "community verification wrapper did not settle before publication"
+            )
+        time.sleep(5)
 
 
 def require_checks(head: str, *, bypass: bool, wait_seconds: int = 0) -> None:
@@ -436,6 +500,69 @@ def _download_artifact(
     return root, bundle
 
 
+def _existing_model_has_release(
+    root: pathlib.Path, runtime: Mapping[str, Any]
+) -> bool:
+    manifest = generate_manifest.read_object(root / "manifest.json")
+    model = manifest.get("models", {}).get(runtime["logical_model"])
+    target = (
+        model.get("targets", {}).get(runtime["target"]["id"])
+        if isinstance(model, Mapping)
+        else None
+    )
+    existing = (
+        target.get("candidates", {}) if isinstance(target, Mapping) else {}
+    )
+    return any(
+        isinstance(record, Mapping) and bool(record.get("releases"))
+        for record in existing.values()
+    )
+
+
+def _cheap_verifier_ids(number: int) -> set[int]:
+    comments = verification_bot._flatten_pages(
+        verification_bot.api(
+            f"repos/{REPOSITORY}/issues/{number}/comments?per_page=100"
+        )
+    )
+    return {
+        int(user["id"])
+        for item in comments
+        if isinstance(item, Mapping)
+        and verification_bot.SUBMISSION_MARKER
+        in str(item.get("body", ""))
+        and isinstance((user := item.get("user")), Mapping)
+        and isinstance(user.get("id"), int)
+        and not isinstance(user["id"], bool)
+        and user["id"] > 0
+    }
+
+
+def _preflight_publication(
+    *, number: int, candidate: str, root: pathlib.Path, bypass: bool
+) -> None:
+    """Reject missing evidence before retrieving any verifier artifact."""
+
+    runtime = generate_manifest.read_object(root / candidate / "runtime.json")
+    verifier_ids = _cheap_verifier_ids(number)
+    if not bypass and len(verifier_ids) < community_verification.POLICY[
+        "required_verifiers"
+    ]:
+        raise ShipitError(
+            "independent verification is incomplete; verifier artifact was not downloaded"
+        )
+    if (
+        bypass
+        and not verifier_ids
+        and not (root / candidate / "benchmark.json").is_file()
+        and _existing_model_has_release(root, runtime)
+    ):
+        raise ShipitError(
+            "maintainer bypass requires benchmark.json for an existing model; "
+            "verifier artifact was not downloaded"
+        )
+
+
 def _bypass_consensus(
     *,
     pr: Mapping[str, Any],
@@ -482,26 +609,10 @@ def _bypass_consensus(
             }
             if "ttft_cache" in benchmark:
                 author_result["ttft_cache"] = benchmark["ttft_cache"]
-        else:
-            manifest = generate_manifest.read_object(root / "manifest.json")
-            model = manifest.get("models", {}).get(runtime["logical_model"])
-            target = (
-                model.get("targets", {}).get(runtime["target"]["id"])
-                if isinstance(model, Mapping)
-                else None
+        elif _existing_model_has_release(root, runtime):
+            raise ShipitError(
+                "maintainer bypass requires benchmark.json for an existing model"
             )
-            existing = (
-                target.get("candidates", {})
-                if isinstance(target, Mapping)
-                else {}
-            )
-            if any(
-                isinstance(record, Mapping) and bool(record.get("releases"))
-                for record in existing.values()
-            ):
-                raise ShipitError(
-                    "maintainer bypass requires benchmark.json for an existing model"
-                )
         consensus = {
             "schema_version": community_verification.SCHEMA_VERSION,
             "candidate_id": candidate,
@@ -631,6 +742,156 @@ def _check(name: str, head: str, conclusion: str, summary: str) -> None:
     )
 
 
+def _existing_publication_receipt(
+    *,
+    number: int,
+    candidate: str,
+    current: str,
+    runtime: Mapping[str, Any],
+    release: Mapping[str, Any],
+    consensus: Mapping[str, Any],
+    bot_login: str,
+) -> dict[str, Any] | None:
+    comments = verification_bot._flatten_pages(
+        verification_bot.api(
+            f"repos/{REPOSITORY}/issues/{number}/comments?per_page=100",
+            paginate=True,
+        )
+    )
+    provenance = release.get("provenance")
+    subject = consensus.get("subject")
+    if not isinstance(provenance, Mapping) or not isinstance(subject, Mapping):
+        return None
+    expected_engine = runtime.get("engine")
+    expected_oci = expected_engine.get("oci") if isinstance(expected_engine, Mapping) else None
+    expected_engine_reference = (
+        expected_oci.get("reference") if isinstance(expected_oci, Mapping) else None
+    )
+    expected_runtime_digest = subject.get("runtime_oci_manifest_digest")
+    expected_execution = provenance.get("execution_sha256")
+    for comment in reversed(comments):
+        if not isinstance(comment, Mapping):
+            continue
+        user = comment.get("user")
+        body = comment.get("body")
+        if (
+            not isinstance(user, Mapping)
+            or str(user.get("login", "")).casefold() != bot_login.casefold()
+            or user.get("type") != "Bot"
+            or not isinstance(body, str)
+            or RECEIPT_MARKER not in body
+        ):
+            continue
+        match = re.search(r"```json\n(\{.*?\})\n```", body, flags=re.DOTALL)
+        if match is None:
+            continue
+        try:
+            receipt = json.loads(match[1])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(receipt, dict):
+            continue
+        published = receipt.get("published")
+        engine = published.get("engine") if isinstance(published, Mapping) else None
+        runtime_artifact = (
+            published.get("runtime") if isinstance(published, Mapping) else None
+        )
+        if (
+            receipt.get("schema_version") == 1
+            and receipt.get("repository") == REPOSITORY
+            and receipt.get("pull_request") == number
+            and receipt.get("candidate") == candidate
+            and receipt.get("runtime_version") == runtime.get("version")
+            and receipt.get("merge_head_sha") == current
+            and receipt.get("proposal_head_sha") == provenance.get("proposal_head_sha")
+            and receipt.get("execution_sha256") == expected_execution
+            and receipt.get("waiver") == consensus.get("waiver")
+            and isinstance(engine, Mapping)
+            and engine.get("anonymous_pull_verified") is True
+            and engine.get("reference") == expected_engine_reference
+            and isinstance(runtime_artifact, Mapping)
+            and runtime_artifact.get("anonymous_pull_verified") is True
+            and isinstance(expected_runtime_digest, str)
+            and isinstance(runtime_artifact.get("reference"), str)
+            and runtime_artifact["reference"].endswith("@" + expected_runtime_digest)
+        ):
+            return receipt
+    return None
+
+
+def _merge_exact(number: int, current: str, candidate: str, version: str) -> None:
+    merged = verification_bot.api(
+        f"repos/{REPOSITORY}/pulls/{number}/merge",
+        method="PUT",
+        value={
+            "sha": current,
+            "merge_method": "squash",
+            "commit_title": f"Publish {candidate} {version}",
+        },
+    )
+    if not isinstance(merged, dict) or merged.get("merged") is not True:
+        raise ShipitError("GitHub refused the exact-head merge after publication")
+
+
+def _update_behind_receipt_head(
+    *,
+    number: int,
+    current: str,
+    candidate: str,
+    root: pathlib.Path,
+    wait_seconds: int = 300,
+) -> str:
+    pull = _pull(number)
+    if pull.get("mergeable_state") != "behind":
+        return current
+    verification_bot.api(
+        f"repos/{REPOSITORY}/pulls/{number}/update-branch",
+        method="PUT",
+        value={"expected_head_sha": current},
+    )
+    deadline = time.monotonic() + wait_seconds
+    updated = current
+    while time.monotonic() < deadline:
+        latest = _pull(number)
+        head = latest.get("head")
+        value = head.get("sha") if isinstance(head, Mapping) else None
+        if isinstance(value, str) and value != current:
+            updated = value
+            break
+        time.sleep(5)
+    if updated == current:
+        raise ShipitError("GitHub did not update the published proposal head")
+    fetch = subprocess.run(
+        ["git", "fetch", "--no-tags", "origin", f"pull/{number}/head"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        raise ShipitError("cannot fetch the updated published proposal head")
+    fetched = subprocess.check_output(
+        ["git", "rev-parse", "FETCH_HEAD"], cwd=root, text=True
+    ).strip()
+    if fetched != updated:
+        raise ShipitError("fetched proposal head differs from GitHub")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", current, updated],
+        cwd=root,
+        check=False,
+    )
+    unchanged = subprocess.run(
+        ["git", "diff", "--quiet", current, updated, "--", candidate],
+        cwd=root,
+        check=False,
+    )
+    if ancestor.returncode != 0 or unchanged.returncode != 0:
+        raise ShipitError(
+            "updating the proposal changed its published runtime candidate"
+        )
+    return updated
+
+
 def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
     issue, comment = event.get("issue"), event.get("comment")
     if not isinstance(issue, Mapping) or not isinstance(comment, Mapping) or not isinstance(issue.get("pull_request"), Mapping):
@@ -667,8 +928,53 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
     bot_login = os.environ.get("LETSINFER_VERIFICATION_BOT_LOGIN", "")
     if not bot_login:
         raise ShipitError("verification bot login is not configured")
-    _bot_only_head(proposal=proposal, current=current, candidate=candidate, bot_login=bot_login)
     _approved_review(number, int(pr["user"]["id"]), required=not bypass)
+    if bypass and (root / candidate / "benchmark.consensus.json").is_file():
+        consensus = generate_manifest.read_object(
+            root / candidate / "benchmark.consensus.json"
+        )
+        generate_manifest.validate_consensus_binding(runtime, consensus)
+        receipt = _existing_publication_receipt(
+            number=number,
+            candidate=candidate,
+            current=current,
+            runtime=runtime,
+            release=release,
+            consensus=consensus,
+            bot_login=bot_login,
+        )
+        if receipt is not None:
+            current = _update_behind_receipt_head(
+                number=number,
+                current=current,
+                candidate=candidate,
+                root=root,
+            )
+            require_checks(current, bypass=True, wait_seconds=1800)
+            finalize_bypassed_community_check(current)
+            _check(
+                CHECK_NAME,
+                current,
+                "success",
+                "Resumed an exact publication that was already anonymously verified.",
+            )
+            _merge_exact(number, current, candidate, str(runtime["version"]))
+            return {
+                "processed": True,
+                "merged": True,
+                "resumed": True,
+                "candidate": candidate,
+                "head": current,
+            }
+    _bot_only_head(
+        proposal=proposal,
+        current=current,
+        candidate=candidate,
+        bot_login=bot_login,
+    )
+    _preflight_publication(
+        number=number, candidate=candidate, root=root, bypass=bypass
+    )
     with tempfile.TemporaryDirectory(prefix="letsinfer-shipit-") as temporary:
         artifact_root, bundle = _download_artifact(
             name=f"verification-bundle-pr-{number}-{proposal}",
@@ -731,18 +1037,10 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
             + "\n```\n\n"
             + RECEIPT_MARKER,
         )
+        if bypass:
+            finalize_bypassed_community_check(current)
         _check(CHECK_NAME, current, "success", f"Published exact Engine/runtime artifacts for `{bundle['subject']['execution_sha256']}`.")
-        merged = verification_bot.api(
-            f"repos/{REPOSITORY}/pulls/{number}/merge",
-            method="PUT",
-            value={
-                "sha": current,
-                "merge_method": "squash",
-                "commit_title": f"Publish {candidate} {runtime['version']}",
-            },
-        )
-        if not isinstance(merged, dict) or merged.get("merged") is not True:
-            raise ShipitError("GitHub refused the exact-head merge after publication")
+        _merge_exact(number, current, candidate, str(runtime["version"]))
     return {"processed": True, "merged": True, "candidate": candidate, "head": current}
 
 

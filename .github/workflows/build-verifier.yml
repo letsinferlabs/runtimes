@@ -144,11 +144,6 @@ jobs:
           set -euo pipefail
           python3 tools/engine_reuse.py restore --root . \
             --raw "$RUNNER_TEMP/raw" --github-output "$GITHUB_OUTPUT"
-      - name: Set up the isolated BuildKit builder
-        if: >-
-          steps.candidate.outputs.mode == 'build-engine' &&
-          steps.engine_reuse.outputs.reused != 'true'
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Build the exact runtime twice
         env:
           CANDIDATE: ${{ steps.candidate.outputs.candidate }}
@@ -192,79 +187,18 @@ jobs:
           }
           pathlib.Path(path).write_text(json.dumps(value, sort_keys=True, separators=(",", ":"))+"\n")
           PY
-      - name: Build the exact Engine OCI twice
+      - name: Build the exact Engine OCI once
         if: >-
           steps.candidate.outputs.mode == 'build-engine' &&
           steps.engine_reuse.outputs.reused != 'true'
         env:
           CANDIDATE: ${{ steps.candidate.outputs.candidate }}
-          ENGINE_REPOSITORY: ${{ steps.candidate.outputs.engine_repository }}
-          ENGINE_EXISTING_REFERENCE: ${{ steps.candidate.outputs.engine_existing_reference }}
         working-directory: trusted
         run: |
           set -euo pipefail
           raw="$RUNNER_TEMP/raw"
-          repository="$ENGINE_REPOSITORY"
-          platform=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_platform"])' "$raw/candidate-audit.json")
-          thin=(python3 tools/oci_layout.py thin --archive - \
-            --platform "$platform" --repository "$repository" \
-            --output "$raw/engine.oci.tar")
-          if test -n "$ENGINE_EXISTING_REFERENCE"; then
-            thin+=(--existing-reference "$ENGINE_EXISTING_REFERENCE")
-          fi
-          docker buildx build "../proposal/$CANDIDATE" \
-            --file "../proposal/$CANDIDATE/image/Dockerfile" \
-            --platform "$platform" --build-context letsinfer-tools=. --no-cache \
-            --build-arg SOURCE_DATE_EPOCH=0 \
-            --output "type=oci,dest=-,oci-mediatypes=true,rewrite-timestamp=true,compression=gzip" \
-            | "${thin[@]}"
-          python3 tools/oci_layout.py inspect --archive "$raw/engine.oci.tar" \
-            --platform "$platform" --repository "$repository" \
-            --output "$raw/engine-a-plan.json"
-          # A second no-cache build from the same checkout can hide source-mtime
-          # dependencies. Give every regular proposal file a fixed, distinct
-          # mtime before build B so embedded checkout timestamps change the OCI
-          # identity and fail the comparison instead of surfacing after pinning.
-          python3 - "../proposal/$CANDIDATE" <<'PY'
-          import os
-          import pathlib
-          import stat
-          import sys
-
-          root = pathlib.Path(sys.argv[1]).resolve(strict=True)
-          for path in sorted(root.rglob("*")):
-              mode = path.lstat().st_mode
-              if stat.S_ISLNK(mode) or not (
-                  stat.S_ISDIR(mode) or stat.S_ISREG(mode)
-              ):
-                  raise SystemExit(f"unsupported candidate entry: {path}")
-              if stat.S_ISREG(mode):
-                  os.utime(path, (946684800, 946684800), follow_symlinks=False)
-          PY
-          thin=(python3 tools/oci_layout.py thin --archive - \
-            --platform "$platform" --repository "$repository" \
-            --output "$raw/engine-b.oci.tar")
-          if test -n "$ENGINE_EXISTING_REFERENCE"; then
-            thin+=(--existing-reference "$ENGINE_EXISTING_REFERENCE")
-          fi
-          docker buildx build "../proposal/$CANDIDATE" \
-            --file "../proposal/$CANDIDATE/image/Dockerfile" \
-            --platform "$platform" --build-context letsinfer-tools=. --no-cache \
-            --build-arg SOURCE_DATE_EPOCH=0 \
-            --output "type=oci,dest=-,oci-mediatypes=true,rewrite-timestamp=true,compression=gzip" \
-            | "${thin[@]}"
-          python3 tools/oci_layout.py inspect --archive "$raw/engine-b.oci.tar" \
-            --platform "$platform" --repository "$repository" \
-            --output "$raw/engine-b-plan.json"
-          cmp "$raw/engine-a-plan.json" "$raw/engine-b-plan.json"
-          rm "$raw/engine-b.oci.tar"
           inventory="$RUNNER_TEMP/inventory"
-          docker buildx build "../proposal/$CANDIDATE" \
-            --file "../proposal/$CANDIDATE/image/Dockerfile" \
-            --platform "$platform" --target letsinfer-engine-inventory \
-            --build-context letsinfer-tools=. --no-cache \
-            --build-arg SOURCE_DATE_EPOCH=0 \
-            --output "type=local,dest=$inventory"
+          python3 tools/build_engine.py --root ../proposal --candidate "$CANDIDATE" --output "$raw/engine.oci.tar" --inventory-output "$inventory" > "$raw/engine-a-plan.json"
           test -s "$inventory/engine-inventory.json"
           cp "$inventory/engine-inventory.json" "$raw/engine-inventory.json"
       - name: Upload raw, untrusted build outputs

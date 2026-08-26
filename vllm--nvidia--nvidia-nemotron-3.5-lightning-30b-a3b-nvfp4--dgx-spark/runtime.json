@@ -1,0 +1,238 @@
+{
+  "schema_version": 5,
+  "id": "vllm--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
+  "version": "0.1.0-rc.1",
+  "logical_model": "nemotron-3.5-lightning",
+  "target": {
+    "id": "dgx-spark",
+    "platform": "linux/arm64",
+    "accelerator": {
+      "vendor": "nvidia",
+      "architecture": "sm_121",
+      "count": 1,
+      "partitioning": "full-device"
+    },
+    "memory": {
+      "topology": "unified",
+      "minimum_total_gib": 118
+    },
+    "placement": {
+      "strategy": "single",
+      "node_count": 1,
+      "interconnect": {
+        "kind": "any",
+        "rdma_required": false,
+        "minimum_speed_mbps": 0,
+        "minimum_mtu": 0
+      }
+    }
+  },
+  "engine": {
+    "id": "vllm",
+    "protocol": {
+      "version": 2
+    },
+    "oci": {
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:06a4d4017313ac0b32f402de518b74dda4da27b6212826b314a43835eadcf472",
+      "immutable_id": "sha256:34a93e33222ec63e8086cd2d053ac3b521e841e323724b8c1895425817fe8463",
+      "base": "docker.io/vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967",
+      "payload_id": "sha256:9b7e18e84042597a33f08e789304c6d54906d094aef47d3a5635096d92ddb1ae"
+    },
+    "model_format": "huggingface-snapshot",
+    "cache_provider": "vllm-hybrid-prefix-v1",
+    "arguments": [
+      "--moe-backend",
+      "marlin",
+      "--attention-backend",
+      "TRITON_ATTN",
+      "--kv-cache-dtype",
+      "fp8",
+      "--max-model-len",
+      "1048576",
+      "--max-num-batched-tokens",
+      "16384",
+      "--max-num-seqs",
+      "48",
+      "--enable-prefix-caching",
+      "--quantization",
+      "modelopt_fp4",
+      "--gpu-memory-utilization",
+      "0.88",
+      "--cudagraph-capture-sizes",
+      "1",
+      "2",
+      "4",
+      "--speculative-config.method",
+      "dspark",
+      "--speculative-config.model",
+      "${artifact:draft}",
+      "--speculative-config.num-speculative-tokens",
+      "3",
+      "--mamba-backend",
+      "flashinfer",
+      "--mamba-cache-mode",
+      "align",
+      "--mamba-ssm-cache-dtype",
+      "float16",
+      "--enable-mamba-cache-stochastic-rounding",
+      "--mamba-cache-philox-rounds",
+      "5",
+      "--reasoning-parser",
+      "nemotron_v3",
+      "--tool-call-parser",
+      "qwen3_coder",
+      "--enable-auto-tool-choice",
+      "--async-scheduling",
+      "--seed",
+      "42042"
+    ],
+    "environment": {
+      "VLLM_MARLIN_USE_ATOMIC_ADD": "1"
+    }
+  },
+  "model": {
+    "uri": "hf://nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
+    "artifact": "model",
+    "acquisition": {
+      "image": "docker.io/vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "model",
+      "uri": "hf://nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
+      "format": "huggingface-snapshot",
+      "revision": "cc84af2fe71647d87f4486c064f320e1e7535243"
+    },
+    {
+      "name": "draft",
+      "uri": "hf://nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4-DSpark",
+      "format": "huggingface-snapshot",
+      "revision": "d10c6ff40d6e69d1f92e407e027de3eafdb77645"
+    }
+  ],
+  "container": {
+    "memory_bytes": 120259084288,
+    "shm_bytes": 34359738368,
+    "min_available_gib": 105,
+    "runtime_min_available_gib": 4,
+    "startup_timeout_seconds": 3600
+  },
+  "cache": {
+    "provider": "vllm-hybrid-prefix-v1",
+    "persistent": false,
+    "prewarm": false,
+    "replay_output_policy": null,
+    "config": {}
+  },
+  "serving": {
+    "max_connections": 128,
+    "max_active_requests": 48,
+    "max_context_tokens": 1048576,
+    "gate": {
+      "measured_commit": "6e448d0ea9bf3d88d898b65449ca6dc2aec170ac"
+    }
+  },
+  "benchmark": {
+    "contract": {
+      "schema_version": 8,
+      "suite": "letsinfer-code-prose-v1",
+      "generator": {
+        "id": "letsinfer-code-prose",
+        "version": 8
+      },
+      "domains": [
+        "code"
+      ],
+      "execution": {
+        "isolation": "fresh-matrix",
+        "prefix_state": "shared",
+        "samples_per_cell": 1,
+        "stream_prefix": "shared-body"
+      },
+      "short": {
+        "domains": [
+          "code",
+          "prose"
+        ],
+        "prompt_tokens": 256,
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "request": {
+          "output_tokens": 512,
+          "min_completion_tokens": 512,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      },
+      "ttft_cache": {
+        "prompt_tokens": 64000,
+        "prompt_domain": "code",
+        "repetitions": 2,
+        "request": {
+          "output_tokens": 1,
+          "min_completion_tokens": 1,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      },
+      "tokenizer": {
+        "capability": "engine-rendered-chat-count-v1",
+        "model_sha256": "6e99dfe39b6f28f4987de47ff7c14cb274aa5c78f533d8f124699879dc289025",
+        "render_contract": "openai-chat-user-v1",
+        "engine_payload_sha256": "9b7e18e84042597a33f08e789304c6d54906d094aef47d3a5635096d92ddb1ae"
+      },
+      "request": {
+        "output_tokens": 128,
+        "min_completion_tokens": 128,
+        "require_natural_stop": false,
+        "temperature": 0,
+        "seed": 42042
+      },
+      "sample_interval_seconds": 5,
+      "cases": [
+        {
+          "id": "32k",
+          "prompt_tokens": 32768,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "64k",
+          "prompt_tokens": 65536,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "128k",
+          "prompt_tokens": 131072,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "256k",
+          "prompt_tokens": 260000,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        }
+      ]
+    }
+  }
+}

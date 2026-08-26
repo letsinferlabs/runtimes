@@ -291,6 +291,46 @@ class VerificationBotTests(unittest.TestCase):
         )
         process.assert_not_called()
 
+    def test_benchmark_ready_waits_for_exact_bundle_without_failure(self) -> None:
+        event = {
+            "action": "synchronize",
+            "pull_request": {
+                "number": 17,
+                "head": {"sha": "a" * 40},
+                "labels": [{"name": "benchmark-ready"}],
+            },
+        }
+        with (
+            mock.patch.object(bot, "exact_release_promotion", return_value=False),
+            mock.patch.object(
+                bot, "changed_runtime_candidates", return_value=["candidate"]
+            ),
+            mock.patch.object(bot, "sync_runtime_label"),
+            mock.patch.object(
+                bot,
+                "process_pull_request",
+                side_effect=bot.BotError(
+                    "exact verifier bundle is unavailable: still building"
+                ),
+            ),
+            mock.patch.object(bot, "publish_classification_check") as publish,
+        ):
+            result = bot.process(event)
+        self.assertEqual(
+            result,
+            {
+                "processed": False,
+                "reason": "exact verifier bundle is pending",
+            },
+        )
+        publish.assert_called_once_with(
+            event["pull_request"],
+            runtime_pending=True,
+            pending_summary=(
+                "The trusted exact-head verifier bundle is still building."
+            ),
+        )
+
     def test_closed_pull_request_cancels_the_check(self) -> None:
         pull = {"number": 17, "head": {"sha": "a" * 40}}
         with mock.patch.object(bot, "cancel_check") as cancel:

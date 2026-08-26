@@ -126,6 +126,8 @@ def _validate_proof(
         "candidate_audit_sha256",
         "engine_reference",
         "engine_config_digest",
+        "engine_payload_digest",
+        "engine_base_reference",
         "target_platform",
         "engine_archive_sha256",
         "engine_archive_bytes",
@@ -162,6 +164,14 @@ def _validate_proof(
         or proof["engine_spdx_bytes"] <= 0
         or not isinstance(proof.get("target_platform"), str)
         or DIGEST_RE.fullmatch(str(proof.get("engine_config_digest"))) is None
+        or (
+            proof.get("engine_payload_digest") is not None
+            and DIGEST_RE.fullmatch(str(proof["engine_payload_digest"])) is None
+        )
+        or (
+            proof.get("engine_base_reference") is not None
+            and re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", str(proof["engine_base_reference"])) is None
+        )
         or re.fullmatch(
             r"ghcr\.io/letsinferlabs/(?:engines/[^@]+|engine-images)"
             r"@sha256:[0-9a-f]{64}",
@@ -198,6 +208,8 @@ def _validate_proof(
             ("engine_source_sha256", "engine_source_sha256"),
             ("engine_reference", "engine_reference"),
             ("engine_config_digest", "engine_config_digest"),
+            ("engine_payload_digest", "engine_payload_digest"),
+            ("engine_base_reference", "engine_base_reference"),
             ("target_platform", "target_platform"),
         )
     ):
@@ -258,6 +270,8 @@ def create_proof(
         "candidate_audit_sha256": sha256_file(audit_path),
         "engine_reference": audit["engine_reference"],
         "engine_config_digest": audit["engine_config_digest"],
+        "engine_payload_digest": audit.get("engine_payload_digest"),
+        "engine_base_reference": audit.get("engine_base_reference"),
         "target_platform": audit["target_platform"],
         "engine_archive_sha256": sha256_file(engine_archive),
         "engine_archive_bytes": engine_archive.stat().st_size,
@@ -281,6 +295,7 @@ def create_proof(
         for key, value in (
             ("reference", proof["engine_reference"]),
             ("config_digest", proof["engine_config_digest"]),
+            ("payload_digest", proof["engine_payload_digest"]),
             ("platform", proof["target_platform"]),
         )
     ):
@@ -463,10 +478,13 @@ def _copy_engine(
         layout.get("manifest_digest")
         != str(audit["engine_reference"]).rsplit("@", 1)[-1]
         or layout.get("config_digest") != audit["engine_config_digest"]
+        or (
+            audit.get("engine_payload_digest") is not None
+            and layout.get("payload_digest") != audit["engine_payload_digest"]
+        )
     ):
         raise ReuseError("attested Engine bundle differs from the current pin")
-    for name in ("engine-a-plan.json", "engine-b-plan.json"):
-        (raw / name).write_bytes(canonical_bytes(expected))
+    (raw / "engine-a-plan.json").write_bytes(canonical_bytes(expected))
 
 
 def restore(
