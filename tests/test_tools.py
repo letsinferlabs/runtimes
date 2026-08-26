@@ -188,7 +188,19 @@ class ManifestToolTests(unittest.TestCase):
         candidate = "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
         migration = generate_manifest.read_object(ROOT / "qualification-migration.json")
-        entry = migration["contract_migrations"][f"{candidate}@{runtime['version']}"]
+        identities = [
+            identity
+            for identity in migration["contract_migrations"]
+            if identity.startswith(candidate + "@")
+        ]
+        migration_identity = max(
+            identities,
+            key=lambda identity: generate_manifest._version_key(
+                identity.rsplit("@", 1)[1]
+            ),
+        )
+        runtime["version"] = migration_identity.rsplit("@", 1)[1]
+        entry = migration["contract_migrations"][migration_identity]
         current = generate_manifest.read_object(ROOT / "manifest.json")["models"][
             runtime["logical_model"]
         ]["targets"][runtime["target"]["id"]]["candidates"][candidate]["releases"][
