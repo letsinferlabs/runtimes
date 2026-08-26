@@ -506,7 +506,10 @@ class ManifestToolTests(unittest.TestCase):
             / "runtime.json"
         )
         runtime = json.loads(source.read_text(encoding="utf-8"))
-        runtime["engine"]["oci"]["payload_id"] = "sha256:" + "5" * 64
+        distribution = runtime["engine"].get(
+            "distribution", runtime["engine"].get("oci")
+        )
+        distribution["payload_id"] = "sha256:" + "5" * 64
         runtime["benchmark"]["contract"]["tokenizer"].pop(
             "engine_image_sha256", None
         )

@@ -34,15 +34,29 @@ class PublicationPolicyTests(unittest.TestCase):
 
     def test_unscored_schema6_cutover_requires_execution_identity(self) -> None:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
-        previous = generate_manifest.read_object(ROOT / candidate / "runtime.json")
-        current = copy.deepcopy(previous)
-        current["schema_version"] = 6
-        current["version"] = "0.1.0-rc.18"
-        current["engine"]["distribution"] = {
-            "kind": "oci-container",
-            **current["engine"].pop("oci"),
-        }
-        current["model"]["acquisition"]["kind"] = "oci-container"
+        runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
+        if runtime["schema_version"] == 5:
+            previous = runtime
+            current = copy.deepcopy(previous)
+            current["schema_version"] = 6
+            current["version"] = "0.1.0-rc.18"
+            current["engine"]["distribution"] = {
+                "kind": "oci-container",
+                **current["engine"].pop("oci"),
+            }
+            current["model"]["acquisition"]["kind"] = "oci-container"
+        else:
+            current = runtime
+            previous = copy.deepcopy(current)
+            previous["schema_version"] = 5
+            previous["version"] = "0.1.0-rc.17"
+            distribution = previous["engine"].pop("distribution")
+            previous["engine"]["oci"] = {
+                key: value
+                for key, value in distribution.items()
+                if key != "kind"
+            }
+            previous["model"]["acquisition"].pop("kind")
         with mock.patch.object(
             shipit.subprocess,
             "check_output",
@@ -761,7 +775,9 @@ class PublicationPolicyTests(unittest.TestCase):
             "subject": {
                 "candidate_id": candidate,
                 "runtime_version": runtime["version"],
-                "engine_oci_manifest_digest": runtime["engine"]["oci"]["reference"].rsplit("@", 1)[-1],
+                "engine_oci_manifest_digest": generate_manifest.engine_distribution(runtime)[
+                    "reference"
+                ].rsplit("@", 1)[-1],
                 "benchmark_contract_sha256": hashlib.sha256(
                     generate_manifest.canonical_bytes(runtime["benchmark"]["contract"])
                 ).hexdigest(),
@@ -818,7 +834,10 @@ class PublicationPolicyTests(unittest.TestCase):
     def test_consensus_binds_normalized_engine_payload_when_present(self) -> None:
         runtime, consensus = self._waived_consensus(10000001)
         payload = "7" * 64
-        runtime["engine"]["oci"]["payload_id"] = "sha256:" + payload
+        distribution = runtime["engine"].get(
+            "distribution", runtime["engine"].get("oci")
+        )
+        distribution["payload_id"] = "sha256:" + payload
         subject = consensus["subject"]
         subject.pop("engine_oci_manifest_digest")
         subject["engine_payload_sha256"] = payload
@@ -919,12 +938,16 @@ class PublicationPolicyTests(unittest.TestCase):
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
         release = generate_manifest.read_object(ROOT / candidate / "release.json")
+        benchmark = generate_manifest.read_object(
+            ROOT / candidate / "benchmark.previous.json"
+        )
+        runtime["version"] = benchmark["subject"]["runtime_version"]
         subject = {
             "candidate_id": candidate,
             "runtime_version": runtime["version"],
             "proposal_head_sha": "a" * 40,
             "execution_sha256": "b" * 64,
-            "engine_oci_manifest_digest": runtime["engine"]["oci"][
+            "engine_oci_manifest_digest": generate_manifest.engine_distribution(runtime)[
                 "reference"
             ].rsplit("@", 1)[-1],
             "benchmark_contract_sha256": hashlib.sha256(
@@ -955,23 +978,39 @@ class PublicationPolicyTests(unittest.TestCase):
                 "#issuecomment-123"
             ),
         }
-        with mock.patch.object(
-            verification_bot, "accepted_submissions", return_value=[]
-        ):
-            consensus = shipit._bypass_consensus(
-                pr=pull,
-                candidate=candidate,
-                subject=subject,
-                root=ROOT,
-                actor=actor,
-                reason="Sole maintainer release decision",
-                comment=comment,
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            candidate_root = root / candidate
+            candidate_root.mkdir()
+            (candidate_root / "runtime.json").write_bytes(
+                generate_manifest.canonical_bytes(runtime)
+            )
+            (candidate_root / "release.json").write_bytes(
+                generate_manifest.canonical_bytes(release)
+            )
+            shutil.copy2(
+                ROOT / candidate / "benchmark.previous.json",
+                candidate_root / "benchmark.json",
+            )
+            with mock.patch.object(
+                verification_bot, "accepted_submissions", return_value=[]
+            ):
+                consensus = shipit._bypass_consensus(
+                    pr=pull,
+                    candidate=candidate,
+                    subject=subject,
+                    root=root,
+                    actor=actor,
+                    reason="Sole maintainer release decision",
+                    comment=comment,
+                )
+            benchmark_sha256 = generate_manifest.sha256_file(
+                candidate_root / "benchmark.json"
             )
 
         self.assertTrue(consensus["qualification"]["passed"])
         self.assertEqual(consensus["qualification"]["independent_verifiers"], 0)
         self.assertEqual(consensus["verifiers"], [])
-        benchmark = generate_manifest.read_object(ROOT / candidate / "benchmark.json")
         self.assertEqual(
             consensus["score"],
             {
@@ -984,7 +1023,7 @@ class PublicationPolicyTests(unittest.TestCase):
         self.assertEqual(consensus["results"][0]["benchmark_id"], benchmark["id"])
         self.assertEqual(
             consensus["results"][0]["benchmark_record_sha256"],
-            generate_manifest.sha256_file(ROOT / candidate / "benchmark.json"),
+            benchmark_sha256,
         )
         self.assertEqual(
             consensus["waiver"]["policy"],
@@ -1025,7 +1064,7 @@ class PublicationPolicyTests(unittest.TestCase):
                 "candidate_id": candidate,
                 "runtime_version": runtime["version"],
                 "proposal_head_sha": "a" * 40,
-                "engine_oci_manifest_digest": runtime["engine"]["oci"][
+                "engine_oci_manifest_digest": generate_manifest.engine_distribution(runtime)[
                     "reference"
                 ].rsplit("@", 1)[-1],
                 "benchmark_contract_sha256": hashlib.sha256(
