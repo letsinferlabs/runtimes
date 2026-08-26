@@ -1,0 +1,391 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Two-node SGLang Engine adapter for Qwen3.8 Flash Next."""
+
+from __future__ import annotations
+
+import glob
+import http.client
+import ipaddress
+import json
+import os
+import pathlib
+import re
+import ssl
+import stat
+import sys
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+_root = pathlib.Path(__file__).resolve().parent
+_installed_lib = _root.parent / "lib"
+sys.path.insert(0, str(_installed_lib if _installed_lib.is_dir() else _root))
+
+from engine_frontend import (
+    AdapterError,
+    artifact_path,
+    backend_json,
+    child_environment,
+    expand_arguments,
+    load_runtime,
+    run,
+)
+
+
+FORBIDDEN_ARGUMENTS = {
+    "--dist-init-addr",
+    "--host",
+    "--model",
+    "--model-path",
+    "--node-rank",
+    "--nnodes",
+    "--port",
+    "--served-model-name",
+    "--tp",
+    "--tp-size",
+}
+GROUP_PATH = pathlib.Path("/run/letsinfer/group.json")
+BASELINE_PATH = pathlib.Path("/tmp/letsinfer-rdma-baseline.json")
+MAX_LOG_BYTES = 4 * 1024 * 1024
+
+
+def _load_group() -> dict[str, Any]:
+    configured = pathlib.Path(
+        os.environ.get("LETSINFER_GROUP_CONFIG", str(GROUP_PATH))
+    )
+    if configured != GROUP_PATH or configured.is_symlink() or not configured.is_file():
+        raise AdapterError("sealed engine-group document is unavailable")
+    try:
+        group = json.loads(configured.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AdapterError("sealed engine-group document is invalid") from error
+    if (
+        not isinstance(group, dict)
+        or group.get("schema_version") != 3
+        or group.get("strategy") != "parallel"
+        or group.get("failure_policy") != "whole-group"
+        or group.get("endpoint_owner") != "task-0"
+        or not isinstance(group.get("resources"), list)
+        or len(group["resources"]) != 2
+        or not isinstance(group.get("connections"), list)
+    ):
+        raise AdapterError("runtime requires one exact two-node parallel group")
+    return group
+
+
+def _host(value: str) -> str:
+    raw = value[1:-1] if value.startswith("[") and value.endswith("]") else value
+    try:
+        address = ipaddress.ip_address(raw)
+    except ValueError as error:
+        raise AdapterError("engine-group address is not an IP address") from error
+    if address.is_loopback or address.is_unspecified or address.is_multicast:
+        raise AdapterError("engine-group address is not a usable peer address")
+    return str(address)
+
+
+def _context(runtime: Mapping[str, Any]) -> dict[str, Any]:
+    group = _load_group()
+    task_id = os.environ.get("LETSINFER_TASK_ID")
+    node_id = os.environ.get("LETSINFER_NODE_ID")
+    if task_id not in {"task-0", "task-1"} or not isinstance(node_id, str):
+        raise AdapterError("engine-group task identity is invalid")
+    resources = sorted(group["resources"], key=lambda item: item.get("task_id", ""))
+    if [item.get("task_id") for item in resources] != ["task-0", "task-1"]:
+        raise AdapterError("engine-group tasks are incomplete")
+    local = next(
+        (
+            item
+            for item in resources
+            if item.get("task_id") == task_id and item.get("node_id") == node_id
+        ),
+        None,
+    )
+    if local is None:
+        raise AdapterError("engine-group task does not match its resource")
+    target = runtime.get("target")
+    placement = target.get("placement") if isinstance(target, Mapping) else None
+    interconnect = (
+        placement.get("interconnect") if isinstance(placement, Mapping) else None
+    )
+    if (
+        not isinstance(placement, Mapping)
+        or placement.get("strategy") != "parallel"
+        or placement.get("node_count") != 2
+        or not isinstance(interconnect, Mapping)
+        or interconnect.get("kind") != "connectx"
+        or interconnect.get("rdma_required") is not True
+    ):
+        raise AdapterError("runtime target is not the two-node ConnectX RDMA target")
+    connections = [
+        item
+        for item in group["connections"]
+        if isinstance(item, Mapping)
+        and item.get("kind") == "connectx"
+        and item.get("rdma") is True
+        and sorted(item.get("nodes", []))
+        == sorted(resource["node_id"] for resource in resources)
+        and item.get("speed_mbps", 0) >= interconnect["minimum_speed_mbps"]
+        and item.get("mtu", 0) >= interconnect["minimum_mtu"]
+    ]
+    if len(connections) != 1:
+        raise AdapterError("sealed ConnectX RDMA connection is unavailable")
+    interface = os.environ.get("LETSINFER_RDMA_INTERFACE")
+    device = os.environ.get("LETSINFER_RDMA_DEVICE")
+    if (
+        local.get("rdma_interface") != interface
+        or not isinstance(interface, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,31}", interface) is None
+        or not isinstance(device, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}", device) is None
+    ):
+        raise AdapterError("Core-provided RDMA resource binding is invalid")
+    hca_net = pathlib.Path("/sys/class/infiniband") / device / "device/net" / interface
+    if not hca_net.is_dir():
+        raise AdapterError("Core-provided HCA does not own the sealed interface")
+    required_nodes = [pathlib.Path("/dev/infiniband/rdma_cm")]
+    required_nodes.extend(sorted(pathlib.Path("/dev/infiniband").glob("uverbs*")))
+    if len(required_nodes) < 2:
+        raise AdapterError("userspace RDMA devices are unavailable")
+    for path in required_nodes:
+        if path.is_symlink():
+            raise AdapterError("RDMA device cannot be a symlink")
+        try:
+            details = path.stat()
+        except OSError as error:
+            raise AdapterError("RDMA device is unavailable") from error
+        if not stat.S_ISCHR(details.st_mode) or not os.access(path, os.R_OK | os.W_OK):
+            raise AdapterError("RDMA character device is unusable")
+    main = resources[0]
+    try:
+        local_base = int(local["port_base"])
+        local_count = int(local["port_count"])
+        main_base = int(main["port_base"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise AdapterError("engine-group ports are invalid") from error
+    if local_count < 3 or local_base + local_count > 65536:
+        raise AdapterError("engine-group task has too few allocated ports")
+    return {
+        "group": group,
+        "task_id": task_id,
+        "rank": int(task_id.removeprefix("task-")),
+        "interface": interface,
+        "device": device,
+        "local_address": _host(str(local["address"])),
+        "local_backend_port": local_base + 2,
+        "dist_init_addr": f"{_host(str(main['address']))}:{main_base + 1}",
+    }
+
+
+def _engine_arguments(runtime: Mapping[str, Any]) -> list[str]:
+    values = expand_arguments(runtime)
+    if any(value in FORBIDDEN_ARGUMENTS for value in values):
+        raise AdapterError("runtime arguments cannot replace distributed resources")
+    return values
+
+
+def build_command(runtime: Mapping[str, Any], port: int) -> Sequence[str]:
+    context = _context(runtime)
+    if context["rank"] != 0 or port != context["local_backend_port"]:
+        raise AdapterError("endpoint adapter must own task-0 and its backend port")
+    return _native_command(runtime, context)
+
+
+def _native_command(
+    runtime: Mapping[str, Any], context: Mapping[str, Any]
+) -> list[str]:
+    return [
+        "python3",
+        "-m",
+        "sglang.launch_server",
+        "--model-path",
+        artifact_path(runtime, runtime["model"]["artifact"]),
+        "--served-model-name",
+        runtime["logical_model"],
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(context["local_backend_port"]),
+        "--tp-size",
+        "2",
+        "--nnodes",
+        "2",
+        "--node-rank",
+        str(context["rank"]),
+        "--dist-init-addr",
+        str(context["dist_init_addr"]),
+        "--enable-cache-report",
+        *_engine_arguments(runtime),
+    ]
+
+
+def _counter_paths(device: str) -> list[pathlib.Path]:
+    paths: list[pathlib.Path] = []
+    root = pathlib.Path("/sys/class/infiniband") / device / "ports"
+    for port in sorted(root.glob("[0-9]*")):
+        for name in ("port_rcv_data", "port_xmit_data"):
+            path = port / "counters" / name
+            if path.is_file() and not path.is_symlink():
+                paths.append(path)
+    if not paths:
+        raise AdapterError("RDMA transport counters are unavailable")
+    return paths
+
+
+def _read_counters(device: str) -> dict[str, int]:
+    values: dict[str, int] = {}
+    for path in _counter_paths(device):
+        try:
+            value = int(path.read_text(encoding="ascii").strip())
+        except (OSError, ValueError) as error:
+            raise AdapterError("RDMA transport counter is invalid") from error
+        if value < 0:
+            raise AdapterError("RDMA transport counter is negative")
+        values[str(path)] = value
+    return values
+
+
+def _write_baseline(context: Mapping[str, Any]) -> None:
+    value = {
+        "schema_version": 1,
+        "group_id": os.environ.get("LETSINFER_GROUP_ID"),
+        "task_id": context["task_id"],
+        "device": context["device"],
+        "counters": _read_counters(str(context["device"])),
+    }
+    staged = BASELINE_PATH.with_suffix(".stage")
+    staged.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+    os.replace(staged, BASELINE_PATH)
+
+
+def build_environment(runtime: Mapping[str, Any]) -> Mapping[str, str]:
+    context = _context(runtime)
+    _write_baseline(context)
+    group_id = os.environ.get("LETSINFER_GROUP_ID")
+    task_id = context["task_id"]
+    return {
+        "GLOO_SOCKET_IFNAME": str(context["interface"]),
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_FILE": f"/tmp/letsinfer-nccl-{group_id}-{task_id}-%h-%p.log",
+        "NCCL_DEBUG_SUBSYS": "INIT,NET",
+        "NCCL_IB_DISABLE": "0",
+        "NCCL_IB_HCA": f"={context['device']}",
+        "NCCL_NET": "IB",
+        "NCCL_NET_GDR_LEVEL": "SYS",
+        "NCCL_SOCKET_IFNAME": f"={context['interface']}",
+    }
+
+
+def count_tokens(host: str, port: int, body: bytes, _model: str) -> int:
+    status, value = backend_json(host, port, "POST", "/v1/tokenize", body)
+    count = value.get("count")
+    tokens = value.get("tokens")
+    if status != 200 or not isinstance(tokens, list):
+        raise AdapterError("SGLang exact token count failed")
+    if (
+        not isinstance(count, int)
+        or isinstance(count, bool)
+        or count <= 0
+        or count != len(tokens)
+    ):
+        raise AdapterError("SGLang returned an invalid token count")
+    return count
+
+
+def _nccl_log(context: Mapping[str, Any]) -> str:
+    pattern = (
+        f"/tmp/letsinfer-nccl-{os.environ.get('LETSINFER_GROUP_ID')}-"
+        f"{context['task_id']}-*.log"
+    )
+    paths = sorted(glob.glob(pattern))
+    if not paths:
+        raise AdapterError("NCCL transport evidence is unavailable")
+    chunks: list[str] = []
+    remaining = MAX_LOG_BYTES
+    for value in paths:
+        path = pathlib.Path(value)
+        if path.is_symlink() or not path.is_file():
+            raise AdapterError("NCCL transport evidence is unsafe")
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            chunk = handle.read(remaining + 1)
+        if len(chunk.encode("utf-8")) > remaining:
+            raise AdapterError("NCCL transport evidence is too large")
+        chunks.append(chunk)
+        remaining -= len(chunk.encode("utf-8"))
+    return "\n".join(chunks)
+
+
+def _rdma_progressed(context: Mapping[str, Any]) -> bool:
+    try:
+        baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AdapterError("RDMA counter baseline is unavailable") from error
+    current = _read_counters(str(context["device"]))
+    prior = baseline.get("counters") if isinstance(baseline, Mapping) else None
+    return isinstance(prior, Mapping) and any(
+        current.get(path, 0) > value
+        for path, value in prior.items()
+        if isinstance(path, str) and isinstance(value, int)
+    )
+
+
+def _endpoint_healthy() -> bool:
+    try:
+        port = int(os.environ["LETSINFER_ENGINE_PORT"])
+    except (KeyError, ValueError):
+        return False
+    if port not in range(1, 65536):
+        return False
+    context = ssl.create_default_context(
+        cafile=os.environ.get("LETSINFER_TLS_CERT_FILE")
+    )
+    connection = http.client.HTTPSConnection(
+        "127.0.0.1", port, timeout=3, context=context
+    )
+    try:
+        connection.request("GET", "/health", headers={"Connection": "close"})
+        return connection.getresponse().status == 200
+    except OSError:
+        return False
+    finally:
+        connection.close()
+
+
+def ready() -> int:
+    runtime = load_runtime("sglang")
+    context = _context(runtime)
+    log = _nccl_log(context)
+    if "NET/IB" not in log or "NET/Socket" in log or "Using network Socket" in log:
+        return 1
+    if not _rdma_progressed(context):
+        return 1
+    if context["rank"] == 0 and not _endpoint_healthy():
+        return 1
+    return 0
+
+
+def worker() -> int:
+    runtime = load_runtime("sglang")
+    context = _context(runtime)
+    if context["rank"] != 1 or os.environ.get("LETSINFER_ENGINE_PORT") != "-1":
+        raise AdapterError("worker must own task-1 without an Engine endpoint")
+    environment = child_environment(runtime)
+    environment.update(build_environment(runtime))
+    os.execvpe("python3", _native_command(runtime, context), environment)
+    raise AdapterError("SGLang worker exec unexpectedly returned")
+
+
+def main() -> int:
+    if len(sys.argv) == 2 and sys.argv[1] == "ready":
+        return ready()
+    if len(sys.argv) == 2 and sys.argv[1] == "worker":
+        return worker()
+    return run("sglang", build_command, build_environment, count_tokens)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (AdapterError, KeyError, OSError, TypeError, ValueError) as error:
+        print(f"engine-adapter: {error}", file=sys.stderr)
+        raise SystemExit(1) from error

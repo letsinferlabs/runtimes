@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "authors": [
+    {
+      "github_login": "radixark",
+      "github_id": 223053390,
+      "github_type": "Organization"
+    },
+    {
+      "github_login": "sgl-project",
+      "github_id": 147780389,
+      "github_type": "Organization"
+    },
+    {
+      "github_login": "letsinferlabs",
+      "github_id": 317451145,
+      "github_type": "Organization"
+    }
+  ],
+  "license": "AGPL-3.0-only",
+  "provenance": null
+}
