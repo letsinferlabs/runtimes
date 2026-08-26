@@ -461,11 +461,12 @@ class ManifestToolTests(unittest.TestCase):
                 / "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark/runtime.json"
             ).read_text(encoding="utf-8")
         )
-        runtime["schema_version"] = 6
-        runtime["engine"]["distribution"] = {
-            "kind": "oci-container",
-            **runtime["engine"].pop("oci"),
-        }
+        if "oci" in runtime["engine"]:
+            runtime["schema_version"] = 6
+            runtime["engine"]["distribution"] = {
+                "kind": "oci-container",
+                **runtime["engine"].pop("oci"),
+            }
         changed, execution_changed = pin_engine.update(
             runtime,
             "ghcr.io/letsinferlabs/engine-images@sha256:" + "9" * 64,
@@ -535,7 +536,10 @@ class ManifestToolTests(unittest.TestCase):
             / "runtime.json"
         )
         runtime = json.loads(source.read_text(encoding="utf-8"))
-        runtime["engine"]["oci"]["payload_id"] = "sha256:" + "5" * 64
+        distribution = runtime["engine"].get(
+            "distribution", runtime["engine"].get("oci")
+        )
+        distribution["payload_id"] = "sha256:" + "5" * 64
         runtime["benchmark"]["contract"]["tokenizer"].pop(
             "engine_image_sha256", None
         )
