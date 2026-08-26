@@ -1022,11 +1022,13 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
     if not bot_login:
         raise ShipitError("verification bot login is not configured")
     _approved_review(number, int(pr["user"]["id"]), required=not bypass)
+    existing_consensus: dict[str, Any] | None = None
     if bypass and (root / candidate / "benchmark.consensus.json").is_file():
         consensus = generate_manifest.read_object(
             root / candidate / "benchmark.consensus.json"
         )
         generate_manifest.validate_consensus_binding(runtime, consensus)
+        existing_consensus = consensus
         receipt = _existing_publication_receipt(
             number=number,
             candidate=candidate,
@@ -1082,12 +1084,26 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
         )
         if bundle["candidate"] != candidate or bundle["subject"]["runtime_version"] != runtime["version"]:
             raise ShipitError("verifier bundle candidate or version differs")
+        if (
+            existing_consensus is not None
+            and existing_consensus.get("subject") != bundle["subject"]
+        ):
+            raise ShipitError("existing consensus differs from verifier bundle")
         if bypass:
             assert reason is not None
-            consensus = _bypass_consensus(
-                pr=pr, candidate=candidate, subject=bundle["subject"], root=root,
-                actor=actor, reason=reason, comment=comment,
-                allow_unscored_cutover=allow_unscored_cutover,
+            consensus = (
+                existing_consensus
+                if existing_consensus is not None
+                else _bypass_consensus(
+                    pr=pr,
+                    candidate=candidate,
+                    subject=bundle["subject"],
+                    root=root,
+                    actor=actor,
+                    reason=reason,
+                    comment=comment,
+                    allow_unscored_cutover=allow_unscored_cutover,
+                )
             )
             generate_manifest.validate_consensus_binding(runtime, consensus)
             _url, current = verification_bot.materialize(root, candidate, pr, consensus)
