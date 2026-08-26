@@ -25,6 +25,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class PublicationPolicyTests(unittest.TestCase):
+    def test_publication_comments_do_not_displace_pull_request_wrappers(self) -> None:
+        workflow = (ROOT / ".github/workflows/community-verification.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("-${{ github.event_name }}", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+
     def test_unscored_schema6_cutover_requires_execution_identity(self) -> None:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         previous = generate_manifest.read_object(ROOT / candidate / "runtime.json")

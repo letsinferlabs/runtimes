@@ -7,7 +7,7 @@ on:
     types: [opened, synchronize, reopened, closed]
 
 concurrency:
-  group: runtime-verification-pr-${{ github.event.issue.number || github.event.pull_request.number }}
+  group: runtime-verification-pr-${{ github.event.issue.number || github.event.pull_request.number }}-${{ github.event_name }}
   cancel-in-progress: false
 
 permissions:
