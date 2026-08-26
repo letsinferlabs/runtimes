@@ -237,6 +237,15 @@ def _bypassed_community_wrapper(
     item: Mapping[str, Any], *, head: str, checks: Mapping[str, Mapping[str, Any]]
 ) -> bool:
     authoritative = checks.get(verification_bot.CHECK_NAME)
+    return (
+        isinstance(authoritative, Mapping)
+        and authoritative.get("status") == "completed"
+        and authoritative.get("conclusion") == "success"
+        and _community_wrapper_for_head(item, head=head)
+    )
+
+
+def _community_wrapper_for_head(item: Mapping[str, Any], *, head: str) -> bool:
     app = item.get("app")
     match = re.fullmatch(
         r"https://github\.com/letsinferlabs/runtimes/actions/runs/"
@@ -248,9 +257,6 @@ def _bypassed_community_wrapper(
         or not isinstance(app, Mapping)
         or app.get("slug") != "github-actions"
         or match is None
-        or not isinstance(authoritative, Mapping)
-        or authoritative.get("status") != "completed"
-        or authoritative.get("conclusion") != "success"
     ):
         return False
     run = verification_bot.api(
@@ -262,6 +268,64 @@ def _bypassed_community_wrapper(
         and run.get("head_sha") == head
         and run.get("event") in {"pull_request_target", "issue_comment"}
     )
+
+
+def finalize_bypassed_community_check(
+    head: str, *, wait_seconds: int = 1800
+) -> None:
+    """Complete the authoritative check after its workflow wrapper has settled.
+
+    Materializing waived consensus creates a new pull-request head. The community
+    workflow can publish a newer pending check after shipit first records the
+    override. Wait for that trusted wrapper, then update its authoritative check
+    in place so branch protection cannot observe the stale pending run.
+    """
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        runs = _check_runs(head)
+        authoritative = next(
+            (
+                item
+                for item in runs
+                if item.get("name") == verification_bot.CHECK_NAME
+            ),
+            None,
+        )
+        wrappers = [
+            item
+            for item in runs
+            if item.get("name") == "process"
+            and _community_wrapper_for_head(item, head=head)
+        ]
+        if (
+            isinstance(authoritative, Mapping)
+            and wrappers
+            and all(item.get("status") == "completed" for item in wrappers)
+        ):
+            check_id = authoritative.get("id")
+            if not isinstance(check_id, int) or check_id <= 0:
+                raise ShipitError("community verification check identity is invalid")
+            verification_bot.api(
+                f"repos/{REPOSITORY}/check-runs/{check_id}",
+                method="PATCH",
+                value={
+                    "status": "completed",
+                    "conclusion": "success",
+                    "output": {
+                        "title": "Maintainer verification override applied",
+                        "summary": (
+                            "An allowlisted maintainer applied the audited "
+                            "verifier override."
+                        ),
+                    },
+                },
+            )
+            return
+        if time.monotonic() >= deadline:
+            raise ShipitError(
+                "community verification wrapper did not settle before publication"
+            )
+        time.sleep(5)
 
 
 def require_checks(head: str, *, bypass: bool, wait_seconds: int = 0) -> None:
@@ -781,6 +845,8 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
             + "\n```\n\n"
             + RECEIPT_MARKER,
         )
+        if bypass:
+            finalize_bypassed_community_check(current)
         _check(CHECK_NAME, current, "success", f"Published exact Engine/runtime artifacts for `{bundle['subject']['execution_sha256']}`.")
         merged = verification_bot.api(
             f"repos/{REPOSITORY}/pulls/{number}/merge",

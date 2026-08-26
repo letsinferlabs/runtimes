@@ -482,6 +482,63 @@ class PublicationPolicyTests(unittest.TestCase):
         ):
             shipit.require_checks(head, bypass=True)
 
+    def test_bypass_finalizes_pending_check_after_wrapper_settles(self) -> None:
+        head = "a" * 40
+        runs = [
+            {
+                "id": 41,
+                "name": verification_bot.CHECK_NAME,
+                "status": "in_progress",
+                "conclusion": None,
+            },
+            {
+                "id": 42,
+                "name": "process",
+                "status": "completed",
+                "conclusion": "success",
+                "details_url": (
+                    "https://github.com/letsinferlabs/runtimes/actions/runs/"
+                    "123/job/456"
+                ),
+                "app": {"slug": "github-actions"},
+            },
+        ]
+        workflow = {
+            "path": ".github/workflows/community-verification.yml",
+            "head_sha": head,
+            "event": "pull_request_target",
+        }
+        with (
+            mock.patch.object(shipit, "_check_runs", return_value=runs),
+            mock.patch.object(
+                verification_bot,
+                "api",
+                side_effect=[workflow, {"id": 41}],
+            ) as api,
+        ):
+            shipit.finalize_bypassed_community_check(head, wait_seconds=0)
+        self.assertEqual(
+            api.call_args_list,
+            [
+                mock.call("repos/letsinferlabs/runtimes/actions/runs/123"),
+                mock.call(
+                    "repos/letsinferlabs/runtimes/check-runs/41",
+                    method="PATCH",
+                    value={
+                        "status": "completed",
+                        "conclusion": "success",
+                        "output": {
+                            "title": "Maintainer verification override applied",
+                            "summary": (
+                                "An allowlisted maintainer applied the audited "
+                                "verifier override."
+                            ),
+                        },
+                    },
+                ),
+            ],
+        )
+
     def _waived_consensus(self, actor_id: int) -> tuple[dict, dict]:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
