@@ -1,17 +1,1 @@
-{
-  "schema_version": 2,
-  "authors": [
-    {
-      "github_login": "ggml-org",
-      "github_id": 134263123,
-      "github_type": "Organization"
-    },
-    {
-      "github_login": "TaimurAyaz",
-      "github_id": 7026217,
-      "github_type": "User"
-    }
-  ],
-  "license": "AGPL-3.0-only",
-  "provenance": null
-}
+{"authors":[{"github_id":134263123,"github_login":"ggml-org","github_type":"Organization"},{"github_id":7026217,"github_login":"TaimurAyaz","github_type":"User"}],"license":"AGPL-3.0-only","provenance":{"consensus_sha256":"e4c9ccd3a9746a158b9ea974bc60673f1031b5ed9afba21c481d49d442d868b0","execution_sha256":"c505216f157c03b20e0f5d17f1f90165cd0ce2695542f4bdd3659b3cf3d41e54","proposal_head_sha":"3e4b0bde088ea3cedf9444947c0643bb1b7afddc","pull_request":105,"pull_request_url":"https://github.com/letsinferlabs/runtimes/pull/105","qualified_commit_sha":"7c737d064daf6a4dc6deefc95d03377e2c46346b","repository":"letsinferlabs/runtimes"},"schema_version":2}
