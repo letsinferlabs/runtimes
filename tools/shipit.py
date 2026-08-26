@@ -808,11 +808,7 @@ def _existing_publication_receipt(
     subject = consensus.get("subject")
     if not isinstance(provenance, Mapping) or not isinstance(subject, Mapping):
         return None
-    expected_engine = runtime.get("engine")
-    expected_oci = expected_engine.get("oci") if isinstance(expected_engine, Mapping) else None
-    expected_engine_reference = (
-        expected_oci.get("reference") if isinstance(expected_oci, Mapping) else None
-    )
+    expected_distribution = generate_manifest.engine_distribution(dict(runtime))
     expected_runtime_digest = subject.get("runtime_oci_manifest_digest")
     expected_execution = provenance.get("execution_sha256")
     for comment in reversed(comments):
@@ -842,6 +838,19 @@ def _existing_publication_receipt(
         runtime_artifact = (
             published.get("runtime") if isinstance(published, Mapping) else None
         )
+        if expected_distribution["kind"] == "oci-container":
+            engine_matches = (
+                isinstance(engine, Mapping)
+                and engine.get("anonymous_pull_verified") is True
+                and engine.get("reference") == expected_distribution["reference"]
+            )
+        else:
+            engine_matches = isinstance(engine, Mapping) and dict(engine) == {
+                "kind": expected_distribution["kind"],
+                "payload_digest": expected_distribution["payload_id"],
+                "platform": expected_distribution["platform"],
+                "source_revision": expected_distribution["source_revision"],
+            }
         if (
             receipt.get("schema_version") == 1
             and receipt.get("repository") == REPOSITORY
@@ -852,9 +861,7 @@ def _existing_publication_receipt(
             and receipt.get("proposal_head_sha") == provenance.get("proposal_head_sha")
             and receipt.get("execution_sha256") == expected_execution
             and receipt.get("waiver") == consensus.get("waiver")
-            and isinstance(engine, Mapping)
-            and engine.get("anonymous_pull_verified") is True
-            and engine.get("reference") == expected_engine_reference
+            and engine_matches
             and isinstance(runtime_artifact, Mapping)
             and runtime_artifact.get("anonymous_pull_verified") is True
             and isinstance(expected_runtime_digest, str)

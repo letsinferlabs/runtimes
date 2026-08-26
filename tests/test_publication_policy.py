@@ -386,7 +386,7 @@ class PublicationPolicyTests(unittest.TestCase):
         ]["candidates"][existing]
         published_engine = candidate_record["releases"][
             candidate_record["latest"]
-        ]["engine_oci"]
+        ]["engine_distribution"]["reference"]
         self.assertEqual(
             existing_repositories["engine_existing_reference"],
             published_engine,
@@ -704,7 +704,13 @@ class PublicationPolicyTests(unittest.TestCase):
                 current=current,
                 runtime={
                     "version": "0.1.0-rc.1",
-                    "engine": {"oci": {"reference": engine}},
+                    "engine": {
+                        "distribution": {
+                            "kind": "oci-container",
+                            "reference": engine,
+                            "immutable_id": "sha256:" + "4" * 64,
+                        }
+                    },
                 },
                 release={
                     "provenance": {
