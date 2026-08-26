@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "upstream": "https://github.com/mlc-ai/mlc-llm",
+  "revision": "9fa644f54b04983adea4d0168f49fc6af4a893ba",
+  "model": "hf://mlc-ai/Qwen3-0.6B-q4f16_1-MLC",
+  "model_revision": "8c14ce481d4c692769976ad52afea453a102df19",
+  "model_files_sha256": "adec1a35e1c692bb771db8ee3f241570440ed815da4aec20e58464fec6b299e6",
+  "target": "arm64-apple-ios",
+  "app_payload_sha256": "f4e9dd864988a7a22ffdd12635b8321282f3fdea12bdd8467791b17b88152dcc"
+}

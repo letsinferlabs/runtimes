@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "authors": [
+    {"github_login": "mlc-ai", "github_id": 106173866, "github_type": "Organization"},
+    {"github_login": "TaimurAyaz", "github_id": 7026217, "github_type": "User"}
+  ],
+  "license": "AGPL-3.0-only",
+  "provenance": null
+}
