@@ -12,9 +12,10 @@ import sys
 from typing import Any
 
 if __package__:
-    from tools import candidate_policy, oci_layout, pin_engine
+    from tools import candidate_policy, engine_distribution, oci_layout, pin_engine
 else:
     import candidate_policy
+    import engine_distribution
     import oci_layout
     import pin_engine
 
@@ -62,10 +63,20 @@ def build(
     audit = candidate_policy.audit_candidate(root, candidate, "build-engine")
     runtime_path = directory / "runtime.json"
     runtime = read_object(runtime_path)
-    oci = runtime["engine"]["oci"]
-    base = oci.get("base")
+    try:
+        distribution = engine_distribution.validate(
+            runtime["engine"]["distribution"],
+            platform=str(runtime["target"]["platform"]),
+        )
+    except (KeyError, engine_distribution.DistributionError) as error:
+        raise BuildError(
+            "build-engine runtime has no valid Engine distribution"
+        ) from error
+    if distribution.get("kind") != "oci-container":
+        raise BuildError("build-engine runtime must use an OCI Engine distribution")
+    base = distribution.get("base")
     if not isinstance(base, str):
-        raise BuildError("build-engine runtime must pin engine.oci.base")
+        raise BuildError("build-engine runtime must pin engine.distribution.base")
     repository, _existing = candidate_policy.engine_publication(
         root, candidate, None
     )
