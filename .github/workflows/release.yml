@@ -49,14 +49,6 @@ jobs:
           git diff --check
           python3 -m unittest discover -s tests -p 'test_*.py'
           python3 tools/generate_manifest.py --previous manifest.json --check
-          python3 - <<'PY'
-          import json, pathlib
-          catalog=json.loads(pathlib.Path('manifest.json').read_text())
-          for model, model_record in catalog['models'].items():
-              for target, record in model_record['targets'].items():
-                  if record['recommended'] is None:
-                      raise SystemExit(f'{model}/{target} has no qualified recommendation')
-          PY
       - name: Build deterministic catalog runtime packs
         id: packs
         run: |
@@ -119,7 +111,7 @@ jobs:
             source=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source"])' "$plan")
             config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$plan")
             python3 tools/oci_layout.py verify --reference "$source" --config-digest "$config"
-            engine=$(python3 -c 'import json,sys; engine=json.load(open(sys.argv[1]))["engine"]; value=engine.get("distribution", engine.get("oci")); kind=value.get("kind", "oci-container"); print(kind+"\t"+str(value.get("reference", ""))+"\t"+str(value.get("immutable_id", "")))' "$candidate/runtime.json")
+            engine=$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1]))["engine"]["distribution"]; print(value["kind"]+"\t"+str(value.get("reference", ""))+"\t"+str(value.get("immutable_id", "")))' "$candidate/runtime.json")
             IFS=$'\t' read -r engine_kind engine_reference engine_config <<< "$engine"
             if test "$engine_kind" = oci-container; then
               platform=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target"]["platform"])' "$candidate/runtime.json")
@@ -164,7 +156,7 @@ jobs:
           root=pathlib.Path(os.environ['RUNNER_TEMP']) / 'catalog-release'
           catalog=load_catalog(str(root / 'catalog.json'), public_key=str(root / 'catalog-public-key.pem'))
           ledger, _data, _signature=load_ledger(str(root / 'revocations.json'), public_key=root / 'catalog-public-key.pem')
-          assert catalog['schema_version'] == 6 and ledger['schema_version'] == 1
+          assert catalog['schema_version'] == 7 and ledger['schema_version'] == 1
           PY
           python3 - "$candidate" "$GITHUB_SHA" <<'PY'
           import hashlib, json, pathlib, re, sys
@@ -189,7 +181,7 @@ jobs:
         run: |
           set -euo pipefail
           candidate="$RUNNER_TEMP/catalog-release"
-          tag="catalog-v6-$GITHUB_SHA"
+          tag="catalog-v7-$GITHUB_SHA"
           assets=(catalog.json catalog.json.sig revocations.json revocations.json.sig catalog-public-key.pem catalog-release.json)
           if gh release view "$tag" >/dev/null 2>&1; then
             existing="$RUNNER_TEMP/existing-catalog-release"

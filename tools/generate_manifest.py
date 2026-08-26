@@ -17,17 +17,19 @@ from typing import Any
 try:
     from tools.engine_distribution import (
         DistributionError,
-        from_engine as distribution_from_engine,
+        projection as distribution_projection,
+        validate as validate_distribution,
     )
 except ModuleNotFoundError:  # Direct ``python3 tools/generate_manifest.py``.
     from engine_distribution import (  # type: ignore[no-redef]
         DistributionError,
-        from_engine as distribution_from_engine,
+        projection as distribution_projection,
+        validate as validate_distribution,
     )
 
 
-SCHEMA_VERSION = 6
-RUNTIME_SCHEMA_VERSIONS = {5, 6}
+SCHEMA_VERSION = 7
+RUNTIME_SCHEMA_VERSION = 6
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 OCI_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 LICENSE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,126}")
@@ -116,13 +118,13 @@ def normalized_candidate(runtime: dict[str, Any]) -> str:
 
 
 def engine_distribution(runtime: dict[str, Any]) -> dict[str, Any]:
-    target = runtime.get("target")
-    engine = runtime.get("engine")
-    if not isinstance(target, dict):
-        raise ManifestError("runtime target is invalid")
+    """Validate the one schema-6 Engine distribution without compatibility paths."""
+
+    target = runtime.get("target", {})
+    engine = runtime.get("engine", {})
     try:
-        return distribution_from_engine(
-            engine, platform=str(target.get("platform", ""))
+        return validate_distribution(
+            engine.get("distribution"), platform=str(target.get("platform", ""))
         )
     except DistributionError as error:
         raise ManifestError(str(error)) from error
@@ -153,18 +155,12 @@ def validate_runtime_execution_contract(runtime: dict[str, Any]) -> None:
     distribution = engine_distribution(runtime)
     acquisition = model.get("acquisition")
     if distribution["kind"] == "oci-container":
-        legacy_acquisition = (
-            isinstance(acquisition, dict)
-            and set(acquisition) == {"image"}
-            and OCI_RE.fullmatch(str(acquisition.get("image", ""))) is not None
-        )
-        current_acquisition = (
+        if not (
             isinstance(acquisition, dict)
             and set(acquisition) == {"kind", "image"}
             and acquisition.get("kind") == "oci-container"
             and OCI_RE.fullmatch(str(acquisition.get("image", ""))) is not None
-        )
-        if not (legacy_acquisition or current_acquisition):
+        ):
             raise ManifestError("OCI runtime model acquisition is invalid")
     elif acquisition != {
         "kind": "huggingface-http",
@@ -1003,7 +999,7 @@ def candidates(
         except (OSError, UnicodeDecodeError) as error:
             raise ManifestError(f"cannot read {readme_path}: {error}") from error
         validate_model_links(runtime, readme)
-        if runtime.get("schema_version") not in RUNTIME_SCHEMA_VERSIONS:
+        if runtime.get("schema_version") != RUNTIME_SCHEMA_VERSION:
             raise ManifestError(f"unsupported runtime schema in {directory.name}")
         validate_runtime_execution_contract(runtime)
         candidate = normalized_candidate(runtime)
@@ -1119,7 +1115,11 @@ def candidates(
 def _previous_releases(previous: dict[str, Any] | None) -> dict[tuple[str, str, str], dict[str, Any]]:
     if previous is None:
         return {}
-    if previous.get("schema_version") not in {5, SCHEMA_VERSION}:
+    # The one-time schema-6 to schema-7 cutover intentionally retires every
+    # pre-schema-6 runtime artifact. There are no users requiring compatibility.
+    if previous.get("schema_version") == 6:
+        return {}
+    if previous.get("schema_version") != SCHEMA_VERSION:
         return {}
     result: dict[tuple[str, str, str], dict[str, Any]] = {}
     for model, model_record in previous.get("models", {}).items():
@@ -1387,7 +1387,10 @@ def generate(
                 "authors": item["release_metadata"]["authors"],
                 "source": item["source"],
                 "engine": runtime["engine"]["id"],
-                "engine_oci": engine_distribution(runtime).get("reference"),
+                "engine_distribution": distribution_projection(
+                    runtime["engine"]["distribution"],
+                    platform=runtime["target"]["platform"],
+                ),
                 "model_uri": runtime["model"]["uri"],
                 "license": item["release_metadata"]["license"],
                 "benchmark": (

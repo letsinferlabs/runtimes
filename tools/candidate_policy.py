@@ -255,11 +255,11 @@ def engine_publication(
     if release is None:
         return NEW_ENGINE_REPOSITORY, None
     distribution = release.get("engine_distribution")
-    reference = (
-        distribution.get("reference")
-        if isinstance(distribution, Mapping)
-        else release.get("engine_oci")
-    )
+    if not isinstance(distribution, Mapping):
+        raise CandidatePolicyError("existing candidate Engine distribution is invalid")
+    if distribution.get("kind") != "oci-container":
+        return NEW_ENGINE_REPOSITORY, None
+    reference = distribution.get("reference")
     match = REFERENCE_RE.fullmatch(str(reference))
     if match is None or OFFICIAL_ENGINE_RE.fullmatch(str(reference)) is None:
         raise CandidatePolicyError("existing candidate Engine repository is not official")

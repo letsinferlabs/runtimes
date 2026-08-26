@@ -134,21 +134,6 @@ def validate(value: Any, *, platform: str) -> dict[str, Any]:
     return result
 
 
-def from_engine(value: Any, *, platform: str) -> dict[str, Any]:
-    """Read the temporary schema-cutover union from one Engine object."""
-
-    if not isinstance(value, Mapping):
-        raise DistributionError("runtime Engine must be an object")
-    if "distribution" in value and "oci" not in value:
-        return validate(value["distribution"], platform=platform)
-    if "oci" in value and "distribution" not in value:
-        oci = value["oci"]
-        if not isinstance(oci, Mapping):
-            raise DistributionError("runtime Engine OCI must be an object")
-        return validate({"kind": "oci-container", **dict(oci)}, platform=platform)
-    raise DistributionError("runtime Engine must select exactly one distribution")
-
-
 def projection(value: Any, *, platform: str) -> dict[str, Any]:
     distribution = validate(value, platform=platform)
     if distribution["kind"] == "oci-container":

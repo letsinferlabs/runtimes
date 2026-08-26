@@ -113,9 +113,7 @@ class ManifestToolTests(unittest.TestCase):
         manifest_path = ROOT / "manifest.json"
         sources = generate_manifest.sources_from_manifest(manifest_path)
         previous = generate_manifest.read_object(manifest_path)
-        migration = generate_manifest.read_object(ROOT / "qualification-migration.json")
-        entries = generate_manifest.contract_migration_entries(migration)
-        entries["orphan--candidate@0.1.0"] = copy.deepcopy(next(iter(entries.values())))
+        entries = {"orphan--candidate@0.1.0": {}}
         with mock.patch.object(
             generate_manifest, "contract_migration_entries", return_value=entries
         ):
@@ -128,7 +126,8 @@ class ManifestToolTests(unittest.TestCase):
     def test_release_metadata_preserves_multiple_runtime_authors(self) -> None:
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         qwen = manifest["models"]["qwen3.8-27b"]["targets"]["dgx-spark"]
-        release = next(iter(qwen["candidates"].values()))["releases"]["0.1.0-rc.13"]
+        candidate = next(iter(qwen["candidates"].values()))
+        release = candidate["releases"][candidate["latest"]]
         self.assertEqual(
             release["authors"],
             [
@@ -186,86 +185,16 @@ class ManifestToolTests(unittest.TestCase):
             },
         )
 
-    def test_contract_migration_is_bound_to_unchanged_execution_and_sealed_evidence(self) -> None:
-        candidate = "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark"
-        runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
-        migration = generate_manifest.read_object(ROOT / "qualification-migration.json")
-        identities = [
-            identity
-            for identity in migration["contract_migrations"]
-            if identity.startswith(candidate + "@")
-        ]
-        migration_identity = max(
-            identities,
-            key=lambda identity: generate_manifest._version_key(
-                identity.rsplit("@", 1)[1]
+    def test_schema_six_catalog_history_is_retired_at_cutover(self) -> None:
+        self.assertEqual(
+            generate_manifest._previous_releases(
+                {
+                    "schema_version": 6,
+                    "models": {"legacy": {"targets": {}}},
+                }
             ),
+            {},
         )
-        runtime["version"] = migration_identity.rsplit("@", 1)[1]
-        entry = migration["contract_migrations"][migration_identity]
-        current = generate_manifest.read_object(ROOT / "manifest.json")["models"][
-            runtime["logical_model"]
-        ]["targets"][runtime["target"]["id"]]["candidates"][candidate]["releases"][
-            runtime["version"]
-        ]
-        old_release = {
-            "source": current["verification"]["from_source"],
-            "engine": current["engine"],
-            "engine_oci": current["engine_oci"],
-            "model_uri": current["model_uri"],
-            "benchmark": current["benchmark"],
-            "provenance": {
-                key: current["provenance"][key]
-                for key in (
-                    "repository",
-                    "pull_request",
-                    "pull_request_url",
-                    "proposal_head_sha",
-                    "qualified_commit_sha",
-                )
-            },
-            "verification": {"verifiers": current["verification"]["verifiers"]},
-        }
-        release = generate_manifest.migrated_release(
-            root=ROOT,
-            runtime=runtime,
-            source=current["source"],
-            release_metadata=generate_manifest.read_object(
-                ROOT / candidate / "release.json"
-            ),
-            old_release=old_release,
-            entry=entry,
-        )
-        self.assertEqual(release, current)
-        changed = copy.deepcopy(runtime)
-        changed["engine"]["environment"]["UNSEALED_CHANGE"] = "1"
-        with self.assertRaisesRegex(
-            generate_manifest.ManifestError, "execution contract changed"
-        ):
-            generate_manifest.migrated_release(
-                root=ROOT,
-                runtime=changed,
-                source=current["source"],
-                release_metadata=generate_manifest.read_object(
-                    ROOT / candidate / "release.json"
-                ),
-                old_release=old_release,
-                entry=entry,
-            )
-        bad_entry = dict(entry, benchmark_record_sha256="0" * 64)
-        with self.assertRaisesRegex(
-            generate_manifest.ManifestError, "benchmark digest differs"
-        ):
-            generate_manifest.migrated_release(
-                root=ROOT,
-                runtime=runtime,
-                source=current["source"],
-                release_metadata=generate_manifest.read_object(
-                    ROOT / candidate / "release.json"
-                ),
-                old_release=old_release,
-                entry=bad_entry,
-            )
 
     def test_parallel_runtime_contract_keeps_engine_semantics_out_of_core(self) -> None:
         runtime = json.loads(
@@ -629,7 +558,7 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertIn("contents: write", workflow)
         self.assertIn("gh release create", workflow)
-        self.assertIn("catalog-v6-$GITHUB_SHA", workflow)
+        self.assertIn("catalog-v7-$GITHUB_SHA", workflow)
         self.assertIn("revocations.json.sig", workflow)
         self.assertNotIn("tools.benchmark_artifact push", workflow)
         self.assertIn("catalog-public-key.pem", workflow)

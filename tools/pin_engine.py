@@ -45,7 +45,7 @@ def update(
     tokenizer = contract.get("tokenizer") if isinstance(contract, dict) else None
     if not isinstance(tokenizer, dict):
         raise PinError("runtime benchmark tokenizer identity is invalid")
-    oci = engine.get("distribution", engine.get("oci"))
+    oci = engine.get("distribution")
     if not isinstance(oci, dict):
         raise PinError("runtime Engine OCI contract is missing")
     if "distribution" in engine and oci.get("kind") != "oci-container":

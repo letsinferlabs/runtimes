@@ -1,8 +1,9 @@
 # Let's Infer runtimes
 
 This repository contains reproducible deployment candidates. A candidate binds
-one logical model to an exact Hugging Face artifact, an immutable Engine OCI,
-and one hardware target. Let's Infer core remains engine- and model-agnostic.
+one logical model to an exact Hugging Face artifact, an immutable Engine
+distribution, and one hardware target. Let's Infer core remains engine- and
+model-agnostic.
 
 ## Features
 
@@ -11,8 +12,8 @@ and one hardware target. Let's Infer core remains engine- and model-agnostic.
   path.
 - **Exact model provenance** — every candidate links its Hugging Face model
   and pins the immutable revision, required files, sizes, and hashes.
-- **Engine freedom** — each Engine OCI carries one engine version and its
-  matching Let's Infer protocol adapter, independent of core releases.
+- **Engine freedom** — each Engine distribution carries one engine version and
+  its matching Let's Infer protocol adapter, independent of core releases.
 - **Target-specific performance** — candidates may include custom kernels,
   patches, sidecars, caches, and configuration for one exact hardware target.
 - **Replica-ready by default** — core can run compatible single groups across
@@ -37,9 +38,9 @@ Every candidate is a single top-level directory:
 ├── runtime.json
 ├── release.json  # structured authors, SPDX license, bot-owned provenance
 ├── README.md      # Let's Infer install block, model links, reproduction
-├── adapter/       # present only when this PR builds a changed Engine OCI
+├── adapter/       # present when this PR builds a changed Engine
 ├── engine/        # optional pinned engine source for radical Engine changes
-├── image/         # required deterministic recipe when building an Engine OCI
+├── image/         # deterministic OCI recipe when building a container Engine
 ├── kernels/       # optional runtime-specific kernels
 ├── patches/       # optional auditable source patches
 ├── scripts/       # optional build or qualification helpers
@@ -81,7 +82,7 @@ every catalog release and shown by `letsinfer model list`. `runtime.json` declar
 - exact `hf://owner/repository` identity and immutable 40-hex revision;
 - exact model files when the artifact is a single file;
 - digest-pinned acquisition image;
-- digest-pinned Engine OCI and image configuration identity;
+- one typed immutable Engine distribution and execution-payload identity;
 - Engine protocol version;
 - target capabilities;
 - an optional bounded, engine-neutral orchestration contract for parallel
@@ -108,14 +109,16 @@ target path.
 
 ## Engine boundary
 
-The Engine OCI contains the inference engine and its matching adapter. The
-adapter implements Engine protocol v2: lifecycle, health, normalized telemetry,
-exact token counting, and authenticated inference proxying. Core does not carry
+The Engine distribution contains the inference engine and its matching adapter.
+It may be a digest-pinned OCI container, native archive, standalone Python
+environment, or Engine embedded in the signed iOS application. The adapter
+implements Engine protocol v2: lifecycle, health, normalized telemetry, exact
+token counting, and authenticated inference proxying. Core does not carry
 per-engine registries, flags, tokenizers, cache plugins, or version shims.
 
 Inside your candidate, you may change engine configuration, kernels, patches,
-sidecars, and model artifacts. A changed Engine OCI identity always invalidates
-prior qualification evidence.
+sidecars, and model artifacts. A changed Engine payload identity always
+invalidates prior qualification evidence.
 
 ## Agent skills
 
