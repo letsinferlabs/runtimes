@@ -24,6 +24,67 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class PublicationPolicyTests(unittest.TestCase):
+    def test_shipit_publishes_native_runtime_without_treating_engine_as_oci(self) -> None:
+        source = "ghcr.io/letsinferlabs/runtime-artifacts@sha256:" + "1" * 64
+        runtime_plan = {
+            "source": source,
+            "config_digest": "sha256:" + "2" * 64,
+            "version": "0.1.0-rc.1",
+        }
+        engine = {
+            "mode": "build-native-engine",
+            "kind": "python-standalone",
+            "payload_digest": "sha256:" + "3" * 64,
+            "platform": "macos/arm64",
+            "source_revision": "4" * 40,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / "runtime.letsinfer").write_bytes(b"runtime")
+            planned = mock.Mock()
+            planned.document.return_value = runtime_plan
+            registry = mock.Mock()
+            registry.publish.return_value = source
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"OCI_USERNAME": "user", "OCI_PASSWORD": "secret"},
+                ),
+                mock.patch.object(shipit.oci_artifact, "plan", return_value=planned),
+                mock.patch.object(
+                    shipit.oci_artifact,
+                    "Registry",
+                    return_value=registry,
+                ),
+                mock.patch.object(
+                    shipit.oci_layout,
+                    "verify_reference",
+                    return_value={"reference": source},
+                ) as verify,
+                mock.patch.object(shipit.oci_layout, "publish") as publish_engine,
+            ):
+                receipt = shipit._publish(
+                    root=root,
+                    bundle={
+                        "mode": "build-native-engine",
+                        "engine": engine,
+                        "runtime": runtime_plan,
+                        "proposal_head_sha": "5" * 40,
+                    },
+                    candidate="engine--owner--model--target",
+                )
+        self.assertEqual(
+            receipt["engine"],
+            {
+                key: engine[key]
+                for key in ("kind", "payload_digest", "platform", "source_revision")
+            },
+        )
+        publish_engine.assert_not_called()
+        verify.assert_called_once_with(
+            source, expected_config=runtime_plan["config_digest"]
+        )
+
     def test_engine_source_identity_ignores_runtime_only_metadata(self) -> None:
         candidate = "engine--owner--model--target"
         engine = {"path": "image/Dockerfile", "bytes": 4, "mode": 0o644, "sha256": "1" * 64}

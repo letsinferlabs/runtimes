@@ -703,11 +703,17 @@ def _publish(
         )
         if published_engine["reference"] != engine["reference"] or published_engine["config_digest"] != engine["config_digest"]:
             raise ShipitError("published Engine identity differs from verifier bundle")
-    engine_receipt = oci_layout.verify_reference(
-        engine["reference"],
-        expected_config=engine["config_digest"],
-        expected_platform=engine.get("platform"),
-    )
+    if bundle["mode"] == "build-native-engine":
+        engine_receipt = {
+            key: engine[key]
+            for key in ("kind", "payload_digest", "platform", "source_revision")
+        }
+    else:
+        engine_receipt = oci_layout.verify_reference(
+            engine["reference"],
+            expected_config=engine["config_digest"],
+            expected_platform=engine.get("platform"),
+        )
     runtime = bundle["runtime"]
     runtime_repository = str(runtime["source"]).rsplit("@", 1)[0]
     runtime_plan = oci_artifact.plan(

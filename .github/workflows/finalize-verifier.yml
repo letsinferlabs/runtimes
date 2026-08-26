@@ -180,10 +180,10 @@ jobs:
               --output "$RUNNER_TEMP/engine-plan.json"
             reference=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["reference"])' "$RUNNER_TEMP/engine-plan.json")
             config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$RUNNER_TEMP/engine-plan.json")
-            current_reference=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["reference"])' "../proposal/$candidate/runtime.json")
-            current_config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["immutable_id"])' "../proposal/$candidate/runtime.json")
+            current_reference=$(python3 -c 'import json,sys; engine=json.load(open(sys.argv[1]))["engine"]; value=engine.get("distribution", engine.get("oci")); print(value["reference"])' "../proposal/$candidate/runtime.json")
+            current_config=$(python3 -c 'import json,sys; engine=json.load(open(sys.argv[1]))["engine"]; value=engine.get("distribution", engine.get("oci")); print(value["immutable_id"])' "../proposal/$candidate/runtime.json")
             payload=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("payload_digest") or "")' "$RUNNER_TEMP/engine-plan.json")
-            current_payload=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"].get("payload_id") or "")' "../proposal/$candidate/runtime.json")
+            current_payload=$(python3 -c 'import json,sys; engine=json.load(open(sys.argv[1]))["engine"]; value=engine.get("distribution", engine.get("oci")); print(value.get("payload_id") or "")' "../proposal/$candidate/runtime.json")
             if test "$reference" != "$current_reference" || test "$config" != "$current_config" || { test -n "$current_payload" && test "$payload" != "$current_payload"; }; then
               echo "Engine identity differs from the canonical trusted build." >&2
               echo "Run the canonical Engine build locally, update runtime.json, and push once." >&2

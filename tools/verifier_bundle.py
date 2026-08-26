@@ -184,7 +184,7 @@ def create(
     finalizer_workflow_sha: str,
 ) -> dict[str, Any]:
     if (
-        mode not in {"reuse-engine", "build-engine"}
+        mode not in {"reuse-engine", "build-engine", "build-native-engine"}
         or pull_request <= 0
         or build_run_id <= 0
         or finalizer_run_id <= 0
@@ -243,11 +243,24 @@ def create(
     ).document()
     if read_object(raw / "runtime-plan.json") != expected_plan:
         raise BundleError("runtime OCI plan differs from exact source pack")
+    distribution = generate_manifest.engine_distribution(runtime)
     engine_value: dict[str, Any] = {
         "mode": mode,
-        "reference": audit["engine_reference"],
-        "config_digest": audit["engine_config_digest"],
+        "kind": distribution["kind"],
     }
+    if distribution["kind"] == "oci-container":
+        engine_value |= {
+            "reference": audit["engine_reference"],
+            "config_digest": audit["engine_config_digest"],
+        }
+        if distribution.get("payload_id") is not None:
+            engine_value["payload_digest"] = distribution["payload_id"]
+    else:
+        engine_value |= {
+            "payload_digest": distribution["payload_id"],
+            "platform": distribution["platform"],
+            "source_revision": distribution["source_revision"],
+        }
     if mode == "build-engine":
         first = oci_layout.inspect_archive(raw / "engine.oci.tar", audit["target_platform"])
         expected_engine_plan = first | {"reference": audit["engine_reference"]}
@@ -445,6 +458,20 @@ def validate(
         layout = oci_layout.inspect_archive(directory / "engine.oci.tar", str(engine.get("platform")))
         if any(layout.get(key) != engine.get(key) for key in ("platform", "manifest_digest", "config_digest", "layer_digests")):
             raise BundleError("verifier bundle Engine layout differs")
+    elif mode == "build-native-engine":
+        engine = bundle.get("engine")
+        if (
+            not isinstance(engine, dict)
+            or engine.get("kind")
+            not in {"native-archive", "python-standalone", "embedded-application"}
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", str(engine.get("payload_digest")))
+            is None
+            or re.fullmatch(r"[0-9a-f]{40}", str(engine.get("source_revision")))
+            is None
+            or re.fullmatch(r"[a-z0-9._-]+/[a-z0-9._-]+", str(engine.get("platform")))
+            is None
+        ):
+            raise BundleError("verifier bundle native Engine identity is invalid")
     elif mode != "reuse-engine":
         raise BundleError("verifier bundle Engine mode is invalid")
     return bundle
