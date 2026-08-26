@@ -1,10 +1,1 @@
-{
-  "authors": [
-    {"github_login": "antirez", "github_id": 65632, "github_type": "User"},
-    {"github_login": "Entrpi", "github_id": 133157614, "github_type": "User"},
-    {"github_login": "letsinferlabs", "github_id": 317451145, "github_type": "Organization"}
-  ],
-  "license": "AGPL-3.0-only",
-  "provenance": null,
-  "schema_version": 2
-}
+{"authors":[{"github_id":65632,"github_login":"antirez","github_type":"User"},{"github_id":133157614,"github_login":"Entrpi","github_type":"User"},{"github_id":317451145,"github_login":"letsinferlabs","github_type":"Organization"}],"license":"AGPL-3.0-only","provenance":{"consensus_sha256":"a1f50ecf7043a498034cd976dccb743f723cb0461b9e804e985b8cfdf5de69b3","execution_sha256":"18423a13f376b81f24c076b9629cc4819baf58711ab2b40342b5dcf2630d6f02","proposal_head_sha":"1091bc140b29243a54f6692d8733a11c09edc3f3","pull_request":90,"pull_request_url":"https://github.com/letsinferlabs/runtimes/pull/90","qualified_commit_sha":"8d67d771d122dee64d109d53acb3d90bf093195b","repository":"letsinferlabs/runtimes"},"schema_version":2}
