@@ -579,7 +579,7 @@ class PublicationPolicyTests(unittest.TestCase):
             ),
         }
         with mock.patch.object(
-            verification_bot, "api", return_value=[comment]
+            verification_bot, "api", return_value=[[comment]]
         ):
             actual = shipit._existing_publication_receipt(
                 number=69,
