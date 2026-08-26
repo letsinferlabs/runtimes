@@ -195,7 +195,9 @@ jobs:
           CANDIDATE: ${{ steps.identity.outputs.candidate }}
         run: |
           set -euo pipefail
-          core-contract/bin/letsinfer pack "proposal/$CANDIDATE" --output "$RUNNER_TEMP/raw/runtime-trusted.letsinfer"
+          python3 trusted/tools/pack_runtime.py --core-root core-contract \
+            --candidate "proposal/$CANDIDATE" \
+            --output "$RUNNER_TEMP/raw/runtime-trusted.letsinfer"
       - name: Finalize the verifier bundle without executing proposal code
         env:
           FINALIZER_WORKFLOW_SHA: ${{ github.workflow_sha }}
