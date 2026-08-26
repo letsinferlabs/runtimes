@@ -31,6 +31,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 class ManifestToolTests(unittest.TestCase):
     def test_changed_candidate_selection_is_flat_and_shared_changes_fan_out(self) -> None:
         qwen = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        ling = "sglang--inclusionai--ling-3.0-flash-int4--dgx-spark"
         nemotron = (
             "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark"
         )
@@ -42,7 +43,7 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(
             changed_candidates.changed(ROOT, ["tools/generate_manifest.py"]),
-            sorted((deepseek, nemotron, qwen, sparkinfer)),
+            sorted((deepseek, ling, nemotron, qwen, sparkinfer)),
         )
 
     def test_runtime_oci_plan_is_deterministic_and_pull_compatible(self) -> None:
@@ -168,6 +169,7 @@ class ManifestToolTests(unittest.TestCase):
             {record["runtime"]["id"] for record in records},
             {
                 "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
+                "sglang--inclusionai--ling-3.0-flash-int4--dgx-spark",
                 "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
                 "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
                 "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",

@@ -1,0 +1,23 @@
+diff --git a/python/sglang/srt/entrypoints/openai/serving_tokenize.py b/python/sglang/srt/entrypoints/openai/serving_tokenize.py
+index f362e87..8cac2a6 100644
+--- a/python/sglang/srt/entrypoints/openai/serving_tokenize.py
++++ b/python/sglang/srt/entrypoints/openai/serving_tokenize.py
+@@ -45,6 +45,18 @@ class OpenAIServingTokenize(OpenAIServingBase):
+         try:
+             tokenizer = self.tokenizer_manager.tokenizer
+             max_model_len = getattr(tokenizer, "model_max_length", -1)
++            context_length = self.tokenizer_manager.server_args.context_length
++            if not isinstance(max_model_len, int) or isinstance(max_model_len, bool):
++                max_model_len = -1
++            if (
++                isinstance(context_length, int)
++                and not isinstance(context_length, bool)
++                and context_length > 0
++                and (max_model_len < 0 or max_model_len > context_length)
++            ):
++                # Hugging Face uses an enormous sentinel when no tokenizer limit
++                # is declared. Keep the response JSON-safe and runtime-bound.
++                max_model_len = context_length
+ 
+             if request.messages is not None:
+                 token_ids = self._tokenize_chat_request(request)
