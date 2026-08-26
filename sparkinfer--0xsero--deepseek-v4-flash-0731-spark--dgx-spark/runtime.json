@@ -1,7 +1,7 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "id": "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-  "version": "0.1.0-rc.35",
+  "version": "0.1.0-rc.36",
   "logical_model": "deepseek-v4-flash",
   "target": {
     "id": "dgx-spark",
@@ -70,7 +70,8 @@
     "protocol": {
       "version": 2
     },
-    "oci": {
+    "distribution": {
+      "kind": "oci-container",
       "reference": "ghcr.io/letsinferlabs/engine-images@sha256:252a3861aef85e699e7ed81c9d7df21a69843c1bc5e44d5d65ae3dced8b65136",
       "immutable_id": "sha256:107cb0e0acfaee5c43a438e7ba139c9f5fb518d48d98bb92b1ec71981e604937",
       "base": "ghcr.io/0xsero/deepseek-v4-flash-0731-spark-sparkinfer@sha256:2e077489a83a0360952828051fe7f7a32c1801e5ce8436d85f7267583d614ff4"
@@ -80,7 +81,8 @@
     "uri": "hf://0xSero/deepseek-v4-flash-0731-spark",
     "artifact": "model",
     "acquisition": {
-      "image": "ghcr.io/0xsero/deepseek-v4-flash-0731-spark-sparkinfer@sha256:2e077489a83a0360952828051fe7f7a32c1801e5ce8436d85f7267583d614ff4"
+      "image": "ghcr.io/0xsero/deepseek-v4-flash-0731-spark-sparkinfer@sha256:2e077489a83a0360952828051fe7f7a32c1801e5ce8436d85f7267583d614ff4",
+      "kind": "oci-container"
     }
   },
   "artifacts": [
@@ -129,7 +131,9 @@
         "id": "letsinfer-code-prose",
         "version": 7
       },
-      "domains": ["code"],
+      "domains": [
+        "code"
+      ],
       "execution": {
         "isolation": "fresh-matrix",
         "prefix_state": "shared",
@@ -185,22 +189,38 @@
         {
           "id": "32k",
           "prompt_tokens": 32768,
-          "concurrencies": [1, 2, 4]
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
         },
         {
           "id": "64k",
           "prompt_tokens": 65536,
-          "concurrencies": [1, 2, 4]
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
         },
         {
           "id": "128k",
           "prompt_tokens": 131072,
-          "concurrencies": [1, 2, 4]
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
         },
         {
           "id": "256k",
           "prompt_tokens": 260000,
-          "concurrencies": [1, 2, 4]
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
         }
       ]
     }
