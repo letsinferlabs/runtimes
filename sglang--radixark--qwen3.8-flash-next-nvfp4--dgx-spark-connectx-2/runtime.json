@@ -34,9 +34,9 @@
     },
     "distribution": {
       "kind": "oci-container",
-      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "immutable_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "payload_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:c2b4aa32bec338221881227ca99f2884f2f12a07044b381d316b425b1f0a8987",
+      "immutable_id": "sha256:814350af3f607d05df21d96da989497ea279d532e946a07c9fd05155588c45c2",
+      "payload_id": "sha256:58ec15a34908d6ae4814131ac553b0bd94673c0e3a2e1ce438cebe895170b118",
       "base": "docker.io/lmsysorg/sglang@sha256:14ed582518584c5c830206b5318a2c2769e68229c3422e48a28b952b3a888bd4"
     },
     "model_format": "huggingface-snapshot",
@@ -164,7 +164,7 @@
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
         "model_sha256": "dad3eb6e68da1cec05d9393fda228292ee89e1359f62b5d07426dbebb89c31e3",
-        "engine_payload_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "engine_payload_sha256": "58ec15a34908d6ae4814131ac553b0bd94673c0e3a2e1ce438cebe895170b118",
         "render_contract": "openai-chat-user-v1"
       },
       "request": {
