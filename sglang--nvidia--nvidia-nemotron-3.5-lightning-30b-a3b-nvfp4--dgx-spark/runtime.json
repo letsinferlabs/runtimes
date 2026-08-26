@@ -1,7 +1,7 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "id": "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.3",
+  "version": "0.1.0-rc.4",
   "logical_model": "nemotron-3.5-lightning",
   "target": {
     "id": "dgx-spark",
@@ -32,11 +32,6 @@
     "protocol": {
       "version": 2
     },
-    "oci": {
-      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:854d133b66f4fa46ed2b6003d40e696ab2367d7f996c1ca55424b0545d0c41ac",
-      "immutable_id": "sha256:2a9a393634cbe7514d636942db4d76d5725fbfcad6839b5813661719301c1ab1",
-      "base": "docker.io/lmsysorg/sglang@sha256:ee63304703432429d55cf2e4579b70c5a334ed4cc49194fb5290c077fcbbd4a0"
-    },
     "model_format": "huggingface-snapshot",
     "cache_provider": "sglang-radix-v1",
     "arguments": [
@@ -66,13 +61,20 @@
     "environment": {
       "SAFETENSORS_FAST_GPU": "1",
       "TRITON_CACHE_DIR": "/root/.triton"
+    },
+    "distribution": {
+      "kind": "oci-container",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:854d133b66f4fa46ed2b6003d40e696ab2367d7f996c1ca55424b0545d0c41ac",
+      "immutable_id": "sha256:2a9a393634cbe7514d636942db4d76d5725fbfcad6839b5813661719301c1ab1",
+      "base": "docker.io/lmsysorg/sglang@sha256:ee63304703432429d55cf2e4579b70c5a334ed4cc49194fb5290c077fcbbd4a0"
     }
   },
   "model": {
     "uri": "hf://nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
     "artifact": "model",
     "acquisition": {
-      "image": "docker.io/lmsysorg/sglang@sha256:ee63304703432429d55cf2e4579b70c5a334ed4cc49194fb5290c077fcbbd4a0"
+      "image": "docker.io/lmsysorg/sglang@sha256:ee63304703432429d55cf2e4579b70c5a334ed4cc49194fb5290c077fcbbd4a0",
+      "kind": "oci-container"
     }
   },
   "artifacts": [
