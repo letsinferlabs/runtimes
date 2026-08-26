@@ -539,6 +539,70 @@ class PublicationPolicyTests(unittest.TestCase):
             ],
         )
 
+    def test_exact_publication_receipt_is_resumable(self) -> None:
+        candidate = "candidate"
+        current = "b" * 40
+        proposal = "a" * 40
+        engine = "ghcr.io/letsinferlabs/engine-images@sha256:" + "1" * 64
+        runtime_digest = "sha256:" + "2" * 64
+        waiver = {"policy": "allowlisted-maintainer-bypass-v1"}
+        receipt = {
+            "schema_version": 1,
+            "repository": "letsinferlabs/runtimes",
+            "pull_request": 69,
+            "candidate": candidate,
+            "runtime_version": "0.1.0-rc.1",
+            "proposal_head_sha": proposal,
+            "merge_head_sha": current,
+            "execution_sha256": "3" * 64,
+            "waiver": waiver,
+            "published": {
+                "engine": {
+                    "anonymous_pull_verified": True,
+                    "reference": engine,
+                },
+                "runtime": {
+                    "anonymous_pull_verified": True,
+                    "reference": (
+                        "ghcr.io/letsinferlabs/runtime-artifacts@" + runtime_digest
+                    ),
+                },
+            },
+        }
+        comment = {
+            "user": {"login": "letsinfer-bot[bot]", "type": "Bot"},
+            "body": (
+                "## Runtime publication receipt\n\n```json\n"
+                + json.dumps(receipt)
+                + "\n```\n\n"
+                + shipit.RECEIPT_MARKER
+            ),
+        }
+        with mock.patch.object(
+            verification_bot, "api", return_value=[comment]
+        ):
+            actual = shipit._existing_publication_receipt(
+                number=69,
+                candidate=candidate,
+                current=current,
+                runtime={
+                    "version": "0.1.0-rc.1",
+                    "engine": {"oci": {"reference": engine}},
+                },
+                release={
+                    "provenance": {
+                        "proposal_head_sha": proposal,
+                        "execution_sha256": "3" * 64,
+                    }
+                },
+                consensus={
+                    "waiver": waiver,
+                    "subject": {"runtime_oci_manifest_digest": runtime_digest},
+                },
+                bot_login="letsinfer-bot[bot]",
+            )
+        self.assertEqual(actual, receipt)
+
     def _waived_consensus(self, actor_id: int) -> tuple[dict, dict]:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
