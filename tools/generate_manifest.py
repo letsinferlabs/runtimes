@@ -787,11 +787,21 @@ def validate_consensus_binding(
     subject = consensus.get("subject")
     if not isinstance(subject, dict):
         raise ManifestError(f"runtime consensus subject is invalid: {candidate}")
+    engine_oci = runtime["engine"]["oci"]
+    payload_id = engine_oci.get("payload_id")
+    engine_bound = (
+        subject.get("engine_payload_sha256")
+        == str(payload_id).removeprefix("sha256:")
+        and "engine_oci_manifest_digest" not in subject
+        if payload_id is not None
+        else subject.get("engine_oci_manifest_digest")
+        == engine_oci["reference"].rsplit("@", 1)[-1]
+        and "engine_payload_sha256" not in subject
+    )
     if (
         subject.get("candidate_id") != candidate
         or subject.get("runtime_version") != runtime["version"]
-        or subject.get("engine_oci_manifest_digest")
-        != runtime["engine"]["oci"]["reference"].rsplit("@", 1)[-1]
+        or not engine_bound
         or subject.get("benchmark_contract_sha256")
         != hashlib.sha256(canonical_bytes(runtime["benchmark"]["contract"])).hexdigest()
         or subject.get("target_contract_sha256")
