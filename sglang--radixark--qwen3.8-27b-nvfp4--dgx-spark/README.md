@@ -9,7 +9,7 @@
 > Then install this model:
 >
 > ```sh
-> letsinfer install qwen3.8-27b
+> letsinfer model install qwen3.8-27b
 > ```
 
 # Qwen3.8 27B NVFP4 / SGLang / DGX Spark
@@ -55,7 +55,7 @@ code stays in Let's Infer core.
 Install the qualified DGX Spark candidate with:
 
 ```bash
-letsinfer install qwen3.8-27b
+letsinfer model install qwen3.8-27b
 ```
 
 Let's Infer then downloads the runtime pack, this exact model revision, and
@@ -66,7 +66,7 @@ the pinned Engine OCI. You do not download or place the weights separately.
 After installing the qualified runtime, run its complete cache-aware benchmark:
 
 ```bash
-letsinfer benchmark qwen3.8-27b
+letsinfer benchmark run qwen3.8-27b
 ```
 
 The current schema-7 contract runs short code and prose at C1/C2/C4, plus
