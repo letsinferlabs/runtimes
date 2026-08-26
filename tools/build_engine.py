@@ -37,6 +37,9 @@ def read_object(path: pathlib.Path) -> dict[str, Any]:
 
 
 def run(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+    # stdout is a strict machine-readable channel owned by main(). Send every
+    # child command's progress and intermediate document to stderr.
+    kwargs.setdefault("stdout", sys.stderr)
     try:
         return subprocess.run(arguments, check=True, **kwargs)
     except (OSError, subprocess.CalledProcessError) as error:

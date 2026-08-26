@@ -47,6 +47,7 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("type=oci,dest=-", builder)
         self.assertIn("rewrite-timestamp=true", builder)
         self.assertIn("--inventory-output", workflow)
+        self.assertIn('kwargs.setdefault("stdout", sys.stderr)', builder)
 
     def test_unchanged_engine_uses_a_finalizer_attested_proof(self) -> None:
         build = (ROOT / ".github/workflows/build-verifier.yml").read_text(
