@@ -1,7 +1,7 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "id": "sglang--inclusionai--ling-3.0-flash-int4--dgx-spark",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "logical_model": "ling-3.0-flash",
   "target": {
     "id": "dgx-spark",
@@ -31,11 +31,6 @@
     "id": "sglang",
     "protocol": {
       "version": 2
-    },
-    "oci": {
-      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:c33371d5314c73cc99eac88a3a4cc264896d21f3176360b5299dceaec12a732e",
-      "immutable_id": "sha256:3b3378777a5b8eaceca6e19c39a529fc4286282497a2ff29f8171bdc224c853b",
-      "base": "docker.io/lmsysorg/sglang@sha256:fc960102f1d2581b7dfa44885f6afcdfb107e84782e318cf33bbb2f219d0bd16"
     },
     "model_format": "huggingface-snapshot",
     "cache_provider": "sglang-radix-v1",
@@ -73,13 +68,20 @@
       "FLASHINFER_DISABLE_VERSION_CHECK": "1",
       "SGLANG_JIT_DEEPGEMM_PRECOMPILE": "1",
       "TRITON_CACHE_DIR": "/root/.triton"
+    },
+    "distribution": {
+      "kind": "oci-container",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:c33371d5314c73cc99eac88a3a4cc264896d21f3176360b5299dceaec12a732e",
+      "immutable_id": "sha256:3b3378777a5b8eaceca6e19c39a529fc4286282497a2ff29f8171bdc224c853b",
+      "base": "docker.io/lmsysorg/sglang@sha256:fc960102f1d2581b7dfa44885f6afcdfb107e84782e318cf33bbb2f219d0bd16"
     }
   },
   "model": {
     "uri": "hf://inclusionAI/Ling-3.0-flash-int4",
     "artifact": "model",
     "acquisition": {
-      "image": "docker.io/lmsysorg/sglang@sha256:fc960102f1d2581b7dfa44885f6afcdfb107e84782e318cf33bbb2f219d0bd16"
+      "image": "docker.io/lmsysorg/sglang@sha256:fc960102f1d2581b7dfa44885f6afcdfb107e84782e318cf33bbb2f219d0bd16",
+      "kind": "oci-container"
     }
   },
   "artifacts": [
