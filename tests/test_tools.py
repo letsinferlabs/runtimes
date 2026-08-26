@@ -18,6 +18,7 @@ from tools import (
     changed_candidates,
     generate_manifest,
     oci_artifact,
+    oci_layout,
     pin_engine,
     readme_onboarding,
     set_publication_source,
@@ -71,6 +72,9 @@ class ManifestToolTests(unittest.TestCase):
         self.assertEqual(len(manifest["layers"]), 1)
         self.assertEqual(
             manifest["layers"][0]["mediaType"], oci_artifact.PACK_MEDIA_TYPE
+        )
+        self.assertEqual(
+            oci_artifact.PACK_MEDIA_TYPE, oci_layout.RUNTIME_LAYER_MEDIA_TYPE
         )
         self.assertEqual(
             manifest["layers"][0]["annotations"]["org.opencontainers.image.title"],
