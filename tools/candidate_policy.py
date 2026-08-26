@@ -358,6 +358,7 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
         distribution = generate_manifest.engine_distribution(runtime)
     except generate_manifest.ManifestError as error:
         raise CandidatePolicyError(str(error)) from error
+    payload_id = distribution.get("payload_id")
     if distribution["kind"] == "oci-container":
         reference = distribution.get("reference")
         immutable_id = distribution.get("immutable_id")
@@ -479,9 +480,7 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
         "engine_reference": reference,
         "engine_config_digest": immutable_id,
         "engine_payload_digest": payload_id,
-        "engine_base_reference": (
-            oci.get("base") if isinstance(oci, dict) else None
-        ),
+        "engine_base_reference": distribution.get("base"),
         "target_platform": runtime.get("target", {}).get("platform"),
     }
 

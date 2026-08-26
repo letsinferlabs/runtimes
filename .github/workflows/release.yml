@@ -79,7 +79,8 @@ jobs:
           )
           raise SystemExit(0 if found else 1)
           PY
-            .core/bin/letsinfer pack "$candidate" --output "$RUNNER_TEMP/packs/$candidate.letsinfer"
+            python3 tools/pack_runtime.py --core-root .core --candidate "$candidate" \
+              --output "$RUNNER_TEMP/packs/$candidate.letsinfer"
             python3 tools/candidate_policy.py repositories --candidate "$candidate" \
               --output "$RUNNER_TEMP/repositories.json"
             repository=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_repository"])' "$RUNNER_TEMP/repositories.json")

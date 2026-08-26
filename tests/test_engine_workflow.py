@@ -8,6 +8,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class EngineWorkflowTests(unittest.TestCase):
+    def test_workflows_use_the_exact_core_pack_library_not_product_cli(self) -> None:
+        workflows = [
+            ROOT / ".github/workflows/validate.yml",
+            ROOT / ".github/workflows/build-verifier.yml",
+            ROOT / ".github/workflows/finalize-verifier.yml",
+            ROOT / ".github/workflows/release.yml",
+        ]
+        for path in workflows:
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("tools/pack_runtime.py", source, path.name)
+            self.assertNotIn("bin/letsinfer pack", source, path.name)
+
     def test_untrusted_pr_builder_has_no_publication_authority(self) -> None:
         workflow = (ROOT / ".github/workflows/build-verifier.yml").read_text(
             encoding="utf-8"
