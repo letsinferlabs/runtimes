@@ -14,9 +14,10 @@
     "repository": "MiaAI-Lab/Ling-3.0-Flash-SGLang-DSpark-DGX-Spark",
     "commit": "ca840cb8d032353e24648aeee06312b0938348f6"
   },
-  "method": "immutable-base-adapter-overlay",
+  "method": "verified-base-patch-overlay",
   "runtime_fixes": [
     "letsinfer-engine-protocol-v2-adapter",
+    "bound-tokenize-response-context-metadata",
     "digest-pinned-arm64-base",
     "immutable-target-and-dspark-revisions"
   ]

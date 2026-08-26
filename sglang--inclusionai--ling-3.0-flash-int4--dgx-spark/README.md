@@ -24,7 +24,7 @@ stable local OpenAI-compatible API.
 - **256K context** -- serves the checkpoint's native 262,144-token window.
 - **DSpark speculative decoding** -- the external 1.36B Ling draft proposes
   eight-token blocks through SGLang's ReplaySSM verification path.
-- **Spark-safe memory profile** -- 75% static allocation, FP8 KV, a 32-entry
+- **Spark-safe memory profile** -- 80% static allocation, FP8 KV, a 32-entry
   Mamba cache, and a 10 GiB host-availability safety floor.
 - **Measured concurrency envelope** -- up to six active requests behind 128
   gateway connections, with Let's Infer admission and queueing.
@@ -50,7 +50,10 @@ MiaAI-Lab's DGX Spark integration at commit
 The Engine uses the immutable official ARM64 SGLang image built from commit
 `0e5e40d8f1460976cd7190ae479c210f0642c120`. Exact source identities and
 license boundaries are recorded in `engine/PROVENANCE.json` and
-`THIRD_PARTY.md`.
+`THIRD_PARTY.md`. One fail-closed patch clamps only the `/v1/tokenize`
+response's `max_model_len` metadata to the runtime context when a tokenizer
+reports Hugging Face's out-of-range sentinel; token rendering, token IDs, and
+the exact count remain native SGLang results.
 
 ## Reproduce this
 
