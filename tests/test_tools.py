@@ -520,9 +520,11 @@ class ManifestToolTests(unittest.TestCase):
         source = "ghcr.io/letsinferlabs/runtimes/example@sha256:" + "7" * 64
         set_publication_source.update(document, candidate, source)
         self.assertNotEqual(document, before)
+        record = document["models"]["deepseek-v4-flash"]["targets"]["dgx-spark"][
+            "candidates"
+        ][candidate]
         self.assertEqual(
-            document["models"]["deepseek-v4-flash"]["targets"]["dgx-spark"]
-            ["candidates"][candidate]["releases"]["0.11.0-rc.11"]["source"],
+            record["releases"][record["latest"]]["source"],
             source,
         )
         self.assertEqual(
