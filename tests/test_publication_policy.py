@@ -32,53 +32,12 @@ class PublicationPolicyTests(unittest.TestCase):
         self.assertIn("-${{ github.event_name }}", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
 
-    def test_unscored_schema6_cutover_requires_execution_identity(self) -> None:
+    def test_unscored_new_candidate_can_share_a_model_target(self) -> None:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
-        if runtime["schema_version"] == 5:
-            previous = runtime
-            current = copy.deepcopy(previous)
-            current["schema_version"] = 6
-            current["version"] = "0.1.0-rc.18"
-            current["engine"]["distribution"] = {
-                "kind": "oci-container",
-                **current["engine"].pop("oci"),
-            }
-            current["model"]["acquisition"]["kind"] = "oci-container"
-        else:
-            current = runtime
-            previous = copy.deepcopy(current)
-            previous["schema_version"] = 5
-            previous["version"] = "0.1.0-rc.17"
-            distribution = previous["engine"].pop("distribution")
-            previous["engine"]["oci"] = {
-                key: value
-                for key, value in distribution.items()
-                if key != "kind"
-            }
-            previous["model"]["acquisition"].pop("kind")
-        with mock.patch.object(
-            shipit.subprocess,
-            "check_output",
-            return_value=json.dumps(previous),
-        ):
-            self.assertTrue(
-                shipit._schema6_cutover_is_execution_identical(
-                    root=ROOT,
-                    candidate=candidate,
-                    runtime=current,
-                    base_sha="1" * 40,
-                )
-            )
-            current["engine"]["arguments"].append("--changed")
-            self.assertFalse(
-                shipit._schema6_cutover_is_execution_identical(
-                    root=ROOT,
-                    candidate=candidate,
-                    runtime=current,
-                    base_sha="1" * 40,
-                )
-            )
+        self.assertTrue(shipit._existing_candidate_has_release(ROOT, runtime))
+        runtime["id"] = "other--owner--qwen3.8-27b--dgx-spark"
+        self.assertFalse(shipit._existing_candidate_has_release(ROOT, runtime))
 
     def test_shipit_publishes_native_runtime_without_treating_engine_as_oci(self) -> None:
         source = "ghcr.io/letsinferlabs/runtime-artifacts@sha256:" + "1" * 64
