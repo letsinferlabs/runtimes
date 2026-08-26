@@ -349,7 +349,7 @@ class ManifestToolTests(unittest.TestCase):
         self.assertTrue(block.startswith("> **Run this model with [Let's Infer]"))
         self.assertIn("https://letsinfer.ai/", block)
         self.assertIn("curl -fsSL https://letsinfer.ai/install.sh | sh", block)
-        self.assertIn("letsinfer install qwen3.8-27b", block)
+        self.assertIn("letsinfer model install qwen3.8-27b", block)
         readme_onboarding.validate(block + "\n# Existing README\n", "qwen3.8-27b")
         with self.assertRaisesRegex(
             readme_onboarding.ReadmeError, "logical model deepseek-v4-flash"
