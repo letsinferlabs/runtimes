@@ -89,6 +89,7 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertNotIn("engine-pin-request.json", workflow)
         self.assertIn("exact authored Engine identity", workflow)
         self.assertIn("runtime/verifier-bundle", workflow)
+        self.assertIn('engine.get("distribution", engine.get("oci"))', workflow)
         self.assertIn('run.get("head_branch") != "main"', workflow)
         self.assertIn("actions/attest@", workflow)
         self.assertNotIn("working-directory: proposal", workflow)
@@ -115,6 +116,8 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertNotIn("packages: write", release)
         self.assertNotIn("oci_artifact.py push", release)
         self.assertIn("oci_layout.py verify", release)
+        self.assertIn('test "$engine_kind" = oci-container', release)
+        self.assertIn('engine.get("distribution", engine.get("oci"))', release)
 
     def test_every_engine_exports_the_same_inventory_contract(self) -> None:
         for dockerfile in ROOT.glob("*/image/Dockerfile"):

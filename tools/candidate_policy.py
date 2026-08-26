@@ -131,7 +131,20 @@ def classify_paths(
         engine_change = engine_change or any(
             (directory / name).exists() for name in ENGINE_INPUT_DIRECTORIES
         )
-    return "build-engine" if engine_change else "reuse-engine"
+    if not engine_change:
+        return "reuse-engine"
+    try:
+        runtime = generate_manifest.read_object(root / candidate / "runtime.json")
+        distribution = generate_manifest.engine_distribution(runtime)
+    except generate_manifest.ManifestError:
+        distribution = {}
+    return (
+        "build-native-engine"
+        if isinstance(distribution, Mapping)
+        and distribution.get("kind")
+        in {"native-archive", "python-standalone", "embedded-application"}
+        else "build-engine"
+    )
 
 
 def classify(
@@ -241,7 +254,12 @@ def engine_publication(
     release = _candidate_release(root, candidate, base)
     if release is None:
         return NEW_ENGINE_REPOSITORY, None
-    reference = release.get("engine_oci")
+    distribution = release.get("engine_distribution")
+    reference = (
+        distribution.get("reference")
+        if isinstance(distribution, Mapping)
+        else release.get("engine_oci")
+    )
     match = REFERENCE_RE.fullmatch(str(reference))
     if match is None or OFFICIAL_ENGINE_RE.fullmatch(str(reference)) is None:
         raise CandidatePolicyError("existing candidate Engine repository is not official")
@@ -315,7 +333,7 @@ def _dockerfile_bases(path: pathlib.Path) -> None:
 
 
 def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, Any]:
-    if mode not in {"reuse-engine", "build-engine"}:
+    if mode not in {"reuse-engine", "build-engine", "build-native-engine"}:
         raise CandidatePolicyError("candidate Engine mode is invalid")
     directory = root / candidate
     runtime_path = directory / "runtime.json"
@@ -336,16 +354,38 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
     engine = runtime.get("engine")
     if not isinstance(engine, dict):
         raise CandidatePolicyError("runtime Engine contract is missing")
-    oci = engine.get("oci") if isinstance(engine, dict) else None
-    reference = oci.get("reference") if isinstance(oci, dict) else None
-    immutable_id = oci.get("immutable_id") if isinstance(oci, dict) else None
-    payload_id = oci.get("payload_id") if isinstance(oci, dict) else None
-    if OFFICIAL_ENGINE_RE.fullmatch(str(reference)) is None:
-        raise CandidatePolicyError("runtime must pin an official Engine OCI manifest digest")
-    if SHA256_RE.fullmatch(str(immutable_id)) is None:
-        raise CandidatePolicyError("runtime must pin an Engine configuration digest")
-    if payload_id is not None and SHA256_RE.fullmatch(str(payload_id)) is None:
-        raise CandidatePolicyError("runtime Engine payload identity is invalid")
+    try:
+        distribution = generate_manifest.engine_distribution(runtime)
+    except generate_manifest.ManifestError as error:
+        raise CandidatePolicyError(str(error)) from error
+    if distribution["kind"] == "oci-container":
+        reference = distribution.get("reference")
+        immutable_id = distribution.get("immutable_id")
+        if OFFICIAL_ENGINE_RE.fullmatch(str(reference)) is None:
+            raise CandidatePolicyError(
+                "runtime must pin an official Engine OCI manifest digest"
+            )
+        if SHA256_RE.fullmatch(str(immutable_id)) is None:
+            raise CandidatePolicyError(
+                "runtime must pin an Engine configuration digest"
+            )
+        payload_id = distribution.get("payload_id")
+        if payload_id is not None and SHA256_RE.fullmatch(str(payload_id)) is None:
+            raise CandidatePolicyError("runtime Engine payload identity is invalid")
+        if mode == "build-native-engine":
+            raise CandidatePolicyError("OCI candidate cannot use build-native-engine")
+    elif mode != "build-native-engine":
+        raise CandidatePolicyError(
+            "native Engine candidate must use build-native-engine"
+        )
+    else:
+        reference = (
+            distribution.get("archive", {}).get("url")
+            if isinstance(distribution.get("archive"), Mapping)
+            else distribution.get("bundle_id")
+            or distribution.get("python", {}).get("archive", {}).get("url")
+        )
+        immutable_id = distribution.get("payload_id")
     protocol = engine.get("protocol")
     if not isinstance(protocol, dict) or protocol.get("version") != 2:
         raise CandidatePolicyError("runtime must use Engine protocol 2")
@@ -361,6 +401,19 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
                     f"build-engine candidate is missing {path.relative_to(directory)}"
                 )
         _dockerfile_bases(directory / "image" / "Dockerfile")
+    elif mode == "build-native-engine":
+        for path in (
+            directory / "adapter" / "engine-adapter",
+            directory / "LICENSE",
+        ):
+            if path.is_symlink() or not path.is_file():
+                raise CandidatePolicyError(
+                    f"build-native-engine candidate is missing {path.relative_to(directory)}"
+                )
+        if (directory / "image" / "Dockerfile").exists():
+            raise CandidatePolicyError(
+                "build-native-engine candidate cannot contain image/Dockerfile"
+            )
 
     paths = _candidate_files(root, candidate)
     if len(paths) > MAX_CANDIDATE_FILES:
@@ -448,7 +501,10 @@ def main() -> int:
     parser.add_argument("--base")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--candidate")
-    parser.add_argument("--mode", choices=("reuse-engine", "build-engine"))
+    parser.add_argument(
+        "--mode",
+        choices=("reuse-engine", "build-engine", "build-native-engine"),
+    )
     parser.add_argument("--output", type=pathlib.Path)
     parser.add_argument("--github-output", type=pathlib.Path)
     arguments = parser.parse_args()

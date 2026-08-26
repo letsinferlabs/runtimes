@@ -118,11 +118,13 @@ jobs:
             source=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source"])' "$plan")
             config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$plan")
             python3 tools/oci_layout.py verify --reference "$source" --config-digest "$config"
-            engine=$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1]))["engine"]["oci"]; print(value["reference"]+"\t"+value["immutable_id"])' "$candidate/runtime.json")
-            IFS=$'\t' read -r engine_reference engine_config <<< "$engine"
-            platform=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target"]["platform"])' "$candidate/runtime.json")
-            python3 tools/oci_layout.py verify --reference "$engine_reference" \
-              --config-digest "$engine_config" --platform "$platform"
+            engine=$(python3 -c 'import json,sys; engine=json.load(open(sys.argv[1]))["engine"]; value=engine.get("distribution", engine.get("oci")); kind=value.get("kind", "oci-container"); print(kind+"\t"+str(value.get("reference", ""))+"\t"+str(value.get("immutable_id", "")))' "$candidate/runtime.json")
+            IFS=$'\t' read -r engine_kind engine_reference engine_config <<< "$engine"
+            if test "$engine_kind" = oci-container; then
+              platform=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target"]["platform"])' "$candidate/runtime.json")
+              python3 tools/oci_layout.py verify --reference "$engine_reference" \
+                --config-digest "$engine_config" --platform "$platform"
+            fi
           done
       - name: Sign catalog and revocation ledger
         env:
