@@ -6,7 +6,7 @@ and one hardware target. Let's Infer core remains engine- and model-agnostic.
 
 ## Features
 
-- **Install by model name** — `letsinfer install qwen3.8-27b` resolves the best
+- **Install by model name** — `letsinfer model install qwen3.8-27b` resolves the best
   qualified candidate for your hardware; users never type an engine or target
   path.
 - **Exact model provenance** — every candidate links its Hugging Face model
@@ -60,7 +60,7 @@ structured verifiers, score, and consensus digest; it is never hand-edited.
 
 Every candidate README begins with a link to
 [Let's Infer](https://letsinfer.ai/), the canonical installer command, and
-`letsinfer install LOGICAL_MODEL` derived from `runtime.json`. Add the block
+`letsinfer model install LOGICAL_MODEL` derived from `runtime.json`. Add the block
 without replacing an existing README:
 
 ```bash
@@ -75,7 +75,7 @@ candidate is changed.
 `release.json` declares one or more structured GitHub authors and the SPDX
 license. It begins with `provenance: null`; qualification automation owns the
 eventual PR/execution/consensus provenance. Those identities are versioned with
-every catalog release and shown by `letsinfer list`. `runtime.json` declares:
+every catalog release and shown by `letsinfer model list`. `runtime.json` declares:
 
 - logical model alias;
 - exact `hf://owner/repository` identity and immutable 40-hex revision;
@@ -219,7 +219,7 @@ continue through ordinary validation and review.
 After a runtime PR is labeled `benchmark-ready`, independent users run:
 
 ```bash
-letsinfer benchmark verify https://github.com/letsinferlabs/runtimes/pull/123
+letsinfer benchmark verification run https://github.com/letsinferlabs/runtimes/pull/123
 ```
 
 Let's Infer runs a paired baseline/candidate benchmark, restores the verifier's
@@ -316,7 +316,7 @@ migration fail; ordinary releases still require fresh community consensus.
 Install the model you want to run:
 
 ```bash
-letsinfer install qwen3.8-27b
+letsinfer model install qwen3.8-27b
 ```
 
 Let’s Infer detects your target and selects the best qualified candidate from
@@ -326,8 +326,8 @@ need to select an engine.
 Discover every qualified candidate compatible with the current machine:
 
 ```bash
-letsinfer list
-letsinfer list qwen3.8-27b --versions
+letsinfer model list
+letsinfer model list qwen3.8-27b --versions
 ```
 
 ## License

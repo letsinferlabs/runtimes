@@ -40,7 +40,7 @@ def launch_block(logical_model: str) -> str:
         "> Then install this model:\n"
         ">\n"
         f"> {fence}sh\n"
-        f"> letsinfer install {logical_model}\n"
+        f"> letsinfer model install {logical_model}\n"
         f"> {fence}\n"
     )
 

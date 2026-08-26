@@ -274,7 +274,7 @@ jobs:
           if test "$JOB_STATUS" = success; then
             conclusion=success
             title="Verifier bundle is ready"
-            summary="Verifiers can download the exact immutable runtime and Engine artifact through letsinfer benchmark verify."
+            summary="Verifiers can download the exact immutable runtime and Engine artifact through letsinfer benchmark verification run."
           fi
           gh api "repos/$GITHUB_REPOSITORY/check-runs" --method POST --input - <<JSON
           {"name":"runtime/verifier-bundle","head_sha":"$HEAD_SHA","status":"completed","conclusion":"$conclusion","output":{"title":"$title","summary":"$summary"}}
