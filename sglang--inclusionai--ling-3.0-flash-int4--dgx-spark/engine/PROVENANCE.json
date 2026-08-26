@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "base_image": "docker.io/lmsysorg/sglang@sha256:fc960102f1d2581b7dfa44885f6afcdfb107e84782e318cf33bbb2f219d0bd16",
+  "base_image_id": "sha256:b91418b57e3e30c945e9a3fdef0d799f9a0c91c30712b599bd6f755e334dbff5",
+  "base_sglang_version": "0.0.0.dev0",
+  "upstream_repository": "sgl-project/sglang",
+  "upstream_commit": "0e5e40d8f1460976cd7190ae479c210f0642c120",
+  "upstream_build": "https://github.com/sgl-project/sglang/actions/runs/32440673880",
+  "official_recipe": {
+    "repository": "inclusionAI/ling-cookbook",
+    "commit": "7873c82251e9994289789b3e3cde6e2c3e45db06"
+  },
+  "spark_recipe": {
+    "repository": "MiaAI-Lab/Ling-3.0-Flash-SGLang-DSpark-DGX-Spark",
+    "commit": "ca840cb8d032353e24648aeee06312b0938348f6"
+  },
+  "method": "verified-base-patch-overlay",
+  "runtime_fixes": [
+    "letsinfer-engine-protocol-v2-adapter",
+    "bound-tokenize-response-context-metadata",
+    "digest-pinned-arm64-base",
+    "immutable-target-and-dspark-revisions"
+  ]
+}
