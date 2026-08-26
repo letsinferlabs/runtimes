@@ -833,6 +833,65 @@ def _merge_exact(number: int, current: str, candidate: str, version: str) -> Non
         raise ShipitError("GitHub refused the exact-head merge after publication")
 
 
+def _update_behind_receipt_head(
+    *,
+    number: int,
+    current: str,
+    candidate: str,
+    root: pathlib.Path,
+    wait_seconds: int = 300,
+) -> str:
+    pull = _pull(number)
+    if pull.get("mergeable_state") != "behind":
+        return current
+    verification_bot.api(
+        f"repos/{REPOSITORY}/pulls/{number}/update-branch",
+        method="PUT",
+        value={"expected_head_sha": current},
+    )
+    deadline = time.monotonic() + wait_seconds
+    updated = current
+    while time.monotonic() < deadline:
+        latest = _pull(number)
+        head = latest.get("head")
+        value = head.get("sha") if isinstance(head, Mapping) else None
+        if isinstance(value, str) and value != current:
+            updated = value
+            break
+        time.sleep(5)
+    if updated == current:
+        raise ShipitError("GitHub did not update the published proposal head")
+    fetch = subprocess.run(
+        ["git", "fetch", "--no-tags", "origin", f"pull/{number}/head"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        raise ShipitError("cannot fetch the updated published proposal head")
+    fetched = subprocess.check_output(
+        ["git", "rev-parse", "FETCH_HEAD"], cwd=root, text=True
+    ).strip()
+    if fetched != updated:
+        raise ShipitError("fetched proposal head differs from GitHub")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", current, updated],
+        cwd=root,
+        check=False,
+    )
+    unchanged = subprocess.run(
+        ["git", "diff", "--quiet", current, updated, "--", candidate],
+        cwd=root,
+        check=False,
+    )
+    if ancestor.returncode != 0 or unchanged.returncode != 0:
+        raise ShipitError(
+            "updating the proposal changed its published runtime candidate"
+        )
+    return updated
+
+
 def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
     issue, comment = event.get("issue"), event.get("comment")
     if not isinstance(issue, Mapping) or not isinstance(comment, Mapping) or not isinstance(issue.get("pull_request"), Mapping):
@@ -869,7 +928,6 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
     bot_login = os.environ.get("LETSINFER_VERIFICATION_BOT_LOGIN", "")
     if not bot_login:
         raise ShipitError("verification bot login is not configured")
-    _bot_only_head(proposal=proposal, current=current, candidate=candidate, bot_login=bot_login)
     _approved_review(number, int(pr["user"]["id"]), required=not bypass)
     if bypass and (root / candidate / "benchmark.consensus.json").is_file():
         consensus = generate_manifest.read_object(
@@ -886,6 +944,13 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
             bot_login=bot_login,
         )
         if receipt is not None:
+            current = _update_behind_receipt_head(
+                number=number,
+                current=current,
+                candidate=candidate,
+                root=root,
+            )
+            require_checks(current, bypass=True, wait_seconds=1800)
             finalize_bypassed_community_check(current)
             _check(
                 CHECK_NAME,
@@ -901,6 +966,12 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
                 "candidate": candidate,
                 "head": current,
             }
+    _bot_only_head(
+        proposal=proposal,
+        current=current,
+        candidate=candidate,
+        bot_login=bot_login,
+    )
     _preflight_publication(
         number=number, candidate=candidate, root=root, bypass=bypass
     )

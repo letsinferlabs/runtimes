@@ -603,6 +603,45 @@ class PublicationPolicyTests(unittest.TestCase):
             )
         self.assertEqual(actual, receipt)
 
+    def test_receipt_resume_updates_behind_head_without_changing_candidate(self) -> None:
+        old = "a" * 40
+        new = "b" * 40
+        root = pathlib.Path("/tmp/proposal")
+        completed = subprocess.CompletedProcess(["git"], 0, "", "")
+        with (
+            mock.patch.object(
+                shipit,
+                "_pull",
+                side_effect=[
+                    {"mergeable_state": "behind"},
+                    {"head": {"sha": new}},
+                ],
+            ),
+            mock.patch.object(
+                verification_bot, "api", return_value={"message": "Updating"}
+            ) as api,
+            mock.patch.object(
+                shipit.subprocess, "run", side_effect=[completed, completed, completed]
+            ) as run,
+            mock.patch.object(
+                shipit.subprocess, "check_output", return_value=new + "\n"
+            ),
+        ):
+            actual = shipit._update_behind_receipt_head(
+                number=69,
+                current=old,
+                candidate="candidate",
+                root=root,
+                wait_seconds=1,
+            )
+        self.assertEqual(actual, new)
+        api.assert_called_once_with(
+            "repos/letsinferlabs/runtimes/pulls/69/update-branch",
+            method="PUT",
+            value={"expected_head_sha": old},
+        )
+        self.assertEqual(run.call_count, 3)
+
     def _waived_consensus(self, actor_id: int) -> tuple[dict, dict]:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
