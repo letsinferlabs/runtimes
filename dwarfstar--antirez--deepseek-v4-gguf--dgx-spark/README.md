@@ -1,3 +1,17 @@
+> **Run this model with [Let's Infer](https://letsinfer.ai/).**
+>
+> Install Let's Infer first:
+>
+> ```sh
+> curl -fsSL https://letsinfer.ai/install.sh | sh
+> ```
+>
+> Then install this model:
+>
+> ```sh
+> letsinfer install deepseek-v4-flash
+> ```
+
 # DeepSeek V4 Flash / DwarfStar / DGX Spark
 
 Run DeepSeek V4 Flash on one NVIDIA DGX Spark through Let's Infer's stable
