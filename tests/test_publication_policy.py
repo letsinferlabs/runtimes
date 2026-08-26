@@ -552,6 +552,38 @@ class PublicationPolicyTests(unittest.TestCase):
         ):
             generate_manifest.validate_consensus_binding(runtime, consensus)
 
+    def test_consensus_binds_normalized_engine_payload_when_present(self) -> None:
+        runtime, consensus = self._waived_consensus(10000001)
+        payload = "7" * 64
+        runtime["engine"]["oci"]["payload_id"] = "sha256:" + payload
+        subject = consensus["subject"]
+        subject.pop("engine_oci_manifest_digest")
+        subject["engine_payload_sha256"] = payload
+        consensus.pop("consensus_id")
+        consensus["consensus_id"] = hashlib.sha256(
+            generate_manifest.canonical_bytes(consensus)
+        ).hexdigest()
+        with mock.patch.dict(
+            os.environ,
+            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
+            clear=True,
+        ):
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+
+        subject["engine_payload_sha256"] = "8" * 64
+        consensus.pop("consensus_id")
+        consensus["consensus_id"] = hashlib.sha256(
+            generate_manifest.canonical_bytes(consensus)
+        ).hexdigest()
+        with mock.patch.dict(
+            os.environ,
+            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
+            clear=True,
+        ), self.assertRaisesRegex(
+            generate_manifest.ManifestError, "execution binding differs"
+        ):
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+
     def test_maintainer_bypass_accepts_zero_independent_verifiers(self) -> None:
         runtime, consensus = self._waived_consensus(10000001)
         consensus["qualification"]["independent_verifiers"] = 0
