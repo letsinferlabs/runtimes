@@ -1055,6 +1055,13 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
             )
             generate_manifest.validate_consensus_binding(runtime, consensus)
             _url, current = verification_bot.materialize(root, candidate, pr, consensus)
+            if allow_unscored_cutover:
+                current = _update_behind_receipt_head(
+                    number=number,
+                    current=current,
+                    candidate=candidate,
+                    root=root,
+                )
             _check(
                 verification_bot.CHECK_NAME,
                 current,
