@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "base_image": "docker.io/vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967",
+  "base_image_id": "sha256:2c211a1273b48e8929f893b267aeb1509e6b84654cdbde1bad56d79e3964224d",
+  "base_vllm_version": "0.27.1",
+  "upstream_repository": "vllm-project/vllm",
+  "upstream_commit": "6e448d0ea9bf3d88d898b65449ca6dc2aec170ac",
+  "official_recipe": {
+    "repository": "NVIDIA-NeMo/Nemotron",
+    "commit": "e27b37133d652f72dbf631ff8bb487df45f8f7d1"
+  },
+  "method": "immutable-base-adapter-overlay",
+  "runtime_fixes": [
+    "letsinfer-engine-protocol-v2-adapter",
+    "marlin-atomic-add-for-small-n",
+    "triton-target-attention-full-graph",
+    "flashinfer-mamba-align-cache",
+    "seeded-mamba-stochastic-rounding",
+    "asynchronous-scheduling",
+    "digest-pinned-arm64-base",
+    "immutable-model-and-dspark-revisions"
+  ]
+}
