@@ -12,8 +12,9 @@
 - [ ] I did not commit model weights, OCI layers, archives, credentials,
       generated builds, caches, or benchmark output.
 - [ ] Local schema, unit, source audit, and deterministic pack checks pass.
-- [ ] For a changed Engine, the locally calculated future production digest is
-      pinned; CI will independently rebuild it before verification.
+- [ ] For a changed Engine, `tools/build_engine.py --pin` recorded the
+      canonical manifest, configuration, and execution-payload identities; CI
+      will build once and compare them without modifying this branch.
 
 After the trusted verifier bundle is ready, maintainers perform security and
 supply-chain review before applying `benchmark-ready`. Do not request `/shipit`

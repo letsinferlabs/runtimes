@@ -436,6 +436,69 @@ def _download_artifact(
     return root, bundle
 
 
+def _existing_model_has_release(
+    root: pathlib.Path, runtime: Mapping[str, Any]
+) -> bool:
+    manifest = generate_manifest.read_object(root / "manifest.json")
+    model = manifest.get("models", {}).get(runtime["logical_model"])
+    target = (
+        model.get("targets", {}).get(runtime["target"]["id"])
+        if isinstance(model, Mapping)
+        else None
+    )
+    existing = (
+        target.get("candidates", {}) if isinstance(target, Mapping) else {}
+    )
+    return any(
+        isinstance(record, Mapping) and bool(record.get("releases"))
+        for record in existing.values()
+    )
+
+
+def _cheap_verifier_ids(number: int) -> set[int]:
+    comments = verification_bot._flatten_pages(
+        verification_bot.api(
+            f"repos/{REPOSITORY}/issues/{number}/comments?per_page=100"
+        )
+    )
+    return {
+        int(user["id"])
+        for item in comments
+        if isinstance(item, Mapping)
+        and verification_bot.SUBMISSION_MARKER
+        in str(item.get("body", ""))
+        and isinstance((user := item.get("user")), Mapping)
+        and isinstance(user.get("id"), int)
+        and not isinstance(user["id"], bool)
+        and user["id"] > 0
+    }
+
+
+def _preflight_publication(
+    *, number: int, candidate: str, root: pathlib.Path, bypass: bool
+) -> None:
+    """Reject missing evidence before retrieving any verifier artifact."""
+
+    runtime = generate_manifest.read_object(root / candidate / "runtime.json")
+    verifier_ids = _cheap_verifier_ids(number)
+    if not bypass and len(verifier_ids) < community_verification.POLICY[
+        "required_verifiers"
+    ]:
+        raise ShipitError(
+            "independent verification is incomplete; verifier artifact was not downloaded"
+        )
+    if (
+        bypass
+        and not verifier_ids
+        and not (root / candidate / "benchmark.json").is_file()
+        and _existing_model_has_release(root, runtime)
+    ):
+        raise ShipitError(
+            "maintainer bypass requires benchmark.json for an existing model; "
+            "verifier artifact was not downloaded"
+        )
+
+
 def _bypass_consensus(
     *,
     pr: Mapping[str, Any],
@@ -482,26 +545,10 @@ def _bypass_consensus(
             }
             if "ttft_cache" in benchmark:
                 author_result["ttft_cache"] = benchmark["ttft_cache"]
-        else:
-            manifest = generate_manifest.read_object(root / "manifest.json")
-            model = manifest.get("models", {}).get(runtime["logical_model"])
-            target = (
-                model.get("targets", {}).get(runtime["target"]["id"])
-                if isinstance(model, Mapping)
-                else None
+        elif _existing_model_has_release(root, runtime):
+            raise ShipitError(
+                "maintainer bypass requires benchmark.json for an existing model"
             )
-            existing = (
-                target.get("candidates", {})
-                if isinstance(target, Mapping)
-                else {}
-            )
-            if any(
-                isinstance(record, Mapping) and bool(record.get("releases"))
-                for record in existing.values()
-            ):
-                raise ShipitError(
-                    "maintainer bypass requires benchmark.json for an existing model"
-                )
         consensus = {
             "schema_version": community_verification.SCHEMA_VERSION,
             "candidate_id": candidate,
@@ -669,6 +716,9 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
         raise ShipitError("verification bot login is not configured")
     _bot_only_head(proposal=proposal, current=current, candidate=candidate, bot_login=bot_login)
     _approved_review(number, int(pr["user"]["id"]), required=not bypass)
+    _preflight_publication(
+        number=number, candidate=candidate, root=root, bypass=bypass
+    )
     with tempfile.TemporaryDirectory(prefix="letsinfer-shipit-") as temporary:
         artifact_root, bundle = _download_artifact(
             name=f"verification-bundle-pr-{number}-{proposal}",

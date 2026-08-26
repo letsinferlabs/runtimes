@@ -28,11 +28,15 @@ def readable_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
-def update(runtime: dict[str, Any], reference: str, immutable_id: str) -> bool:
+def update(
+    runtime: dict[str, Any], reference: str, immutable_id: str, payload_id: str
+) -> tuple[bool, bool]:
     if OCI_RE.fullmatch(reference) is None:
         raise PinError("Engine OCI reference must be digest-pinned")
     if IMAGE_ID_RE.fullmatch(immutable_id) is None:
         raise PinError("Engine OCI immutable ID must be a SHA-256 image ID")
+    if IMAGE_ID_RE.fullmatch(payload_id) is None:
+        raise PinError("Engine payload ID must be a SHA-256 execution payload")
     engine = runtime.get("engine")
     benchmark = runtime.get("benchmark")
     if not all(isinstance(item, dict) for item in (engine, benchmark)):
@@ -44,22 +48,35 @@ def update(runtime: dict[str, Any], reference: str, immutable_id: str) -> bool:
     oci = engine.get("oci")
     if not isinstance(oci, dict):
         raise PinError("runtime Engine OCI contract is missing")
-    engine_image_sha256 = immutable_id.removeprefix("sha256:")
+    payload_sha256 = payload_id.removeprefix("sha256:")
+    prior_payload = oci.get("payload_id")
+    execution_changed = (
+        prior_payload != payload_id
+        if prior_payload is not None
+        else (
+            oci.get("reference") != reference
+            or oci.get("immutable_id") != immutable_id
+        )
+    )
     changed = (
         oci.get("reference") != reference
         or oci.get("immutable_id") != immutable_id
-        or tokenizer.get("engine_image_sha256") != engine_image_sha256
+        or oci.get("payload_id") != payload_id
+        or tokenizer.get("engine_payload_sha256") != payload_sha256
+        or tokenizer.get("engine_image_sha256") is not None
     )
     oci["reference"] = reference
     oci["immutable_id"] = immutable_id
-    tokenizer["engine_image_sha256"] = engine_image_sha256
-    return changed
+    oci["payload_id"] = payload_id
+    tokenizer.pop("engine_image_sha256", None)
+    tokenizer["engine_payload_sha256"] = payload_sha256
+    return changed, execution_changed
 
 
 def update_bytes(
-    content: bytes, reference: str, immutable_id: str
-) -> tuple[dict[str, Any], bool, bytes]:
-    """Update only the three owned JSON string values, preserving other bytes."""
+    content: bytes, reference: str, immutable_id: str, payload_id: str
+) -> tuple[dict[str, Any], bool, bool, bytes]:
+    """Update only Engine identity fields and report execution changes."""
     try:
         before = json.loads(content.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -67,41 +84,20 @@ def update_bytes(
     if not isinstance(before, dict):
         raise PinError("runtime must contain one JSON object")
     after = copy.deepcopy(before)
-    changed = update(after, reference, immutable_id)
+    changed, execution_changed = update(after, reference, immutable_id, payload_id)
     if not changed:
-        return after, False, content
+        return after, False, False, content
 
-    paths = (
-        ("engine", "oci", "reference"),
-        ("engine", "oci", "immutable_id"),
-        ("benchmark", "contract", "tokenizer", "engine_image_sha256"),
-    )
-    pinned = content
-    for path in paths:
-        old: Any = before
-        new: Any = after
-        for key in path:
-            old = old[key]
-            new = new[key]
-        if old == new:
-            continue
-        if not isinstance(old, str) or not isinstance(new, str):
-            raise PinError("Engine pin fields must contain JSON strings")
-        old_token = json.dumps(old, ensure_ascii=False).encode("utf-8")
-        new_token = json.dumps(new, ensure_ascii=False).encode("utf-8")
-        if pinned.count(old_token) != 1:
-            raise PinError(
-                f"Engine pin field {'.'.join(path)} is not byte-unique"
-            )
-        pinned = pinned.replace(old_token, new_token, 1)
-
+    # Reformat only this small declarative file. Adding payload identity is a
+    # schema change, so byte-token substitution is no longer a sound primitive.
+    pinned = readable_bytes(after)
     try:
         reconstructed = json.loads(pinned)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise PinError("byte-preserving Engine pin produced invalid JSON") from error
+        raise PinError("Engine pin produced invalid JSON") from error
     if reconstructed != after:
-        raise PinError("byte-preserving Engine pin changed unrelated JSON content")
-    return after, True, pinned
+        raise PinError("Engine pin changed unrelated JSON content")
+    return after, True, execution_changed, pinned
 
 
 def write_atomic(path: pathlib.Path, data: bytes) -> None:
@@ -120,20 +116,20 @@ def write_atomic(path: pathlib.Path, data: bytes) -> None:
 
 
 def pin_runtime(
-    path: pathlib.Path, reference: str, immutable_id: str
+    path: pathlib.Path, reference: str, immutable_id: str, payload_id: str
 ) -> tuple[dict[str, Any], bool]:
     path = path.resolve(strict=True)
     if path.is_symlink() or not path.is_file() or path.name != "runtime.json":
         raise PinError("runtime must be a regular runtime.json")
     try:
-        runtime, changed, pinned = update_bytes(
-            path.read_bytes(), reference, immutable_id
+        runtime, changed, execution_changed, pinned = update_bytes(
+            path.read_bytes(), reference, immutable_id, payload_id
         )
     except OSError as error:
         raise PinError(f"cannot read runtime: {error}") from error
     if changed:
         write_atomic(path, pinned)
-    if changed:
+    if execution_changed:
         for name in ("benchmark.json", "benchmark.consensus.json"):
             evidence = path.parent / name
             if evidence.is_symlink():
@@ -153,9 +149,13 @@ def main() -> int:
     parser.add_argument("--runtime", type=pathlib.Path, required=True)
     parser.add_argument("--reference", required=True)
     parser.add_argument("--immutable-id", required=True)
+    parser.add_argument("--payload-id", required=True)
     arguments = parser.parse_args()
     runtime, changed = pin_runtime(
-        arguments.runtime, arguments.reference, arguments.immutable_id
+        arguments.runtime,
+        arguments.reference,
+        arguments.immutable_id,
+        arguments.payload_id,
     )
     print(f"PINNED changed={str(changed).lower()} candidate={runtime.get('id')}")
     return 0

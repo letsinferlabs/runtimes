@@ -339,10 +339,13 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
     oci = engine.get("oci") if isinstance(engine, dict) else None
     reference = oci.get("reference") if isinstance(oci, dict) else None
     immutable_id = oci.get("immutable_id") if isinstance(oci, dict) else None
+    payload_id = oci.get("payload_id") if isinstance(oci, dict) else None
     if OFFICIAL_ENGINE_RE.fullmatch(str(reference)) is None:
         raise CandidatePolicyError("runtime must pin an official Engine OCI manifest digest")
     if SHA256_RE.fullmatch(str(immutable_id)) is None:
         raise CandidatePolicyError("runtime must pin an Engine configuration digest")
+    if payload_id is not None and SHA256_RE.fullmatch(str(payload_id)) is None:
+        raise CandidatePolicyError("runtime Engine payload identity is invalid")
     protocol = engine.get("protocol")
     if not isinstance(protocol, dict) or protocol.get("version") != 2:
         raise CandidatePolicyError("runtime must use Engine protocol 2")
@@ -422,6 +425,10 @@ def audit_candidate(root: pathlib.Path, candidate: str, mode: str) -> dict[str, 
         "engine_source_sha256": engine_source_sha256(candidate, records),
         "engine_reference": reference,
         "engine_config_digest": immutable_id,
+        "engine_payload_digest": payload_id,
+        "engine_base_reference": (
+            oci.get("base") if isinstance(oci, dict) else None
+        ),
         "target_platform": runtime.get("target", {}).get("platform"),
     }
 
