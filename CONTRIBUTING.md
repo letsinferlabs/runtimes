@@ -33,17 +33,24 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 letsinfer pack <candidate> --output /tmp/runtime.letsinfer
 ```
 
-For `build-engine`, build the Dockerfile for the declared target and use the
-trusted OCI inspection tool to calculate the exact manifest/configuration pin
-before requesting verification. CI independently rebuilds it; a mismatch
-produces a reviewable pin patch and no verifier artifact.
+For `build-engine`, use the same canonical builder CI uses:
+
+```bash
+python3 tools/build_engine.py --candidate <candidate> --output /tmp/engine.oci.tar --pin
+```
+
+It pins the transport manifest/configuration and stable execution payload in
+`runtime.json`. CI builds once with the same pinned BuildKit contract and
+fails with a direct correction message if the authored identity differs. CI
+never commits generated pins to your branch.
 
 ## Pull request lifecycle
 
 1. Open one PR changing one candidate.
 2. A no-code PR sentinel triggers a read-only, secretless default-branch
-   builder for the exact head. The trusted builder produces raw runtime/Engine
-   outputs and retains one verified OCI layout.
+   builder for the exact head. The canonical builder produces one Engine
+   output, computes its normalized payload identity, and retains only the
+   local overlay layers plus an immutable public-base reference.
 3. A separate trusted default-branch finalizer reclassifies, re-audits,
    re-packs, creates SBOM/provenance, and publishes the exact verifier artifact
    without executing proposal code.

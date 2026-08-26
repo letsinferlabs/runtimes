@@ -33,9 +33,10 @@ RECOMMENDATION_POLICY = {
     "tie_breakers": ["score", "version", "candidate"],
 }
 CONTRACT_MIGRATION_METHOD = "runtime-contract-migration-v1"
-BENCHMARK_SCHEMA_VERSIONS = {4, 5, 6}
-SHARED_BENCHMARK_SCHEMA_VERSIONS = {5, 6}
+BENCHMARK_SCHEMA_VERSIONS = {4, 5, 6, 7}
+SHARED_BENCHMARK_SCHEMA_VERSIONS = {5, 6, 7}
 TTFT_CACHE_BENCHMARK_SCHEMA_VERSION = 6
+EXECUTION_PAYLOAD_BENCHMARK_SCHEMA_VERSION = 7
 REVOCATION_REASON_CODES = {
     "compromised-verifier-key",
     "fraudulent-evidence",
@@ -265,7 +266,9 @@ def benchmark_score(record: dict[str, Any]) -> float:
     return round(math.exp(sum(math.log(value) for value in values) / len(values)), 9)
 
 
-def benchmark_subject(runtime: dict[str, Any]) -> dict[str, Any]:
+def benchmark_subject(
+    runtime: dict[str, Any], *, measured_engine_oci: str | None = None
+) -> dict[str, Any]:
     primary_name = runtime.get("model", {}).get("artifact")
     primary = next(
         (
@@ -280,12 +283,22 @@ def benchmark_subject(runtime: dict[str, Any]) -> dict[str, Any]:
     target = runtime.get("target")
     if not isinstance(target, dict):
         raise ManifestError(f"runtime target is invalid: {runtime.get('id')}")
+    oci = runtime.get("engine", {}).get("oci", {})
+    payload_id = oci.get("payload_id") if isinstance(oci, dict) else None
+    engine_identity = (
+        {
+            "engine_payload_sha256": str(payload_id).removeprefix("sha256:"),
+            "measured_engine_oci": measured_engine_oci or oci.get("reference"),
+        }
+        if isinstance(payload_id, str)
+        else {"engine_oci": oci.get("reference")}
+    )
     return {
         "candidate_id": runtime.get("id"),
         "runtime_version": runtime.get("version"),
         "model_uri": runtime.get("model", {}).get("uri"),
         "model_revision": primary.get("revision"),
-        "engine_oci": runtime.get("engine", {}).get("oci", {}).get("reference"),
+        **engine_identity,
         "target": target.get("id"),
         "target_contract_sha256": hashlib.sha256(canonical_bytes(target)).hexdigest(),
     }
@@ -297,8 +310,17 @@ def validate_benchmark_binding(
     schema_version = record.get("schema_version")
     if schema_version not in BENCHMARK_SCHEMA_VERSIONS:
         raise ManifestError(f"benchmark schema is unsupported: {runtime['id']}")
-    subject = benchmark_subject(runtime)
-    if record.get("subject") != subject:
+    record_subject = record.get("subject")
+    measured_engine_oci = (
+        record_subject.get("measured_engine_oci")
+        if schema_version == EXECUTION_PAYLOAD_BENCHMARK_SCHEMA_VERSION
+        and isinstance(record_subject, dict)
+        else None
+    )
+    subject = benchmark_subject(
+        runtime, measured_engine_oci=measured_engine_oci
+    )
+    if record_subject != subject:
         raise ManifestError(f"benchmark subject differs from runtime: {runtime['id']}")
     contract = runtime["benchmark"]["contract"]
     contract_sha = hashlib.sha256(canonical_bytes(contract)).hexdigest()

@@ -122,16 +122,14 @@ jobs:
           set -euo pipefail
           python3 tools/engine_reuse.py verify-restored --root . \
             --raw "$RUNNER_TEMP/raw"
-      - name: Validate metadata and prepare a pin patch when needed
-        id: pin
+      - name: Validate metadata and exact authored Engine identity
+        id: identity
         env:
           HEAD_SHA: ${{ steps.event.outputs.head }}
           BASE_SHA: ${{ steps.event.outputs.base }}
           BUILD_WORKFLOW_SHA: ${{ steps.event.outputs.workflow_sha }}
           BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
           PR_NUMBER: ${{ steps.event.outputs.number }}
-          FINALIZER_WORKFLOW_SHA: ${{ github.workflow_sha }}
-          RAW_ARTIFACT_DIGEST: ${{ steps.event.outputs.raw_digest }}
           PYTHONDONTWRITEBYTECODE: "1"
         working-directory: trusted
         run: |
@@ -184,63 +182,21 @@ jobs:
             config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$RUNNER_TEMP/engine-plan.json")
             current_reference=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["reference"])' "../proposal/$candidate/runtime.json")
             current_config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["immutable_id"])' "../proposal/$candidate/runtime.json")
-            if test "$reference" != "$current_reference" || test "$config" != "$current_config"; then
-              mkdir "$RUNNER_TEMP/pin"
-              cp "../proposal/$candidate/runtime.json" "$RUNNER_TEMP/runtime-before.json"
-              runtime_blob=$(git -C ../proposal rev-parse "$HEAD_SHA:$candidate/runtime.json")
-              [[ "$runtime_blob" =~ ^[0-9a-f]{40}$ ]]
-              python3 tools/pin_engine.py --runtime "../proposal/$candidate/runtime.json" \
-                --reference "$reference" --immutable-id "$config"
-              git -C ../proposal diff --binary -- "$candidate/runtime.json" > "$RUNNER_TEMP/pin/engine-pin.patch"
-              python3 tools/engine_pin_updater.py request \
-                --before "$RUNNER_TEMP/runtime-before.json" \
-                --after "../proposal/$candidate/runtime.json" \
-                --patch "$RUNNER_TEMP/pin/engine-pin.patch" \
-                --pull "$RUNNER_TEMP/pull.json" \
-                --build "$RUNNER_TEMP/raw/build.json" \
-                --audit "$RUNNER_TEMP/raw/candidate-audit.json" \
-                --repositories "$RUNNER_TEMP/repositories.json" \
-                --engine-plan "$RUNNER_TEMP/engine-plan.json" \
-                --runtime-blob-sha-before "$runtime_blob" \
-                --finalizer-run-id "$GITHUB_RUN_ID" \
-                --finalizer-workflow-sha "$FINALIZER_WORKFLOW_SHA" \
-                --raw-artifact-digest "$RAW_ARTIFACT_DIGEST" \
-                --output "$RUNNER_TEMP/pin/engine-pin-request.json"
-              echo "changed=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "changed=false" >> "$GITHUB_OUTPUT"
+            payload=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("payload_digest") or "")' "$RUNNER_TEMP/engine-plan.json")
+            current_payload=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"].get("payload_id") or "")' "../proposal/$candidate/runtime.json")
+            if test "$reference" != "$current_reference" || test "$config" != "$current_config" || { test -n "$current_payload" && test "$payload" != "$current_payload"; }; then
+              echo "Engine identity differs from the canonical trusted build." >&2
+              echo "Run the canonical Engine build locally, update runtime.json, and push once." >&2
+              exit 1
             fi
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Upload deterministic Engine pin patch
-        if: steps.pin.outputs.changed == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: engine-pin-pr-${{ steps.event.outputs.number }}-${{ steps.event.outputs.head }}
-          path: ${{ runner.temp }}/pin
-          if-no-files-found: error
-          retention-days: 30
-      - name: Attest deterministic Engine pin request
-        if: steps.pin.outputs.changed == 'true'
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: ${{ runner.temp }}/pin/*
-      - name: Require the production Engine pin before verification
-        if: steps.pin.outputs.changed == 'true'
-        run: |
-          echo "The trusted Engine pin updater will process this attested request." >&2
-          exit 1
       - name: Repack exact proposal with trusted core
-        if: steps.pin.outputs.changed != 'true'
         env:
-          CANDIDATE: ${{ steps.pin.outputs.candidate }}
+          CANDIDATE: ${{ steps.identity.outputs.candidate }}
         run: |
           set -euo pipefail
-          core-contract/bin/letsinfer pack "proposal/$CANDIDATE" \
-            --output "$RUNNER_TEMP/raw/runtime-trusted.letsinfer"
+          core-contract/bin/letsinfer pack "proposal/$CANDIDATE" --output "$RUNNER_TEMP/raw/runtime-trusted.letsinfer"
       - name: Finalize the verifier bundle without executing proposal code
-        if: steps.pin.outputs.changed != 'true'
         env:
           FINALIZER_WORKFLOW_SHA: ${{ github.workflow_sha }}
           LETSINFER_CORE_ROOT: ${{ github.workspace }}/core-contract
@@ -250,17 +206,16 @@ jobs:
           set -euo pipefail
           tree=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["candidate_tree_sha256"])' "$RUNNER_TEMP/raw/candidate-audit.json")
           python3 tools/verifier_bundle.py finalize --root ../proposal --raw "$RUNNER_TEMP/raw" \
-            --output "$RUNNER_TEMP/bundle" --candidate "${{ steps.pin.outputs.candidate }}" \
-            --mode "${{ steps.pin.outputs.mode }}" --pull-request "${{ steps.event.outputs.number }}" \
+            --output "$RUNNER_TEMP/bundle" --candidate "${{ steps.identity.outputs.candidate }}" \
+            --mode "${{ steps.identity.outputs.mode }}" --pull-request "${{ steps.event.outputs.number }}" \
             --proposal-head-sha "${{ steps.event.outputs.head }}" --proposal-tree-sha "$tree" \
-            --proposal-base-sha "${{ steps.pin.outputs.base }}" \
+            --proposal-base-sha "${{ steps.identity.outputs.base }}" \
             --build-run-id "${{ github.event.workflow_run.id }}" \
             --build-workflow-sha "${{ steps.event.outputs.workflow_sha }}" \
             --finalizer-run-id "$GITHUB_RUN_ID" \
             --finalizer-workflow-sha "$FINALIZER_WORKFLOW_SHA"
       - name: Upload immutable verifier bundle
         id: bundle
-        if: steps.pin.outputs.changed != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verification-bundle-pr-${{ steps.event.outputs.number }}-${{ steps.event.outputs.head }}
@@ -269,14 +224,11 @@ jobs:
           retention-days: 30
           compression-level: 0
       - name: Attest verifier bundle payloads
-        if: steps.pin.outputs.changed != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/bundle/*
       - name: Create reusable unchanged-Engine proof
-        if: >-
-          steps.pin.outputs.changed != 'true' &&
-          steps.pin.outputs.mode == 'build-engine'
+        if: steps.identity.outputs.mode == 'build-engine'
         env:
           FINALIZER_WORKFLOW_SHA: ${{ github.workflow_sha }}
           PYTHONDONTWRITEBYTECODE: "1"
@@ -293,19 +245,15 @@ jobs:
             --finalizer-run-id "$GITHUB_RUN_ID" \
             --finalizer-workflow-sha "$FINALIZER_WORKFLOW_SHA"
       - name: Upload reusable unchanged-Engine proof
-        if: >-
-          steps.pin.outputs.changed != 'true' &&
-          steps.pin.outputs.mode == 'build-engine'
+        if: steps.identity.outputs.mode == 'build-engine'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: engine-proof-${{ steps.pin.outputs.engine_source_sha256 }}
+          name: engine-proof-${{ steps.identity.outputs.engine_source_sha256 }}
           path: ${{ runner.temp }}/engine-proof
           if-no-files-found: error
           retention-days: 30
       - name: Attest reusable unchanged-Engine proof
-        if: >-
-          steps.pin.outputs.changed != 'true' &&
-          steps.pin.outputs.mode == 'build-engine'
+        if: steps.identity.outputs.mode == 'build-engine'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/engine-proof/*
@@ -314,10 +262,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ steps.event.outputs.head }}
-          PIN_CHANGED: ${{ steps.pin.outputs.changed }}
-          SAME_REPO: ${{ steps.event.outputs.same_repo }}
-          FINALIZER_RUN_ID: ${{ github.run_id }}
-          PR_NUMBER: ${{ steps.event.outputs.number }}
           JOB_STATUS: ${{ job.status }}
         working-directory: trusted
         run: |
@@ -325,15 +269,7 @@ jobs:
           conclusion=failure
           title="Verifier bundle failed"
           summary="The trusted finalizer rejected this proposal or its build output."
-          if test "$PIN_CHANGED" = true; then
-            if test "$SAME_REPO" = true; then
-              title="Trusted Engine pin update queued"
-              summary="The attested deterministic pin request is queued for the repository-scoped updater; its bot commit will trigger exact-head verification."
-            else
-              title="Deterministic Engine pin requires fork update"
-              summary="Download engine-pin-pr-$PR_NUMBER-$HEAD_SHA from finalizer run $FINALIZER_RUN_ID, apply engine-pin.patch, and push the fork branch. No base-repository credential is sent to forks."
-            fi
-          elif test "$JOB_STATUS" = success; then
+          if test "$JOB_STATUS" = success; then
             conclusion=success
             title="Verifier bundle is ready"
             summary="Verifiers can download the exact immutable runtime and Engine artifact through letsinfer benchmark verify."

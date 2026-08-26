@@ -54,6 +54,8 @@ class PublicationPolicyTests(unittest.TestCase):
                 "ghcr.io/letsinferlabs/engine-images@sha256:" + "3" * 64
             ),
             "engine_config_digest": "sha256:" + "4" * 64,
+            "engine_payload_digest": None,
+            "engine_base_reference": None,
             "target_platform": "linux/arm64",
         }
         with tempfile.TemporaryDirectory() as temporary:
@@ -72,6 +74,8 @@ class PublicationPolicyTests(unittest.TestCase):
                 "candidate_audit_sha256": "5" * 64,
                 "engine_reference": audit["engine_reference"],
                 "engine_config_digest": audit["engine_config_digest"],
+                "engine_payload_digest": audit.get("engine_payload_digest"),
+                "engine_base_reference": audit.get("engine_base_reference"),
                 "target_platform": audit["target_platform"],
                 "engine_archive_sha256": "6" * 64,
                 "engine_archive_bytes": 1,
@@ -147,6 +151,8 @@ class PublicationPolicyTests(unittest.TestCase):
                 "candidate_audit_sha256": "5" * 64,
                 "engine_reference": audit["engine_reference"],
                 "engine_config_digest": audit["engine_config_digest"],
+                "engine_payload_digest": audit.get("engine_payload_digest"),
+                "engine_base_reference": audit.get("engine_base_reference"),
                 "target_platform": audit["target_platform"],
                 "engine_archive_sha256": engine_reuse.sha256_file(
                     raw / "engine.oci.tar"
@@ -582,6 +588,37 @@ class PublicationPolicyTests(unittest.TestCase):
             generate_manifest.ManifestError, "bypass score is invalid"
         ):
             generate_manifest.validate_consensus_binding(runtime, consensus)
+
+    def test_publication_preflight_rejects_missing_evidence_before_artifacts(self) -> None:
+        candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            candidate_root = root / candidate
+            candidate_root.mkdir()
+            shutil.copy2(ROOT / candidate / "runtime.json", candidate_root)
+            shutil.copy2(ROOT / "manifest.json", root)
+            with mock.patch.object(
+                shipit, "_cheap_verifier_ids", return_value=set()
+            ), self.assertRaisesRegex(
+                shipit.ShipitError, "verifier artifact was not downloaded"
+            ):
+                shipit._preflight_publication(
+                    number=31,
+                    candidate=candidate,
+                    root=root,
+                    bypass=True,
+                )
+            with mock.patch.object(
+                shipit, "_cheap_verifier_ids", return_value={10000001}
+            ), self.assertRaisesRegex(
+                shipit.ShipitError, "verifier artifact was not downloaded"
+            ):
+                shipit._preflight_publication(
+                    number=31,
+                    candidate=candidate,
+                    root=root,
+                    bypass=False,
+                )
 
     def test_maintainer_bypass_materializes_without_verifier_comments(self) -> None:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"

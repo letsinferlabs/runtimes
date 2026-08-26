@@ -122,6 +122,44 @@ class OciLayoutTests(unittest.TestCase):
             diff_ids=tuple(config["rootfs"]["diff_ids"]),
         )
 
+    def test_execution_payload_ignores_packaging_metadata_only(self) -> None:
+        diff_ids = ("sha256:" + "1" * 64,)
+        first = {
+            "architecture": "arm64",
+            "os": "linux",
+            "created": "1970-01-01T00:00:00Z",
+            "history": [{"created_by": "builder-a"}],
+            "config": {"Env": ["A=1"], "Cmd": ["/engine"]},
+        }
+        second = {
+            **first,
+            "created": "2030-01-01T00:00:00Z",
+            "history": [{"created_by": "builder-b"}],
+        }
+        identity = oci_layout.execution_payload_digest(
+            "linux/arm64", first, diff_ids
+        )
+        self.assertEqual(
+            identity,
+            oci_layout.execution_payload_digest(
+                "linux/arm64", second, diff_ids
+            ),
+        )
+        changed_config = json.loads(json.dumps(first))
+        changed_config["config"]["Env"] = ["A=2"]
+        self.assertNotEqual(
+            identity,
+            oci_layout.execution_payload_digest(
+                "linux/arm64", changed_config, diff_ids
+            ),
+        )
+        self.assertNotEqual(
+            identity,
+            oci_layout.execution_payload_digest(
+                "linux/arm64", first, ("sha256:" + "2" * 64,)
+            ),
+        )
+
     def test_exact_platform_layout_and_docker_archive_agree(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             oci, docker, manifest_digest, config_digest = self._archives(pathlib.Path(temporary))
