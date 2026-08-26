@@ -742,6 +742,97 @@ def _check(name: str, head: str, conclusion: str, summary: str) -> None:
     )
 
 
+def _existing_publication_receipt(
+    *,
+    number: int,
+    candidate: str,
+    current: str,
+    runtime: Mapping[str, Any],
+    release: Mapping[str, Any],
+    consensus: Mapping[str, Any],
+    bot_login: str,
+) -> dict[str, Any] | None:
+    comments = verification_bot.api(
+        f"repos/{REPOSITORY}/issues/{number}/comments?per_page=100",
+        paginate=True,
+    )
+    if not isinstance(comments, list):
+        raise ShipitError("publication comment response is invalid")
+    provenance = release.get("provenance")
+    subject = consensus.get("subject")
+    if not isinstance(provenance, Mapping) or not isinstance(subject, Mapping):
+        return None
+    expected_engine = runtime.get("engine")
+    expected_oci = expected_engine.get("oci") if isinstance(expected_engine, Mapping) else None
+    expected_engine_reference = (
+        expected_oci.get("reference") if isinstance(expected_oci, Mapping) else None
+    )
+    expected_runtime_digest = subject.get("runtime_oci_manifest_digest")
+    expected_execution = provenance.get("execution_sha256")
+    for comment in reversed(comments):
+        if not isinstance(comment, Mapping):
+            continue
+        user = comment.get("user")
+        body = comment.get("body")
+        if (
+            not isinstance(user, Mapping)
+            or str(user.get("login", "")).casefold() != bot_login.casefold()
+            or user.get("type") != "Bot"
+            or not isinstance(body, str)
+            or RECEIPT_MARKER not in body
+        ):
+            continue
+        match = re.search(r"```json\n(\{.*?\})\n```", body, flags=re.DOTALL)
+        if match is None:
+            continue
+        try:
+            receipt = json.loads(match[1])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(receipt, dict):
+            continue
+        published = receipt.get("published")
+        engine = published.get("engine") if isinstance(published, Mapping) else None
+        runtime_artifact = (
+            published.get("runtime") if isinstance(published, Mapping) else None
+        )
+        if (
+            receipt.get("schema_version") == 1
+            and receipt.get("repository") == REPOSITORY
+            and receipt.get("pull_request") == number
+            and receipt.get("candidate") == candidate
+            and receipt.get("runtime_version") == runtime.get("version")
+            and receipt.get("merge_head_sha") == current
+            and receipt.get("proposal_head_sha") == provenance.get("proposal_head_sha")
+            and receipt.get("execution_sha256") == expected_execution
+            and receipt.get("waiver") == consensus.get("waiver")
+            and isinstance(engine, Mapping)
+            and engine.get("anonymous_pull_verified") is True
+            and engine.get("reference") == expected_engine_reference
+            and isinstance(runtime_artifact, Mapping)
+            and runtime_artifact.get("anonymous_pull_verified") is True
+            and isinstance(expected_runtime_digest, str)
+            and isinstance(runtime_artifact.get("reference"), str)
+            and runtime_artifact["reference"].endswith("@" + expected_runtime_digest)
+        ):
+            return receipt
+    return None
+
+
+def _merge_exact(number: int, current: str, candidate: str, version: str) -> None:
+    merged = verification_bot.api(
+        f"repos/{REPOSITORY}/pulls/{number}/merge",
+        method="PUT",
+        value={
+            "sha": current,
+            "merge_method": "squash",
+            "commit_title": f"Publish {candidate} {version}",
+        },
+    )
+    if not isinstance(merged, dict) or merged.get("merged") is not True:
+        raise ShipitError("GitHub refused the exact-head merge after publication")
+
+
 def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
     issue, comment = event.get("issue"), event.get("comment")
     if not isinstance(issue, Mapping) or not isinstance(comment, Mapping) or not isinstance(issue.get("pull_request"), Mapping):
@@ -780,6 +871,36 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
         raise ShipitError("verification bot login is not configured")
     _bot_only_head(proposal=proposal, current=current, candidate=candidate, bot_login=bot_login)
     _approved_review(number, int(pr["user"]["id"]), required=not bypass)
+    if bypass and (root / candidate / "benchmark.consensus.json").is_file():
+        consensus = generate_manifest.read_object(
+            root / candidate / "benchmark.consensus.json"
+        )
+        generate_manifest.validate_consensus_binding(runtime, consensus)
+        receipt = _existing_publication_receipt(
+            number=number,
+            candidate=candidate,
+            current=current,
+            runtime=runtime,
+            release=release,
+            consensus=consensus,
+            bot_login=bot_login,
+        )
+        if receipt is not None:
+            finalize_bypassed_community_check(current)
+            _check(
+                CHECK_NAME,
+                current,
+                "success",
+                "Resumed an exact publication that was already anonymously verified.",
+            )
+            _merge_exact(number, current, candidate, str(runtime["version"]))
+            return {
+                "processed": True,
+                "merged": True,
+                "resumed": True,
+                "candidate": candidate,
+                "head": current,
+            }
     _preflight_publication(
         number=number, candidate=candidate, root=root, bypass=bypass
     )
@@ -848,17 +969,7 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
         if bypass:
             finalize_bypassed_community_check(current)
         _check(CHECK_NAME, current, "success", f"Published exact Engine/runtime artifacts for `{bundle['subject']['execution_sha256']}`.")
-        merged = verification_bot.api(
-            f"repos/{REPOSITORY}/pulls/{number}/merge",
-            method="PUT",
-            value={
-                "sha": current,
-                "merge_method": "squash",
-                "commit_title": f"Publish {candidate} {runtime['version']}",
-            },
-        )
-        if not isinstance(merged, dict) or merged.get("merged") is not True:
-            raise ShipitError("GitHub refused the exact-head merge after publication")
+        _merge_exact(number, current, candidate, str(runtime["version"]))
     return {"processed": True, "merged": True, "candidate": candidate, "head": current}
 
 
