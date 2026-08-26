@@ -1,0 +1,174 @@
+{
+  "benchmark_contract": {
+    "cases": [
+      {
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "id": "32k",
+        "prompt_tokens": 32768
+      },
+      {
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "id": "64k",
+        "prompt_tokens": 65536
+      },
+      {
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "id": "128k",
+        "prompt_tokens": 131072
+      },
+      {
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "id": "256k",
+        "prompt_tokens": 260000
+      }
+    ],
+    "domains": [
+      "code"
+    ],
+    "execution": {
+      "isolation": "fresh-matrix",
+      "prefix_state": "shared",
+      "samples_per_cell": 1,
+      "stream_prefix": "shared-body"
+    },
+    "generator": {
+      "id": "letsinfer-code-prose",
+      "version": 8
+    },
+    "request": {
+      "min_completion_tokens": 128,
+      "output_tokens": 128,
+      "require_natural_stop": false,
+      "seed": 42042,
+      "temperature": 0
+    },
+    "sample_interval_seconds": 5,
+    "schema_version": 8,
+    "short": {
+      "concurrencies": [
+        1,
+        2,
+        4
+      ],
+      "domains": [
+        "code",
+        "prose"
+      ],
+      "prompt_tokens": 256,
+      "request": {
+        "min_completion_tokens": 512,
+        "output_tokens": 512,
+        "require_natural_stop": false,
+        "seed": 42042,
+        "temperature": 0
+      }
+    },
+    "suite": "letsinfer-code-prose-v1",
+    "tokenizer": {
+      "capability": "engine-rendered-chat-count-v1",
+      "engine_payload_sha256": "9b7e18e84042597a33f08e789304c6d54906d094aef47d3a5635096d92ddb1ae",
+      "model_sha256": "6e99dfe39b6f28f4987de47ff7c14cb274aa5c78f533d8f124699879dc289025",
+      "render_contract": "openai-chat-user-v1"
+    },
+    "ttft_cache": {
+      "prompt_domain": "code",
+      "prompt_tokens": 64000,
+      "repetitions": 2,
+      "request": {
+        "min_completion_tokens": 1,
+        "output_tokens": 1,
+        "require_natural_stop": false,
+        "seed": 42042,
+        "temperature": 0
+      }
+    }
+  },
+  "benchmark_contract_sha256": "2d91a04db2cbeb4273d8282e8688ebae7c0a287e74f2f31ef7097465e2c11a20",
+  "id": "c626771ee4c9f194a3831e3e068aa2e54df8b58ea172e4af43469d720d24df34",
+  "installation_id": "66fa77eeb54e393f6609b2ddfc4c8364a71758cea6ce58b9906ef8bdc5dd2634",
+  "results": [
+    {
+      "actual_prompt_tokens": [
+        31126
+      ],
+      "aggregate_tps": 19.815185995612584,
+      "decode_tps": 124.66268987828552,
+      "is_prefix_cached": false,
+      "max_cpu_clock_mhz": 3900.0,
+      "max_cpu_temperature_c": 61.7,
+      "max_cpu_usage_percent": 8.0,
+      "max_gpu_clock_mhz": 2509.0,
+      "max_gpu_temperature_c": 57.0,
+      "max_gpu_usage_percent": 96.0,
+      "max_nvme_read_kib_per_second": 1129.0,
+      "max_nvme_temperature_c": 44.8,
+      "max_nvme_usage_percent": 94.0,
+      "max_nvme_write_kib_per_second": 392.0,
+      "max_system_ram_clock_mhz": -1.0,
+      "max_vram_clock_mhz": -1.0,
+      "prompt_domain": "code",
+      "prompt_set_sha256": "3acd5659f2624da5682b43ba4aa02b1cd6682af8d4474c0c969c78130927d90c",
+      "prompt_suite": "letsinfer-code-prose-v1",
+      "telemetry": {
+        "columns": [
+          "elapsed_seconds",
+          "gpu_usage_percent",
+          "gpu_temperature_c",
+          "cpu_usage_percent",
+          "cpu_temperature_c",
+          "cpu_clock_mhz",
+          "gpu_clock_mhz",
+          "vram_clock_mhz",
+          "system_ram_clock_mhz",
+          "nvme_usage_percent",
+          "nvme_temperature_c",
+          "nvme_read_kib_per_second",
+          "nvme_write_kib_per_second"
+        ],
+        "interval_seconds": 1,
+        "samples": [
+          "0.941,96,53,7,50.7,3900,2502,-1,-1,94,44.8,1129,392",
+          "1.941,96,51,7,56.1,3900,2502,-1,-1,94,44.8,4,212",
+          "2.941,96,56,8,59,3900,2489,-1,-1,94,44.8,376,336",
+          "3.941,96,53,6,60.8,3900,2483,-1,-1,94,44.8,20,204",
+          "4.941,95,57,7,61.7,3900,2496,-1,-1,94,44.8,408,328",
+          "5.941,96,48,5,58,3900,2509,-1,-1,94,44.8,1076,240"
+        ]
+      },
+      "ttft_p95_seconds": null,
+      "ttft_seconds": 5.43794021299982,
+      "ttft_statistic": "single",
+      "workload": "pp32768,tg128,c1"
+    }
+  ],
+  "results_sha256": "abaebc8849eb3d0a6f7bdc5054a3afbfe9ec7d8324150a17ddeee67f4cdd693c",
+  "schema_version": 7,
+  "subject": {
+    "candidate_id": "vllm--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
+    "engine_payload_sha256": "9b7e18e84042597a33f08e789304c6d54906d094aef47d3a5635096d92ddb1ae",
+    "measured_engine_oci": "ghcr.io/letsinferlabs/engine-images@sha256:8b69c270c75e35b9d9e815063180ba37500ce7410a769894abe98c9cfc952daa",
+    "model_revision": "cc84af2fe71647d87f4486c064f320e1e7535243",
+    "model_uri": "hf://nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
+    "runtime_version": "0.1.0-rc.1",
+    "target": "dgx-spark",
+    "target_contract_sha256": "e3f21b216fb6729c17ec8bf73864bb236592f1b5d7cc0a8f0b7b991271b14b60"
+  },
+  "timestamp": 1787704806,
+  "timestamp_unix_ns": 1787704806520668943
+}

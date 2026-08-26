@@ -54,6 +54,8 @@ class PublicationPolicyTests(unittest.TestCase):
                 "ghcr.io/letsinferlabs/engine-images@sha256:" + "3" * 64
             ),
             "engine_config_digest": "sha256:" + "4" * 64,
+            "engine_payload_digest": None,
+            "engine_base_reference": None,
             "target_platform": "linux/arm64",
         }
         with tempfile.TemporaryDirectory() as temporary:
@@ -72,6 +74,8 @@ class PublicationPolicyTests(unittest.TestCase):
                 "candidate_audit_sha256": "5" * 64,
                 "engine_reference": audit["engine_reference"],
                 "engine_config_digest": audit["engine_config_digest"],
+                "engine_payload_digest": audit.get("engine_payload_digest"),
+                "engine_base_reference": audit.get("engine_base_reference"),
                 "target_platform": audit["target_platform"],
                 "engine_archive_sha256": "6" * 64,
                 "engine_archive_bytes": 1,
@@ -147,6 +151,8 @@ class PublicationPolicyTests(unittest.TestCase):
                 "candidate_audit_sha256": "5" * 64,
                 "engine_reference": audit["engine_reference"],
                 "engine_config_digest": audit["engine_config_digest"],
+                "engine_payload_digest": audit.get("engine_payload_digest"),
+                "engine_base_reference": audit.get("engine_base_reference"),
                 "target_platform": audit["target_platform"],
                 "engine_archive_sha256": engine_reuse.sha256_file(
                     raw / "engine.oci.tar"
@@ -476,6 +482,166 @@ class PublicationPolicyTests(unittest.TestCase):
         ):
             shipit.require_checks(head, bypass=True)
 
+    def test_bypass_finalizes_pending_check_after_wrapper_settles(self) -> None:
+        head = "a" * 40
+        runs = [
+            {
+                "id": 41,
+                "name": verification_bot.CHECK_NAME,
+                "status": "in_progress",
+                "conclusion": None,
+            },
+            {
+                "id": 42,
+                "name": "process",
+                "status": "completed",
+                "conclusion": "success",
+                "details_url": (
+                    "https://github.com/letsinferlabs/runtimes/actions/runs/"
+                    "123/job/456"
+                ),
+                "app": {"slug": "github-actions"},
+            },
+        ]
+        workflow = {
+            "path": ".github/workflows/community-verification.yml",
+            "head_sha": head,
+            "event": "pull_request_target",
+        }
+        with (
+            mock.patch.object(shipit, "_check_runs", return_value=runs),
+            mock.patch.object(
+                verification_bot,
+                "api",
+                side_effect=[workflow, {"id": 41}],
+            ) as api,
+        ):
+            shipit.finalize_bypassed_community_check(head, wait_seconds=0)
+        self.assertEqual(
+            api.call_args_list,
+            [
+                mock.call("repos/letsinferlabs/runtimes/actions/runs/123"),
+                mock.call(
+                    "repos/letsinferlabs/runtimes/check-runs/41",
+                    method="PATCH",
+                    value={
+                        "status": "completed",
+                        "conclusion": "success",
+                        "output": {
+                            "title": "Maintainer verification override applied",
+                            "summary": (
+                                "An allowlisted maintainer applied the audited "
+                                "verifier override."
+                            ),
+                        },
+                    },
+                ),
+            ],
+        )
+
+    def test_exact_publication_receipt_is_resumable(self) -> None:
+        candidate = "candidate"
+        current = "b" * 40
+        proposal = "a" * 40
+        engine = "ghcr.io/letsinferlabs/engine-images@sha256:" + "1" * 64
+        runtime_digest = "sha256:" + "2" * 64
+        waiver = {"policy": "allowlisted-maintainer-bypass-v1"}
+        receipt = {
+            "schema_version": 1,
+            "repository": "letsinferlabs/runtimes",
+            "pull_request": 69,
+            "candidate": candidate,
+            "runtime_version": "0.1.0-rc.1",
+            "proposal_head_sha": proposal,
+            "merge_head_sha": current,
+            "execution_sha256": "3" * 64,
+            "waiver": waiver,
+            "published": {
+                "engine": {
+                    "anonymous_pull_verified": True,
+                    "reference": engine,
+                },
+                "runtime": {
+                    "anonymous_pull_verified": True,
+                    "reference": (
+                        "ghcr.io/letsinferlabs/runtime-artifacts@" + runtime_digest
+                    ),
+                },
+            },
+        }
+        comment = {
+            "user": {"login": "letsinfer-bot[bot]", "type": "Bot"},
+            "body": (
+                "## Runtime publication receipt\n\n```json\n"
+                + json.dumps(receipt)
+                + "\n```\n\n"
+                + shipit.RECEIPT_MARKER
+            ),
+        }
+        with mock.patch.object(
+            verification_bot, "api", return_value=[[comment]]
+        ):
+            actual = shipit._existing_publication_receipt(
+                number=69,
+                candidate=candidate,
+                current=current,
+                runtime={
+                    "version": "0.1.0-rc.1",
+                    "engine": {"oci": {"reference": engine}},
+                },
+                release={
+                    "provenance": {
+                        "proposal_head_sha": proposal,
+                        "execution_sha256": "3" * 64,
+                    }
+                },
+                consensus={
+                    "waiver": waiver,
+                    "subject": {"runtime_oci_manifest_digest": runtime_digest},
+                },
+                bot_login="letsinfer-bot[bot]",
+            )
+        self.assertEqual(actual, receipt)
+
+    def test_receipt_resume_updates_behind_head_without_changing_candidate(self) -> None:
+        old = "a" * 40
+        new = "b" * 40
+        root = pathlib.Path("/tmp/proposal")
+        completed = subprocess.CompletedProcess(["git"], 0, "", "")
+        with (
+            mock.patch.object(
+                shipit,
+                "_pull",
+                side_effect=[
+                    {"mergeable_state": "behind"},
+                    {"head": {"sha": new}},
+                ],
+            ),
+            mock.patch.object(
+                verification_bot, "api", return_value={"message": "Updating"}
+            ) as api,
+            mock.patch.object(
+                shipit.subprocess, "run", side_effect=[completed, completed, completed]
+            ) as run,
+            mock.patch.object(
+                shipit.subprocess, "check_output", return_value=new + "\n"
+            ),
+        ):
+            actual = shipit._update_behind_receipt_head(
+                number=69,
+                current=old,
+                candidate="candidate",
+                root=root,
+                wait_seconds=1,
+            )
+        self.assertEqual(actual, new)
+        api.assert_called_once_with(
+            "repos/letsinferlabs/runtimes/pulls/69/update-branch",
+            method="PUT",
+            value={"expected_head_sha": old},
+        )
+        self.assertEqual(run.call_count, 3)
+
     def _waived_consensus(self, actor_id: int) -> tuple[dict, dict]:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
         runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
@@ -546,6 +712,38 @@ class PublicationPolicyTests(unittest.TestCase):
         ):
             generate_manifest.validate_consensus_binding(runtime, consensus)
 
+    def test_consensus_binds_normalized_engine_payload_when_present(self) -> None:
+        runtime, consensus = self._waived_consensus(10000001)
+        payload = "7" * 64
+        runtime["engine"]["oci"]["payload_id"] = "sha256:" + payload
+        subject = consensus["subject"]
+        subject.pop("engine_oci_manifest_digest")
+        subject["engine_payload_sha256"] = payload
+        consensus.pop("consensus_id")
+        consensus["consensus_id"] = hashlib.sha256(
+            generate_manifest.canonical_bytes(consensus)
+        ).hexdigest()
+        with mock.patch.dict(
+            os.environ,
+            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
+            clear=True,
+        ):
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+
+        subject["engine_payload_sha256"] = "8" * 64
+        consensus.pop("consensus_id")
+        consensus["consensus_id"] = hashlib.sha256(
+            generate_manifest.canonical_bytes(consensus)
+        ).hexdigest()
+        with mock.patch.dict(
+            os.environ,
+            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
+            clear=True,
+        ), self.assertRaisesRegex(
+            generate_manifest.ManifestError, "execution binding differs"
+        ):
+            generate_manifest.validate_consensus_binding(runtime, consensus)
+
     def test_maintainer_bypass_accepts_zero_independent_verifiers(self) -> None:
         runtime, consensus = self._waived_consensus(10000001)
         consensus["qualification"]["independent_verifiers"] = 0
@@ -582,6 +780,37 @@ class PublicationPolicyTests(unittest.TestCase):
             generate_manifest.ManifestError, "bypass score is invalid"
         ):
             generate_manifest.validate_consensus_binding(runtime, consensus)
+
+    def test_publication_preflight_rejects_missing_evidence_before_artifacts(self) -> None:
+        candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            candidate_root = root / candidate
+            candidate_root.mkdir()
+            shutil.copy2(ROOT / candidate / "runtime.json", candidate_root)
+            shutil.copy2(ROOT / "manifest.json", root)
+            with mock.patch.object(
+                shipit, "_cheap_verifier_ids", return_value=set()
+            ), self.assertRaisesRegex(
+                shipit.ShipitError, "verifier artifact was not downloaded"
+            ):
+                shipit._preflight_publication(
+                    number=31,
+                    candidate=candidate,
+                    root=root,
+                    bypass=True,
+                )
+            with mock.patch.object(
+                shipit, "_cheap_verifier_ids", return_value={10000001}
+            ), self.assertRaisesRegex(
+                shipit.ShipitError, "verifier artifact was not downloaded"
+            ):
+                shipit._preflight_publication(
+                    number=31,
+                    candidate=candidate,
+                    root=root,
+                    bypass=False,
+                )
 
     def test_maintainer_bypass_materializes_without_verifier_comments(self) -> None:
         candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"

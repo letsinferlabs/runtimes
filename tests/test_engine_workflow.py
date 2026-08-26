@@ -32,27 +32,22 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("path: trusted", workflow)
         self.assertIn("working-directory: trusted", workflow)
 
-    def test_engine_builds_are_reproducible_and_verifier_loadable(self) -> None:
+    def test_engine_build_is_canonical_single_pass_and_thin(self) -> None:
         workflow = (ROOT / ".github/workflows/build-verifier.yml").read_text(
             encoding="utf-8"
         )
-        self.assertEqual(workflow.count("tools/oci_layout.py thin --archive -"), 2)
-        self.assertEqual(workflow.count("type=oci,dest=-"), 2)
-        self.assertIn("ENGINE_EXISTING_REFERENCE", workflow)
-        self.assertIn('cmp "$raw/engine-a-plan.json" "$raw/engine-b-plan.json"', workflow)
-        self.assertNotIn("type=docker,dest=", workflow)
-        self.assertIn("--build-arg SOURCE_DATE_EPOCH=0", workflow)
-        self.assertIn("rewrite-timestamp=true", workflow)
-        self.assertIn("A second no-cache build from the same checkout", workflow)
-        self.assertIn("os.utime(path, (946684800, 946684800)", workflow)
-        first = workflow.index('--output "$raw/engine.oci.tar"')
-        perturb = workflow.index("os.utime(path, (946684800, 946684800)")
-        second = workflow.index('--output "$raw/engine-b.oci.tar"')
-        self.assertLess(first, perturb)
-        self.assertLess(perturb, second)
-        self.assertIn("--target letsinfer-engine-inventory", workflow)
-        self.assertEqual(workflow.count("--build-context letsinfer-tools=."), 3)
-        self.assertNotIn("--build-context letsinfer-tools=../proposal", workflow)
+        builder = (ROOT / "tools/build_engine.py").read_text(encoding="utf-8")
+        self.assertIn("tools/build_engine.py", workflow)
+        self.assertIn("Build the exact Engine OCI once", workflow)
+        self.assertNotIn("engine-b.oci.tar", workflow)
+        self.assertNotIn("engine-b-plan.json", workflow)
+        self.assertNotIn("A second no-cache build", workflow)
+        self.assertIn("moby/buildkit@sha256:", builder)
+        self.assertIn("--existing-reference", builder)
+        self.assertIn("type=oci,dest=-", builder)
+        self.assertIn("rewrite-timestamp=true", builder)
+        self.assertIn("--inventory-output", workflow)
+        self.assertIn('kwargs.setdefault("stdout", sys.stderr)', builder)
 
     def test_unchanged_engine_uses_a_finalizer_attested_proof(self) -> None:
         build = (ROOT / ".github/workflows/build-verifier.yml").read_text(
@@ -67,7 +62,7 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("engine_build_contract_sha256", build)
         self.assertIn("tools/engine_reuse.py verify-restored", finalizer)
         self.assertIn("tools/engine_reuse.py create-proof", finalizer)
-        self.assertIn("engine-proof-${{ steps.pin.outputs.engine_source_sha256 }}", finalizer)
+        self.assertIn("engine-proof-${{ steps.identity.outputs.engine_source_sha256 }}", finalizer)
         self.assertIn("Attest reusable unchanged-Engine proof", finalizer)
 
     def test_verification_bot_uses_a_read_only_attestation_token(self) -> None:
@@ -90,32 +85,22 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("proposal_base_sha", workflow)
         self.assertIn("without executing proposal code", workflow)
         self.assertIn("tools/verifier_bundle.py finalize", workflow)
-        self.assertIn("engine-pin-pr-", workflow)
-        self.assertIn("engine-pin-request.json", workflow)
-        self.assertIn("Attest deterministic Engine pin request", workflow)
+        self.assertNotIn("engine-pin-pr-", workflow)
+        self.assertNotIn("engine-pin-request.json", workflow)
+        self.assertIn("exact authored Engine identity", workflow)
         self.assertIn("runtime/verifier-bundle", workflow)
         self.assertIn('run.get("head_branch") != "main"', workflow)
         self.assertIn("actions/attest@", workflow)
         self.assertNotIn("working-directory: proposal", workflow)
 
-    def test_engine_pin_updater_preserves_the_trust_boundary(self) -> None:
-        workflow = (ROOT / ".github/workflows/auto-pin-engine.yml").read_text(
+    def test_engine_pin_bot_is_removed(self) -> None:
+        self.assertFalse((ROOT / ".github/workflows/auto-pin-engine.yml").exists())
+        self.assertFalse((ROOT / "tools/engine_pin_updater.py").exists())
+        finalizer = (ROOT / ".github/workflows/finalize-verifier.yml").read_text(
             encoding="utf-8"
         )
-        updater = (ROOT / "tools/engine_pin_updater.py").read_text(encoding="utf-8")
-        self.assertIn("workflows: [Finalize verifier artifact]", workflow)
-        self.assertIn("attestations: read", workflow)
-        self.assertIn("runtime-verification-bot", workflow)
-        self.assertIn("engine-pin-pr-", workflow)
-        self.assertIn("gh attestation verify", workflow)
-        self.assertIn("same_repository == 'true'", workflow)
-        self.assertIn("same_repository == 'false'", workflow)
-        self.assertNotIn("path: proposal", workflow)
-        self.assertNotIn("packages: write", workflow)
-        self.assertNotIn("contents: write", workflow)
-        self.assertIn("expectedHeadOid", updater)
-        self.assertIn("createCommitOnBranch", updater)
-        self.assertIn("runtime.json", updater)
+        self.assertIn("Engine identity differs from the canonical trusted build", finalizer)
+        self.assertNotIn("createCommitOnBranch", finalizer)
 
     def test_shipit_is_the_only_engine_registry_publisher(self) -> None:
         self.assertFalse((ROOT / ".github/workflows/publish-engine.yml").exists())

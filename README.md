@@ -170,38 +170,45 @@ git sparse-checkout set tools <candidate>
 Every runtime PR first runs a no-code sentinel. A default-branch `workflow_run`
 builder—not the contributor-editable PR workflow—then checks out the exact
 proposal as untrusted input. It has read-only permissions and no secrets. It
-audits candidate size and contents, builds the runtime twice, and, for
-`build-engine`, independently builds a new Engine-source identity twice plus
-its package inventory. The finalizer attests a small reusable proof keyed by
-the exact Engine-source bytes and trusted build contract. Later PR heads with
-that same identity restore the attested OCI layout and inventory instead of
-running BuildKit again, then still receive a new exact-head bundle. A changed
-Engine source or build contract always misses and performs both no-cache
-builds. The builder cannot publish a package and retains only one byte-verified
-OCI layout.
+audits candidate size and contents, builds the small runtime pack twice, and
+builds a changed Engine exactly once with the same digest-pinned BuildKit
+contract available to authors through `tools/build_engine.py`.
+
+Engine identity has two separate parts. OCI manifest and configuration digests
+identify the published transport object. The execution payload digest
+identifies the pinned base image, normalized final overlay files, and
+runtime-relevant container configuration while ignoring tar timestamps,
+compression, and Docker-versus-OCI media labels. Benchmarks bind to the
+execution payload. Repackaging cannot invalidate valid measurements, while a
+changed executable file, mode, base, environment, entrypoint, or command always
+produces a new benchmark identity.
+
+The verifier artifact stores only the Engine's local overlay layers and an
+immutable reference to its public base image. Core verifies and hydrates that
+base directly from its registry. A finalizer-attested reusable proof keyed by
+the exact Engine source and trusted build contract avoids rebuilding unchanged
+Engine source on later PR heads.
 
 A second default-branch `workflow_run` finalizer treats the proposal and raw
 outputs as untrusted data. It independently reclassifies the base-to-head diff,
-audits and repacks the candidate, verifies both Engine identities, creates
-runtime and Engine SPDX documents plus provenance and checksums, attests the
+audits and repacks the candidate, verifies the Engine transport and payload
+identities, creates runtime and Engine SPDX documents plus provenance and checksums, attests the
 payloads, and uploads one immutable artifact named
 `verification-bundle-pr-NUMBER-HEAD`. It never executes proposal code.
 
-For a changed Engine, `runtime.json` must already pin the future production
-manifest and configuration digests. If local authoring did not pin them, the
-finalizer attests a deterministic `engine-pin-pr-*` request and refuses to make
-the unpinned head benchmarkable. For an eligible branch in this repository, a
-separate trusted updater reconstructs only the three Engine identity fields,
-creates one GitHub App commit with the attested head as its atomic expected
-parent, and lets that commit trigger exact-head verification. Duplicate
-delivery is a no-op and an advanced or protected branch fails closed. The
-updater never publishes an image; `/shipit` remains the only publisher.
+For a changed Engine, run the canonical local builder once before opening or
+updating the PR:
 
-Forks never receive the base repository's credential. A fork author downloads
-the attested artifact, runs `git apply engine-pin.patch`, and pushes the fork;
-the updater check prints the exact command. `reuse-engine` proposals and
-ordinary runtime installers need no pin handoff. No registry write is needed
-during local development or PR build.
+```bash
+python3 tools/build_engine.py --candidate <candidate> --output /tmp/engine.oci.tar --pin
+```
+
+This writes the manifest, configuration, and execution-payload identities into
+`runtime.json`. CI runs the same builder and compares its result directly.
+There is no Engine-pin bot, no generated commit, and no exact-head restart.
+Packaging-only identity changes preserve benchmark evidence when the payload
+digest is unchanged; executable payload changes clear stale evidence.
+`/shipit` remains the only production publisher.
 
 Every runtime proposal must first pass source and supply-chain review. The bot
 automatically adds the `runtime` label when a PR directly changes a runtime
@@ -218,10 +225,11 @@ letsinfer benchmark verify https://github.com/letsinferlabs/runtimes/pull/123
 Let's Infer runs a paired baseline/candidate benchmark, restores the verifier's
 runtime, and posts complete signed evidence. It downloads only the trusted,
 head-bound verifier bundle—not a PR source archive—and locally loads the exact
-bundled OCI layout when the PR changes Engine internals. Core validates every
-OCI descriptor and rootfs diff ID, converts it to a temporary Docker-load
-archive locally, and removes both the temporary archive and any image it
-introduced. Two successful non-author users
+thin OCI layout when the PR changes Engine internals. Core validates every OCI
+descriptor, normalized payload entry, and immutable base-layer reference,
+hydrates public base layers directly from their registry, converts the result
+to a temporary Docker-load archive locally, and removes both the archive and
+any image it introduced. Two successful non-author users
 on distinct account and device identities qualify the exact execution
 subject. One user occupies one slot even after a rerun. A correctness, safety,
 or restoration failure blocks that subject; performance differences remain
@@ -288,12 +296,9 @@ immutable digest; existing candidates keep their already-public package.
 private package setup fails closed.
 
 The default public runners are `ubuntu-24.04-arm` for isolated builds and
-`ubuntu-24.04` for finalization. Repositories with large Engine images should
-set `LETSINFER_VERIFIER_RUNNER` and `LETSINFER_FINALIZER_RUNNER` to isolated
-GitHub-hosted larger-runner labels with adequate disk. Raw outputs expire after
-one day; finalized verifier bundles and their small unchanged-Engine proofs
-expire after 30 days. A missing or expired proof is a cache miss and performs
-the ordinary two-build reproducibility check.
+`ubuntu-24.04` for finalization. Raw outputs expire after one day; finalized
+thin verifier bundles and unchanged-Engine proofs expire after 30 days. A
+missing or expired proof performs one canonical Engine build.
 
 The release fails closed when an Engine digest, model revision, benchmark
 identity, catalog source, signature key, or recommendation is inconsistent.

@@ -47,7 +47,6 @@ RAW_COMMON_FILES = {
 RAW_ENGINE_FILES = {
     "engine.oci.tar",
     "engine-a-plan.json",
-    "engine-b-plan.json",
     "engine-inventory.json",
 }
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
@@ -252,14 +251,15 @@ def create(
     if mode == "build-engine":
         first = oci_layout.inspect_archive(raw / "engine.oci.tar", audit["target_platform"])
         expected_engine_plan = first | {"reference": audit["engine_reference"]}
-        if (
-            read_object(raw / "engine-a-plan.json") != expected_engine_plan
-            or read_object(raw / "engine-b-plan.json") != expected_engine_plan
-        ):
-            raise BundleError("independent Engine builds differ")
+        if read_object(raw / "engine-a-plan.json") != expected_engine_plan:
+            raise BundleError("Engine build plan differs from its OCI layout")
         if (
             first["manifest_digest"] != str(audit["engine_reference"]).rsplit("@", 1)[-1]
             or first["config_digest"] != audit["engine_config_digest"]
+            or (
+                audit.get("engine_payload_digest") is not None
+                and first.get("payload_digest") != audit["engine_payload_digest"]
+            )
         ):
             raise BundleError(
                 "runtime.json must pin the deterministic production Engine identity before verification"

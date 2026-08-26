@@ -35,6 +35,9 @@ class ManifestToolTests(unittest.TestCase):
         nemotron = (
             "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark"
         )
+        nemotron_vllm = (
+            "vllm--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark"
+        )
         deepseek = "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark"
         sparkinfer = "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark"
         self.assertEqual(
@@ -43,7 +46,7 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(
             changed_candidates.changed(ROOT, ["tools/generate_manifest.py"]),
-            sorted((deepseek, ling, nemotron, qwen, sparkinfer)),
+            sorted((deepseek, ling, nemotron, nemotron_vllm, qwen, sparkinfer)),
         )
 
     def test_runtime_oci_plan_is_deterministic_and_pull_compatible(self) -> None:
@@ -173,6 +176,7 @@ class ManifestToolTests(unittest.TestCase):
                 "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
                 "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
                 "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
+                "vllm--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
             },
         )
 
@@ -416,18 +420,20 @@ class ManifestToolTests(unittest.TestCase):
                 / "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark/runtime.json"
             ).read_text(encoding="utf-8")
         )
-        changed = pin_engine.update(
+        changed, execution_changed = pin_engine.update(
             runtime,
             "ghcr.io/letsinferlabs/engines/example@sha256:" + "9" * 64,
             "sha256:" + "8" * 64,
+            "sha256:" + "7" * 64,
         )
         self.assertTrue(changed)
+        self.assertTrue(execution_changed)
         self.assertNotIn("status", runtime)
         self.assertNotIn("qualified", runtime["serving"])
         self.assertNotIn("record", runtime["benchmark"])
         self.assertEqual(
-            runtime["benchmark"]["contract"]["tokenizer"]["engine_image_sha256"],
-            "8" * 64,
+            runtime["benchmark"]["contract"]["tokenizer"]["engine_payload_sha256"],
+            "7" * 64,
         )
 
     def test_pinning_changed_engine_removes_stale_bound_benchmark(self) -> None:
@@ -448,8 +454,9 @@ class ManifestToolTests(unittest.TestCase):
                 "ghcr.io/letsinferlabs/engines/example@sha256:" + "7" * 64
             )
             immutable_id = "sha256:" + "6" * 64
-            _, _, expected_runtime_bytes = pin_engine.update_bytes(
-                runtime_bytes, reference, immutable_id
+            payload_id = "sha256:" + "5" * 64
+            _, _, _, expected_runtime_bytes = pin_engine.update_bytes(
+                runtime_bytes, reference, immutable_id, payload_id
             )
             runtime_path.write_bytes(runtime_bytes)
             benchmark_path.write_text("sealed evidence\n", encoding="utf-8")
@@ -461,6 +468,7 @@ class ManifestToolTests(unittest.TestCase):
                 runtime_path,
                 reference,
                 immutable_id,
+                payload_id,
             )
             self.assertTrue(changed)
             self.assertFalse(benchmark_path.exists())
@@ -469,9 +477,41 @@ class ManifestToolTests(unittest.TestCase):
             pinned = json.loads(runtime_path.read_text(encoding="utf-8"))
             self.assertIsNone(json.loads(release_path.read_text())["provenance"])
             self.assertEqual(
-                pinned["benchmark"]["contract"]["tokenizer"]["engine_image_sha256"],
-                "6" * 64,
+                pinned["benchmark"]["contract"]["tokenizer"]["engine_payload_sha256"],
+                "5" * 64,
             )
+
+    def test_packaging_only_engine_repin_preserves_evidence(self) -> None:
+        source = (
+            ROOT
+            / "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+            / "runtime.json"
+        )
+        runtime = json.loads(source.read_text(encoding="utf-8"))
+        runtime["engine"]["oci"]["payload_id"] = "sha256:" + "5" * 64
+        runtime["benchmark"]["contract"]["tokenizer"].pop(
+            "engine_image_sha256", None
+        )
+        runtime["benchmark"]["contract"]["tokenizer"][
+            "engine_payload_sha256"
+        ] = "5" * 64
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            runtime_path = root / "runtime.json"
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+            benchmark = root / "benchmark.json"
+            consensus = root / "benchmark.consensus.json"
+            benchmark.write_text("evidence", encoding="utf-8")
+            consensus.write_text("consensus", encoding="utf-8")
+            _, changed = pin_engine.pin_runtime(
+                runtime_path,
+                "ghcr.io/letsinferlabs/engines/example@sha256:" + "9" * 64,
+                "sha256:" + "8" * 64,
+                "sha256:" + "5" * 64,
+            )
+            self.assertTrue(changed)
+            self.assertTrue(benchmark.exists())
+            self.assertTrue(consensus.exists())
 
     def test_runtime_publication_source_replacement_is_exactly_scoped(self) -> None:
         document = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
