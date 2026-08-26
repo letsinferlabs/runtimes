@@ -183,7 +183,10 @@ def sync_runtime_label(pull: Mapping[str, Any], *, runtime: bool) -> None:
 
 
 def publish_classification_check(
-    pull: Mapping[str, Any], *, runtime_pending: bool
+    pull: Mapping[str, Any],
+    *,
+    runtime_pending: bool,
+    pending_summary: str | None = None,
 ) -> None:
     head = pull.get("head")
     head_sha = head.get("sha") if isinstance(head, Mapping) else None
@@ -193,7 +196,10 @@ def publish_classification_check(
         status = "in_progress"
         conclusion = None
         title = "Runtime verification is pending"
-        summary = "Add the benchmark-ready label to begin independent verification."
+        summary = (
+            pending_summary
+            or "Add the benchmark-ready label to begin independent verification."
+        )
     else:
         status = "completed"
         conclusion = "success"
@@ -913,7 +919,24 @@ def process(event: Mapping[str, Any]) -> dict[str, Any]:
         if "benchmark-ready" not in labels:
             publish_classification_check(pull, runtime_pending=True)
             return {"processed": False, "reason": "benchmark-ready gate is pending"}
-        return process_pull_request(int(pull["number"]))
+        try:
+            return process_pull_request(int(pull["number"]))
+        except BotError as error:
+            if not str(error).startswith(
+                "exact verifier bundle is unavailable:"
+            ):
+                raise
+            publish_classification_check(
+                pull,
+                runtime_pending=True,
+                pending_summary=(
+                    "The trusted exact-head verifier bundle is still building."
+                ),
+            )
+            return {
+                "processed": False,
+                "reason": "exact verifier bundle is pending",
+            }
     issue = event.get("issue")
     comment = event.get("comment")
     if (
