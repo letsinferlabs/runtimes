@@ -109,6 +109,15 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("actions/attest@", workflow)
         self.assertNotIn("working-directory: proposal", workflow)
 
+    def test_native_protocol_validation_does_not_execute_uninstalled_engines(self) -> None:
+        workflow = (ROOT / ".github/workflows/validate.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('engine_kind=$(python3 -c', workflow)
+        self.assertIn('test "$engine_kind" = native-archive', workflow)
+        self.assertIn("compile(path.read_text", workflow)
+        self.assertIn("engine-adapter\" verify --protocol 2", workflow)
+
     def test_engine_pin_bot_is_removed(self) -> None:
         self.assertFalse((ROOT / ".github/workflows/auto-pin-engine.yml").exists())
         self.assertFalse((ROOT / "tools/engine_pin_updater.py").exists())

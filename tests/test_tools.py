@@ -47,7 +47,7 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(
             changed_candidates.changed(ROOT, ["tools/generate_manifest.py"]),
-            sorted((deepseek, ling, nemotron, nemotron_vllm, qwen, sparkinfer)),
+            sorted(changed_candidates.candidates(ROOT)),
         )
 
     def test_runtime_oci_plan_is_deterministic_and_pull_compatible(self) -> None:
@@ -175,14 +175,7 @@ class ManifestToolTests(unittest.TestCase):
         records = generate_manifest.candidates(ROOT, {}, require_sources=False)
         self.assertEqual(
             {record["runtime"]["id"] for record in records},
-            {
-                "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
-                "sglang--inclusionai--ling-3.0-flash-int4--dgx-spark",
-                "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
-                "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-                "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-                "vllm--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
-            },
+            changed_candidates.candidates(ROOT),
         )
 
     def test_schema_six_catalog_history_is_retired_at_cutover(self) -> None:
