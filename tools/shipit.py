@@ -519,6 +519,39 @@ def _existing_model_has_release(
     )
 
 
+def _schema6_cutover_is_execution_identical(
+    *, root: pathlib.Path, candidate: str, runtime: Mapping[str, Any], base_sha: str
+) -> bool:
+    """Recognize only an execution-identical schema-5 to schema-6 migration."""
+
+    if (
+        runtime.get("schema_version") != 6
+        or re.fullmatch(r"[0-9a-f]{40}", base_sha) is None
+    ):
+        return False
+    try:
+        previous = json.loads(
+            subprocess.check_output(
+                ["git", "show", f"{base_sha}:{candidate}/runtime.json"],
+                cwd=root,
+                text=True,
+            )
+        )
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        return False
+    if (
+        not isinstance(previous, dict)
+        or previous.get("schema_version") != 5
+        or previous.get("id") != runtime.get("id")
+        or generate_manifest._version_key(str(previous.get("version")))
+        >= generate_manifest._version_key(str(runtime.get("version")))
+    ):
+        return False
+    return generate_manifest.runtime_execution_contract_sha256(
+        previous
+    ) == generate_manifest.runtime_execution_contract_sha256(dict(runtime))
+
+
 def _cheap_verifier_ids(number: int) -> set[int]:
     comments = verification_bot._flatten_pages(
         verification_bot.api(
@@ -539,7 +572,12 @@ def _cheap_verifier_ids(number: int) -> set[int]:
 
 
 def _preflight_publication(
-    *, number: int, candidate: str, root: pathlib.Path, bypass: bool
+    *,
+    number: int,
+    candidate: str,
+    root: pathlib.Path,
+    bypass: bool,
+    allow_unscored_cutover: bool = False,
 ) -> None:
     """Reject missing evidence before retrieving any verifier artifact."""
 
@@ -556,6 +594,7 @@ def _preflight_publication(
         and not verifier_ids
         and not (root / candidate / "benchmark.json").is_file()
         and _existing_model_has_release(root, runtime)
+        and not allow_unscored_cutover
     ):
         raise ShipitError(
             "maintainer bypass requires benchmark.json for an existing model; "
@@ -572,6 +611,7 @@ def _bypass_consensus(
     actor: Mapping[str, Any],
     reason: str,
     comment: Mapping[str, Any],
+    allow_unscored_cutover: bool = False,
 ) -> dict[str, Any]:
     runtime = generate_manifest.read_object(root / candidate / "runtime.json")
     release = generate_manifest.read_object(root / candidate / "release.json")
@@ -609,7 +649,7 @@ def _bypass_consensus(
             }
             if "ttft_cache" in benchmark:
                 author_result["ttft_cache"] = benchmark["ttft_cache"]
-        elif _existing_model_has_release(root, runtime):
+        elif _existing_model_has_release(root, runtime) and not allow_unscored_cutover:
             raise ShipitError(
                 "maintainer bypass requires benchmark.json for an existing model"
             )
@@ -923,6 +963,17 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
         raise ShipitError("checked-out proposal head differs from GitHub")
     runtime = generate_manifest.read_object(root / candidate / "runtime.json")
     release = generate_manifest.read_object(root / candidate / "release.json")
+    allow_unscored_cutover = bool(
+        bypass
+        and not (root / candidate / "benchmark.json").is_file()
+        and _existing_model_has_release(root, runtime)
+        and _schema6_cutover_is_execution_identical(
+            root=root,
+            candidate=candidate,
+            runtime=runtime,
+            base_sha=str(pr["base"]["sha"]),
+        )
+    )
     provenance = release.get("provenance")
     proposal = (
         provenance.get("proposal_head_sha")
@@ -979,7 +1030,11 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
         bot_login=bot_login,
     )
     _preflight_publication(
-        number=number, candidate=candidate, root=root, bypass=bypass
+        number=number,
+        candidate=candidate,
+        root=root,
+        bypass=bypass,
+        allow_unscored_cutover=allow_unscored_cutover,
     )
     with tempfile.TemporaryDirectory(prefix="letsinfer-shipit-") as temporary:
         artifact_root, bundle = _download_artifact(
@@ -996,6 +1051,7 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
             consensus = _bypass_consensus(
                 pr=pr, candidate=candidate, subject=bundle["subject"], root=root,
                 actor=actor, reason=reason, comment=comment,
+                allow_unscored_cutover=allow_unscored_cutover,
             )
             generate_manifest.validate_consensus_binding(runtime, consensus)
             _url, current = verification_bot.materialize(root, candidate, pr, consensus)

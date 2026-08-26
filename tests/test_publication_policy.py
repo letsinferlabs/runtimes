@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -24,6 +25,40 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class PublicationPolicyTests(unittest.TestCase):
+    def test_unscored_schema6_cutover_requires_execution_identity(self) -> None:
+        candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
+        previous = generate_manifest.read_object(ROOT / candidate / "runtime.json")
+        current = copy.deepcopy(previous)
+        current["schema_version"] = 6
+        current["version"] = "0.1.0-rc.18"
+        current["engine"]["distribution"] = {
+            "kind": "oci-container",
+            **current["engine"].pop("oci"),
+        }
+        current["model"]["acquisition"]["kind"] = "oci-container"
+        with mock.patch.object(
+            shipit.subprocess,
+            "check_output",
+            return_value=json.dumps(previous),
+        ):
+            self.assertTrue(
+                shipit._schema6_cutover_is_execution_identical(
+                    root=ROOT,
+                    candidate=candidate,
+                    runtime=current,
+                    base_sha="1" * 40,
+                )
+            )
+            current["engine"]["arguments"].append("--changed")
+            self.assertFalse(
+                shipit._schema6_cutover_is_execution_identical(
+                    root=ROOT,
+                    candidate=candidate,
+                    runtime=current,
+                    base_sha="1" * 40,
+                )
+            )
+
     def test_shipit_publishes_native_runtime_without_treating_engine_as_oci(self) -> None:
         source = "ghcr.io/letsinferlabs/runtime-artifacts@sha256:" + "1" * 64
         runtime_plan = {
