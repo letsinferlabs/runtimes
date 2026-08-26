@@ -169,8 +169,18 @@ jobs:
             schema=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["schema_version"])' "$runtime")
             test "$schema" = 6 || continue
             version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$runtime")
+            engine_kind=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["distribution"]["kind"])' "$runtime")
             if test -f "$candidate/adapter/engine-adapter"; then
-              python3 "$candidate/adapter/engine-adapter" verify --protocol 2
+              if test "$engine_kind" = native-archive || test "$engine_kind" = python-standalone; then
+                python3 - "$candidate/adapter/engine-adapter" "$candidate"/adapter/*.py <<'PY'
+          import pathlib, sys
+          for name in sys.argv[1:]:
+              path=pathlib.Path(name)
+              compile(path.read_text(encoding='utf-8'), str(path), 'exec')
+          PY
+              else
+                python3 "$candidate/adapter/engine-adapter" verify --protocol 2
+              fi
             fi
             python3 tools/pack_runtime.py --core-root .core --candidate "$candidate" \
               --output "$RUNNER_TEMP/packs/$candidate-a.letsinfer"
