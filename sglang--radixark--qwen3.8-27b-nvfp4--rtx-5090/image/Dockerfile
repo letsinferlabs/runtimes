@@ -1,3 +1,4 @@
+# Rebuild the exact authored Engine after the source-only PR #119 merge.
 FROM docker.io/lmsysorg/sglang@sha256:7d81a16a2ebbe104be37263b49f1bfc0a6a95c1d57e500875dbe7f7c41301e45 AS letsinfer-engine-inventory-build
 
 COPY --from=letsinfer-tools tools/engine_sbom.py /tmp/letsinfer-engine-sbom.py
