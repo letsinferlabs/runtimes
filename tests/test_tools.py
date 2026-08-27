@@ -173,7 +173,16 @@ class ManifestToolTests(unittest.TestCase):
             generate_manifest, "revocation_identities", return_value={identity}
         ):
             generated = generate_manifest.generate(ROOT, sources, previous)
-        self.assertNotIn("qwen3.8-27b", generated["models"])
+        remaining_targets = set(
+            previous["models"]["qwen3.8-27b"]["targets"]
+        ) - {"dgx-spark"}
+        if remaining_targets:
+            self.assertEqual(
+                set(generated["models"]["qwen3.8-27b"]["targets"]),
+                remaining_targets,
+            )
+        else:
+            self.assertNotIn("qwen3.8-27b", generated["models"])
 
     def test_release_metadata_preserves_multiple_runtime_authors(self) -> None:
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
