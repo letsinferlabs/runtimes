@@ -75,6 +75,8 @@ class Rtx5090EngineTests(unittest.TestCase):
         self.assertNotIn("gemv", command)
         cache_index = command.index("--max-mamba-cache-size")
         self.assertEqual(command[cache_index + 1], "20")
+        context_index = command.index("--context-length")
+        self.assertEqual(command[context_index + 1], "66048")
 
     def test_frontend_accepts_only_current_runtime_source_schema(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
