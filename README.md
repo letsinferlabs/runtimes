@@ -17,7 +17,8 @@ model-agnostic.
 - **Target-specific performance** — candidates may include custom kernels,
   patches, sidecars, caches, and configuration for one exact hardware target.
 - **Replica-ready by default** — core can run compatible single groups across
-  main and child nodes while every node keeps its fastest qualified runtime.
+  main and child nodes while every node keeps its selected target-specific
+  runtime.
 - **Explicit parallel runtimes** — TP/PP candidates declare and qualify their
   complete multi-device topology, generic launch tasks, interconnect, and
   Engine recipe while roles and ranks stay private to the runtime.
@@ -106,6 +107,15 @@ Changing those private details does not require a core release.
 When you install a runtime, Let's Infer downloads every declared model
 artifact. You do not need to preinstall weights, choose an engine, or supply a
 target path.
+
+Qualification is a publication and recommendation claim, not execution
+permission. Runtime source cannot grant it: the signed catalog and community
+evidence determine which candidate is qualified and recommended. Conversely,
+an operator may explicitly install exact local or digest-pinned candidate
+bytes before qualification; core records them as unqualified while still
+creating the ordinary managed placement, allocation, lifecycle, status, and
+gateway route. This boundary requires no alternate runtime schema, Engine
+image, serving recipe, or benchmark mode.
 
 ## Engine boundary
 
