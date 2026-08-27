@@ -42,7 +42,6 @@ jobs:
           persist-credentials: false
       - name: Validate release inputs
         env:
-          LETSINFER_VERIFIER_BYPASS_GITHUB_IDS: ${{ vars.LETSINFER_VERIFIER_BYPASS_GITHUB_IDS }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
@@ -151,12 +150,14 @@ jobs:
           candidate="$RUNNER_TEMP/catalog-release"
           PYTHONPATH=.core python3 - <<'PY'
           import os, pathlib
+          from tools.generate_manifest import SCHEMA_VERSION as CATALOG_SCHEMA_VERSION
           from core.runtime_packs import load_catalog
-          from core.revocations import load_ledger
+          from core.revocations import SCHEMA_VERSION as REVOCATION_SCHEMA_VERSION, load_ledger
           root=pathlib.Path(os.environ['RUNNER_TEMP']) / 'catalog-release'
           catalog=load_catalog(str(root / 'catalog.json'), public_key=str(root / 'catalog-public-key.pem'))
           ledger, _data, _signature=load_ledger(str(root / 'revocations.json'), public_key=root / 'catalog-public-key.pem')
-          assert catalog['schema_version'] == 7 and ledger['schema_version'] == 1
+          assert catalog['schema_version'] == CATALOG_SCHEMA_VERSION
+          assert ledger['schema_version'] == REVOCATION_SCHEMA_VERSION
           PY
           python3 - "$candidate" "$GITHUB_SHA" <<'PY'
           import hashlib, json, pathlib, re, sys
@@ -181,7 +182,7 @@ jobs:
         run: |
           set -euo pipefail
           candidate="$RUNNER_TEMP/catalog-release"
-          tag="catalog-v7-$GITHUB_SHA"
+          tag="catalog-$GITHUB_SHA"
           assets=(catalog.json catalog.json.sig revocations.json revocations.json.sig catalog-public-key.pem catalog-release.json)
           if gh release view "$tag" >/dev/null 2>&1; then
             existing="$RUNNER_TEMP/existing-catalog-release"

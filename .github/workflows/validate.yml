@@ -22,6 +22,27 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Classify exact release promotion
+        id: promotion
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          exact=false
+          if test "$BASE_REF" = release && \
+             test "$HEAD_REPOSITORY" = letsinferlabs/runtimes; then
+            git fetch --no-tags --depth=1 origin main
+            if test "$(git rev-parse "${HEAD_SHA}^{tree}")" = \
+                    "$(git rev-parse "FETCH_HEAD^{tree}")" && \
+               test "$(git rev-parse "${HEAD_SHA}^")" = "$BASE_SHA"; then
+              exact=true
+            fi
+          fi
+          echo "exact=$exact" >> "$GITHUB_OUTPUT"
       - name: Require immutable released core contract
         env:
           CORE_SHA: ${{ vars.LETSINFER_VERIFICATION_CORE_SHA }}
@@ -39,23 +60,44 @@ jobs:
           path: .core
           persist-credentials: false
       - name: Protect bot-owned qualification files
-        if: github.event_name == 'pull_request'
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.promotion.outputs.exact != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           BOT_LOGIN: ${{ vars.LETSINFER_VERIFICATION_BOT_LOGIN }}
         run: |
           set -euo pipefail
-          if test "$BASE_REF" = release && \
-             test "$HEAD_REPOSITORY" = letsinferlabs/runtimes; then
-            git fetch --no-tags --depth=1 origin main
-            if test "$(git rev-parse "${HEAD_SHA}^{tree}")" = \
-                    "$(git rev-parse "FETCH_HEAD^{tree}")" && \
-               test "$(git rev-parse "${HEAD_SHA}^")" = "$BASE_SHA"; then
-              exit 0
-            fi
+          if test "$HEAD_REPOSITORY" = letsinferlabs/runtimes && \
+             python3 - "$BASE_SHA" <<'PY'
+          import pathlib, subprocess, sys
+
+          base = sys.argv[1]
+          candidates = {
+              path.parent.name for path in pathlib.Path('.').glob('*/runtime.json')
+          }
+          candidates.update(
+              pathlib.PurePosixPath(path).parts[0]
+              for path in subprocess.check_output(
+                  ['git', 'ls-tree', '-r', '--name-only', base], text=True,
+              ).splitlines()
+              if path.endswith('/runtime.json')
+              and len(pathlib.PurePosixPath(path).parts) == 2
+          )
+          paths = subprocess.check_output(
+              ['git', 'diff', '--name-only', f'{base}...HEAD', '--'], text=True,
+          ).splitlines()
+          changed_candidates = {
+              pathlib.PurePosixPath(path).parts[0]
+              for path in paths
+              if pathlib.PurePosixPath(path).parts
+              and pathlib.PurePosixPath(path).parts[0] in candidates
+          }
+          raise SystemExit(0 if 'manifest.json' in paths and not changed_candidates else 1)
+          PY
+          then
+            exit 0
           fi
           changed=$(git diff --name-only "$BASE_SHA"...HEAD -- \
             '*/benchmark.consensus.json' '*/release.json' 'manifest.json')
@@ -142,7 +184,6 @@ jobs:
           fi
       - name: Validate schemas and generated catalog
         env:
-          LETSINFER_VERIFIER_BYPASS_GITHUB_IDS: ${{ vars.LETSINFER_VERIFIER_BYPASS_GITHUB_IDS }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
@@ -151,24 +192,14 @@ jobs:
           python3 tools/generate_manifest.py --validate-only
           python3 tools/generate_manifest.py --previous manifest.json --check
       - name: Require Let's Infer onboarding in changed runtime READMEs
-        if: github.event_name == 'pull_request'
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.promotion.outputs.exact != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
-          if test "$BASE_REF" = release && \
-             test "$HEAD_REPOSITORY" = letsinferlabs/runtimes; then
-            git fetch --no-tags --depth=1 origin main
-            if test "$(git rev-parse "${HEAD_SHA}^{tree}")" = \
-                    "$(git rev-parse "FETCH_HEAD^{tree}")" && \
-               test "$(git rev-parse "${HEAD_SHA}^")" = "$BASE_SHA"; then
-              exit 0
-            fi
-          fi
           python3 tools/readme_onboarding.py --base "$BASE_SHA" --head HEAD
       - name: Verify Engine protocol and deterministic runtime packs
         env:

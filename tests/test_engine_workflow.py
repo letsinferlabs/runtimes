@@ -169,19 +169,19 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn('git rev-parse "FETCH_HEAD^{tree}"', workflow)
         self.assertIn('git rev-parse "${HEAD_SHA}^"', workflow)
         self.assertIn('= "$BASE_SHA"', workflow)
+        self.assertEqual(workflow.count('test "$BASE_REF" = release'), 1)
+        self.assertEqual(workflow.count('git fetch --no-tags --depth=1 origin main'), 1)
+        self.assertIn("steps.promotion.outputs.exact != 'true'", workflow)
+        self.assertNotIn("LETSINFER_VERIFIER_BYPASS_GITHUB_IDS", workflow)
 
         onboarding = workflow.split(
             "- name: Require Let's Infer onboarding in changed runtime READMEs", 1
         )[1].split(
             "- name: Verify Engine protocol and deterministic runtime packs", 1
         )[0]
-        self.assertIn('test "$BASE_REF" = release', onboarding)
-        self.assertIn('test "$HEAD_REPOSITORY" = letsinferlabs/runtimes', onboarding)
-        self.assertIn('git rev-parse "${HEAD_SHA}^{tree}"', onboarding)
-        self.assertIn('git rev-parse "FETCH_HEAD^{tree}"', onboarding)
-        self.assertIn('git rev-parse "${HEAD_SHA}^"', onboarding)
-        self.assertIn('= "$BASE_SHA"', onboarding)
-        self.assertIn("exit 0", onboarding)
+        self.assertNotIn('git fetch --no-tags --depth=1 origin main', onboarding)
+        self.assertIn("steps.promotion.outputs.exact != 'true'", onboarding)
+        self.assertIn("tools/readme_onboarding.py", onboarding)
 
     def test_new_runtime_version_may_only_clear_stale_bot_qualification(self) -> None:
         workflow = (ROOT / ".github/workflows/validate.yml").read_text(
@@ -192,6 +192,15 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("reset_release['provenance'] = None", workflow)
         self.assertIn("old_runtime.get('version') == new_runtime.get('version')", workflow)
         self.assertIn("new_release != reset_release", workflow)
+
+    def test_shared_catalog_maintenance_cannot_change_a_candidate(self) -> None:
+        workflow = (ROOT / ".github/workflows/validate.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("'manifest.json' in paths and not changed_candidates", workflow)
+        self.assertIn("path.parent.name for path in pathlib.Path('.').glob('*/runtime.json')", workflow)
+        self.assertIn("'git', 'ls-tree', '-r', '--name-only', base", workflow)
+        self.assertIn('test "$HEAD_REPOSITORY" = letsinferlabs/runtimes', workflow)
 
 
 if __name__ == "__main__":

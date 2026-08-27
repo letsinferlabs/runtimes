@@ -109,19 +109,71 @@ class ManifestToolTests(unittest.TestCase):
             generated = generate_manifest.generate(ROOT, sources, previous)
         self.assertEqual(generated, previous)
 
-    def test_orphan_contract_migration_is_rejected(self) -> None:
+    def test_materialized_qualification_remains_execution_bound(self) -> None:
         manifest_path = ROOT / "manifest.json"
         sources = generate_manifest.sources_from_manifest(manifest_path)
         previous = generate_manifest.read_object(manifest_path)
-        entries = {"orphan--candidate@0.1.0": {}}
-        with mock.patch.object(
-            generate_manifest, "contract_migration_entries", return_value=entries
+        target = previous["models"]["qwen3.8-27b"]["targets"]["dgx-spark"]
+        candidate = target["recommended"]["candidate"]
+        version = target["recommended"]["version"]
+        target["candidates"][candidate]["releases"][version]["verification"][
+            "execution_contract_sha256"
+        ] = "0" * 64
+        with self.assertRaisesRegex(
+            generate_manifest.ManifestError,
+            "runtime execution contract changed",
         ):
-            with self.assertRaisesRegex(
-                generate_manifest.ManifestError,
-                "does not identify a current candidate: orphan--candidate@0.1.0",
-            ):
-                generate_manifest.generate(ROOT, sources, previous)
+            generate_manifest.generate(ROOT, sources, previous)
+
+    def test_scored_dgx_candidates_remain_recommended(self) -> None:
+        manifest = generate_manifest.read_object(ROOT / "manifest.json")
+        expected = {
+            "deepseek-v4-flash": (
+                "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
+                "0.1.0-rc.36",
+            ),
+            "ling-3.0-flash": (
+                "sglang--inclusionai--ling-3.0-flash-int4--dgx-spark",
+                "0.1.0-rc.3",
+            ),
+            "nemotron-3.5-lightning": (
+                "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
+                "0.1.0-rc.4",
+            ),
+            "qwen3.8-27b": (
+                "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
+                "0.1.0-rc.18",
+            ),
+        }
+        for model, identity in expected.items():
+            recommended = manifest["models"][model]["targets"]["dgx-spark"][
+                "recommended"
+            ]
+            self.assertEqual(
+                (recommended["candidate"], recommended["version"]), identity
+            )
+        qwen = manifest["models"]["qwen3-0.6b"]["targets"]
+        self.assertIsNone(qwen["ios-apple-gpu"]["recommended"])
+        self.assertIsNone(qwen["macos-apple-silicon"]["recommended"])
+
+    def test_carried_qualification_remains_revocable(self) -> None:
+        manifest_path = ROOT / "manifest.json"
+        sources = generate_manifest.sources_from_manifest(manifest_path)
+        previous = generate_manifest.read_object(manifest_path)
+        target = previous["models"]["qwen3.8-27b"]["targets"]["dgx-spark"]
+        recommendation = target["recommended"]
+        release = target["candidates"][recommendation["candidate"]]["releases"][
+            recommendation["version"]
+        ]
+        identity = (
+            release["source"].rsplit("@", 1)[-1],
+            release["verification"]["consensus_sha256"],
+        )
+        with mock.patch.object(
+            generate_manifest, "revocation_identities", return_value={identity}
+        ):
+            generated = generate_manifest.generate(ROOT, sources, previous)
+        self.assertNotIn("qwen3.8-27b", generated["models"])
 
     def test_release_metadata_preserves_multiple_runtime_authors(self) -> None:
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
@@ -551,7 +603,11 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertIn("contents: write", workflow)
         self.assertIn("gh release create", workflow)
-        self.assertIn("catalog-v7-$GITHUB_SHA", workflow)
+        self.assertIn('tag="catalog-$GITHUB_SHA"', workflow)
+        self.assertNotIn("catalog-v7-$GITHUB_SHA", workflow)
+        self.assertIn("CATALOG_SCHEMA_VERSION", workflow)
+        self.assertNotIn("catalog['schema_version'] == 7", workflow)
+        self.assertNotIn("LETSINFER_VERIFIER_BYPASS_GITHUB_IDS", workflow)
         self.assertIn("revocations.json.sig", workflow)
         self.assertNotIn("tools.benchmark_artifact push", workflow)
         self.assertIn("catalog-public-key.pem", workflow)
