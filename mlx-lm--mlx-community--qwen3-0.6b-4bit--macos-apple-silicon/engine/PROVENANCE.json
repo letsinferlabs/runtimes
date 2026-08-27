@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "upstream": "https://github.com/ml-explore/mlx-lm",
+  "revision": "ed1fca4cef15a824c5f1702c80f70b4cffc8e4dd",
+  "release": "v0.31.3",
+  "mlx_lm_wheel_sha256": "758cfddf1180053b7613db76fad3d246a331a2a905808e1164a275621fc983b8",
+  "requirements_lock_sha256": "c460590cabceec47994f45d622d06cf9f16afd3d252ee8f37071a17e3540b4ab",
+  "python_source_revision": "c0aa3bbdc2fff56a77ad1ecec68b1e47794d8779",
+  "payload_sha256": "b167e6f4ab0b894df5db46c335d2a337b69ff843380778371853e7a7c81027a0",
+  "mlx_version": "0.32.2"
+}

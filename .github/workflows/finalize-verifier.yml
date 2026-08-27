@@ -180,10 +180,10 @@ jobs:
               --output "$RUNNER_TEMP/engine-plan.json"
             reference=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["reference"])' "$RUNNER_TEMP/engine-plan.json")
             config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$RUNNER_TEMP/engine-plan.json")
-            current_reference=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["reference"])' "../proposal/$candidate/runtime.json")
-            current_config=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"]["immutable_id"])' "../proposal/$candidate/runtime.json")
+            current_reference=$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1]))["engine"]["distribution"]; print(value["reference"])' "../proposal/$candidate/runtime.json")
+            current_config=$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1]))["engine"]["distribution"]; print(value["immutable_id"])' "../proposal/$candidate/runtime.json")
             payload=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("payload_digest") or "")' "$RUNNER_TEMP/engine-plan.json")
-            current_payload=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["engine"]["oci"].get("payload_id") or "")' "../proposal/$candidate/runtime.json")
+            current_payload=$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1]))["engine"]["distribution"]; print(value.get("payload_id") or "")' "../proposal/$candidate/runtime.json")
             if test "$reference" != "$current_reference" || test "$config" != "$current_config" || { test -n "$current_payload" && test "$payload" != "$current_payload"; }; then
               echo "Engine identity differs from the canonical trusted build." >&2
               echo "Run the canonical Engine build locally, update runtime.json, and push once." >&2
@@ -195,7 +195,9 @@ jobs:
           CANDIDATE: ${{ steps.identity.outputs.candidate }}
         run: |
           set -euo pipefail
-          core-contract/bin/letsinfer pack "proposal/$CANDIDATE" --output "$RUNNER_TEMP/raw/runtime-trusted.letsinfer"
+          python3 trusted/tools/pack_runtime.py --core-root core-contract \
+            --candidate "proposal/$CANDIDATE" \
+            --output "$RUNNER_TEMP/raw/runtime-trusted.letsinfer"
       - name: Finalize the verifier bundle without executing proposal code
         env:
           FINALIZER_WORKFLOW_SHA: ${{ github.workflow_sha }}
@@ -272,7 +274,7 @@ jobs:
           if test "$JOB_STATUS" = success; then
             conclusion=success
             title="Verifier bundle is ready"
-            summary="Verifiers can download the exact immutable runtime and Engine artifact through letsinfer benchmark verify."
+            summary="Verifiers can download the exact immutable runtime and Engine artifact through letsinfer benchmark verification run."
           fi
           gh api "repos/$GITHUB_REPOSITORY/check-runs" --method POST --input - <<JSON
           {"name":"runtime/verifier-bundle","head_sha":"$HEAD_SHA","status":"completed","conclusion":"$conclusion","output":{"title":"$title","summary":"$summary"}}

@@ -160,10 +160,10 @@ jobs:
         run: |
           set -euo pipefail
           raw="$RUNNER_TEMP/raw"
-          ../core-contract/bin/letsinfer pack "../proposal/$CANDIDATE" \
-            --output "$raw/runtime-a.letsinfer"
-          ../core-contract/bin/letsinfer pack "../proposal/$CANDIDATE" \
-            --output "$raw/runtime-b.letsinfer"
+          python3 tools/pack_runtime.py --core-root ../core-contract \
+            --candidate "../proposal/$CANDIDATE" --output "$raw/runtime-a.letsinfer"
+          python3 tools/pack_runtime.py --core-root ../core-contract \
+            --candidate "../proposal/$CANDIDATE" --output "$raw/runtime-b.letsinfer"
           cmp "$raw/runtime-a.letsinfer" "$raw/runtime-b.letsinfer"
           version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "../proposal/$CANDIDATE/runtime.json")
           python3 tools/oci_artifact.py plan --artifact "$raw/runtime-a.letsinfer" \

@@ -18,6 +18,7 @@ from tools import (
     changed_candidates,
     generate_manifest,
     oci_artifact,
+    oci_layout,
     pin_engine,
     readme_onboarding,
     set_publication_source,
@@ -46,7 +47,7 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertEqual(
             changed_candidates.changed(ROOT, ["tools/generate_manifest.py"]),
-            sorted((deepseek, ling, nemotron, nemotron_vllm, qwen, sparkinfer)),
+            sorted(changed_candidates.candidates(ROOT)),
         )
 
     def test_runtime_oci_plan_is_deterministic_and_pull_compatible(self) -> None:
@@ -71,6 +72,9 @@ class ManifestToolTests(unittest.TestCase):
         self.assertEqual(len(manifest["layers"]), 1)
         self.assertEqual(
             manifest["layers"][0]["mediaType"], oci_artifact.PACK_MEDIA_TYPE
+        )
+        self.assertEqual(
+            oci_artifact.PACK_MEDIA_TYPE, oci_layout.RUNTIME_LAYER_MEDIA_TYPE
         )
         self.assertEqual(
             manifest["layers"][0]["annotations"]["org.opencontainers.image.title"],
@@ -109,9 +113,7 @@ class ManifestToolTests(unittest.TestCase):
         manifest_path = ROOT / "manifest.json"
         sources = generate_manifest.sources_from_manifest(manifest_path)
         previous = generate_manifest.read_object(manifest_path)
-        migration = generate_manifest.read_object(ROOT / "qualification-migration.json")
-        entries = generate_manifest.contract_migration_entries(migration)
-        entries["orphan--candidate@0.1.0"] = copy.deepcopy(next(iter(entries.values())))
+        entries = {"orphan--candidate@0.1.0": {}}
         with mock.patch.object(
             generate_manifest, "contract_migration_entries", return_value=entries
         ):
@@ -124,7 +126,8 @@ class ManifestToolTests(unittest.TestCase):
     def test_release_metadata_preserves_multiple_runtime_authors(self) -> None:
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         qwen = manifest["models"]["qwen3.8-27b"]["targets"]["dgx-spark"]
-        release = next(iter(qwen["candidates"].values()))["releases"]["0.1.0-rc.13"]
+        candidate = next(iter(qwen["candidates"].values()))
+        release = candidate["releases"][candidate["latest"]]
         self.assertEqual(
             release["authors"],
             [
@@ -164,90 +167,27 @@ class ManifestToolTests(unittest.TestCase):
                             self.assertEqual(release["verification"]["verifiers"], [])
                             self.assertIsNotNone(release["benchmark"])
                             observed.add((model_id, candidate_id, version))
-        self.assertEqual(observed, expected)
+        # Historical scored releases remain in the append-only catalog after
+        # their current candidate moves to a newer unscored schema release.
+        self.assertLessEqual(expected, observed)
 
     def test_every_candidate_validates_without_a_publication_source(self) -> None:
         records = generate_manifest.candidates(ROOT, {}, require_sources=False)
         self.assertEqual(
             {record["runtime"]["id"] for record in records},
-            {
-                "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
-                "sglang--inclusionai--ling-3.0-flash-int4--dgx-spark",
-                "sglang--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
-                "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-                "sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark",
-                "vllm--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
-            },
+            changed_candidates.candidates(ROOT),
         )
 
-    def test_contract_migration_is_bound_to_unchanged_execution_and_sealed_evidence(self) -> None:
-        candidate = "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark"
-        runtime = generate_manifest.read_object(ROOT / candidate / "runtime.json")
-        migration = generate_manifest.read_object(ROOT / "qualification-migration.json")
-        entry = migration["contract_migrations"][f"{candidate}@{runtime['version']}"]
-        current = generate_manifest.read_object(ROOT / "manifest.json")["models"][
-            runtime["logical_model"]
-        ]["targets"][runtime["target"]["id"]]["candidates"][candidate]["releases"][
-            runtime["version"]
-        ]
-        old_release = {
-            "source": current["verification"]["from_source"],
-            "engine": current["engine"],
-            "engine_oci": current["engine_oci"],
-            "model_uri": current["model_uri"],
-            "benchmark": current["benchmark"],
-            "provenance": {
-                key: current["provenance"][key]
-                for key in (
-                    "repository",
-                    "pull_request",
-                    "pull_request_url",
-                    "proposal_head_sha",
-                    "qualified_commit_sha",
-                )
-            },
-            "verification": {"verifiers": current["verification"]["verifiers"]},
-        }
-        release = generate_manifest.migrated_release(
-            root=ROOT,
-            runtime=runtime,
-            source=current["source"],
-            release_metadata=generate_manifest.read_object(
-                ROOT / candidate / "release.json"
+    def test_schema_six_catalog_history_is_retired_at_cutover(self) -> None:
+        self.assertEqual(
+            generate_manifest._previous_releases(
+                {
+                    "schema_version": 6,
+                    "models": {"legacy": {"targets": {}}},
+                }
             ),
-            old_release=old_release,
-            entry=entry,
+            {},
         )
-        self.assertEqual(release, current)
-        changed = copy.deepcopy(runtime)
-        changed["engine"]["environment"]["UNSEALED_CHANGE"] = "1"
-        with self.assertRaisesRegex(
-            generate_manifest.ManifestError, "execution contract changed"
-        ):
-            generate_manifest.migrated_release(
-                root=ROOT,
-                runtime=changed,
-                source=current["source"],
-                release_metadata=generate_manifest.read_object(
-                    ROOT / candidate / "release.json"
-                ),
-                old_release=old_release,
-                entry=entry,
-            )
-        bad_entry = dict(entry, benchmark_record_sha256="0" * 64)
-        with self.assertRaisesRegex(
-            generate_manifest.ManifestError, "benchmark digest differs"
-        ):
-            generate_manifest.migrated_release(
-                root=ROOT,
-                runtime=runtime,
-                source=current["source"],
-                release_metadata=generate_manifest.read_object(
-                    ROOT / candidate / "release.json"
-                ),
-                old_release=old_release,
-                entry=bad_entry,
-            )
 
     def test_parallel_runtime_contract_keeps_engine_semantics_out_of_core(self) -> None:
         runtime = json.loads(
@@ -333,7 +273,7 @@ class ManifestToolTests(unittest.TestCase):
         self.assertTrue(block.startswith("> **Run this model with [Let's Infer]"))
         self.assertIn("https://letsinfer.ai/", block)
         self.assertIn("curl -fsSL https://letsinfer.ai/install.sh | sh", block)
-        self.assertIn("letsinfer install qwen3.8-27b", block)
+        self.assertIn("letsinfer model install qwen3.8-27b", block)
         readme_onboarding.validate(block + "\n# Existing README\n", "qwen3.8-27b")
         with self.assertRaisesRegex(
             readme_onboarding.ReadmeError, "logical model deepseek-v4-flash"
@@ -436,6 +376,36 @@ class ManifestToolTests(unittest.TestCase):
             "7" * 64,
         )
 
+    def test_schema_six_engine_distribution_is_pinned(self) -> None:
+        runtime = json.loads(
+            (
+                ROOT
+                / "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark/runtime.json"
+            ).read_text(encoding="utf-8")
+        )
+        if "oci" in runtime["engine"]:
+            runtime["schema_version"] = 6
+            runtime["engine"]["distribution"] = {
+                "kind": "oci-container",
+                **runtime["engine"].pop("oci"),
+            }
+        changed, execution_changed = pin_engine.update(
+            runtime,
+            "ghcr.io/letsinferlabs/engine-images@sha256:" + "9" * 64,
+            "sha256:" + "8" * 64,
+            "sha256:" + "7" * 64,
+        )
+        self.assertTrue(changed)
+        self.assertTrue(execution_changed)
+        self.assertEqual(runtime["engine"]["distribution"]["kind"], "oci-container")
+        self.assertEqual(
+            runtime["engine"]["distribution"]["payload_id"], "sha256:" + "7" * 64
+        )
+        self.assertEqual(
+            runtime["benchmark"]["contract"]["tokenizer"]["engine_payload_sha256"],
+            "7" * 64,
+        )
+
     def test_pinning_changed_engine_removes_stale_bound_benchmark(self) -> None:
         source = (
             ROOT
@@ -488,7 +458,10 @@ class ManifestToolTests(unittest.TestCase):
             / "runtime.json"
         )
         runtime = json.loads(source.read_text(encoding="utf-8"))
-        runtime["engine"]["oci"]["payload_id"] = "sha256:" + "5" * 64
+        distribution = runtime["engine"].get(
+            "distribution", runtime["engine"].get("oci")
+        )
+        distribution["payload_id"] = "sha256:" + "5" * 64
         runtime["benchmark"]["contract"]["tokenizer"].pop(
             "engine_image_sha256", None
         )
@@ -520,9 +493,11 @@ class ManifestToolTests(unittest.TestCase):
         source = "ghcr.io/letsinferlabs/runtimes/example@sha256:" + "7" * 64
         set_publication_source.update(document, candidate, source)
         self.assertNotEqual(document, before)
+        record = document["models"]["deepseek-v4-flash"]["targets"]["dgx-spark"][
+            "candidates"
+        ][candidate]
         self.assertEqual(
-            document["models"]["deepseek-v4-flash"]["targets"]["dgx-spark"]
-            ["candidates"][candidate]["releases"]["0.11.0-rc.11"]["source"],
+            record["releases"][record["latest"]]["source"],
             source,
         )
         self.assertEqual(
@@ -576,7 +551,7 @@ class ManifestToolTests(unittest.TestCase):
         )
         self.assertIn("contents: write", workflow)
         self.assertIn("gh release create", workflow)
-        self.assertIn("catalog-v6-$GITHUB_SHA", workflow)
+        self.assertIn("catalog-v7-$GITHUB_SHA", workflow)
         self.assertIn("revocations.json.sig", workflow)
         self.assertNotIn("tools.benchmark_artifact push", workflow)
         self.assertIn("catalog-public-key.pem", workflow)

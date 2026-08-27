@@ -44,6 +44,12 @@ It pins the transport manifest/configuration and stable execution payload in
 fails with a direct correction message if the authored identity differs. CI
 never commits generated pins to your branch.
 
+Local installation is allowed before qualification and exercises the same
+managed core placement and lifecycle as a catalog release. It does not make a
+candidate qualified, publish an artifact, or change the evidence required for
+catalog recommendation; do not add qualification or activation flags to
+`runtime.json` to make local testing work.
+
 ## Pull request lifecycle
 
 1. Open one PR changing one candidate.

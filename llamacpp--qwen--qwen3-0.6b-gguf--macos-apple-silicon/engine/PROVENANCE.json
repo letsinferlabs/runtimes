@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "upstream": "https://github.com/ggml-org/llama.cpp",
+  "revision": "c1d0e7a004015f23bc0233470b747b596f29b264",
+  "release": "b10621",
+  "archive_sha256": "429c8270608600188035e5e92f7d78dffb7900904fe7dd7e6a84f48068cd13cf",
+  "archive_bytes": 10954823,
+  "payload_sha256": "b96e00defa35443b1d1b2957f1b088f606f7db3445550b1339fcf64eeea2bd65"
+}
