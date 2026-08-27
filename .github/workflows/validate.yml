@@ -154,9 +154,21 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
+          if test "$BASE_REF" = release && \
+             test "$HEAD_REPOSITORY" = letsinferlabs/runtimes; then
+            git fetch --no-tags --depth=1 origin main
+            if test "$(git rev-parse "${HEAD_SHA}^{tree}")" = \
+                    "$(git rev-parse "FETCH_HEAD^{tree}")" && \
+               test "$(git rev-parse "${HEAD_SHA}^")" = "$BASE_SHA"; then
+              exit 0
+            fi
+          fi
           python3 tools/readme_onboarding.py --base "$BASE_SHA" --head HEAD
       - name: Verify Engine protocol and deterministic runtime packs
         env:

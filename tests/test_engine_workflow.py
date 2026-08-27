@@ -170,6 +170,19 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn('git rev-parse "${HEAD_SHA}^"', workflow)
         self.assertIn('= "$BASE_SHA"', workflow)
 
+        onboarding = workflow.split(
+            "- name: Require Let's Infer onboarding in changed runtime READMEs", 1
+        )[1].split(
+            "- name: Verify Engine protocol and deterministic runtime packs", 1
+        )[0]
+        self.assertIn('test "$BASE_REF" = release', onboarding)
+        self.assertIn('test "$HEAD_REPOSITORY" = letsinferlabs/runtimes', onboarding)
+        self.assertIn('git rev-parse "${HEAD_SHA}^{tree}"', onboarding)
+        self.assertIn('git rev-parse "FETCH_HEAD^{tree}"', onboarding)
+        self.assertIn('git rev-parse "${HEAD_SHA}^"', onboarding)
+        self.assertIn('= "$BASE_SHA"', onboarding)
+        self.assertIn("exit 0", onboarding)
+
     def test_new_runtime_version_may_only_clear_stale_bot_qualification(self) -> None:
         workflow = (ROOT / ".github/workflows/validate.yml").read_text(
             encoding="utf-8"
