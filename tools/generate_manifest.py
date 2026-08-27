@@ -8,7 +8,6 @@ import copy
 import hashlib
 import json
 import math
-import os
 import pathlib
 import re
 import sys
@@ -45,7 +44,7 @@ RECOMMENDATION_POLICY = {
     "cache": "uncached",
     "tie_breakers": ["score", "version", "candidate"],
 }
-CONTRACT_MIGRATION_METHOD = "runtime-contract-migration-v1"
+CONTRACT_CARRYFORWARD_METHOD = "runtime-contract-migration-v1"
 BENCHMARK_SCHEMA_VERSIONS = {4, 5, 6, 7, 8}
 SHARED_BENCHMARK_SCHEMA_VERSIONS = {5, 6, 7, 8}
 TTFT_CACHE_BENCHMARK_SCHEMA_VERSION = 6
@@ -498,17 +497,34 @@ def validate_benchmark_integrity(record: dict[str, Any], where: str) -> None:
         "engine_oci", "target", "target_contract_sha256",
     }
     if (
-        record.get("schema_version") != 4
+        record.get("schema_version") not in BENCHMARK_SCHEMA_VERSIONS
         or not isinstance(subject, dict)
         or set(subject) != subject_fields
         or not SHA256_RE.fullmatch(str(subject.get("target_contract_sha256")))
         or not SHA256_RE.fullmatch(str(record.get("benchmark_contract_sha256")))
     ):
         raise ManifestError(f"benchmark migration record is invalid: {where}")
+    schema_version = record["schema_version"]
+    embedded_contract = record.get("benchmark_contract")
+    if schema_version in SHARED_BENCHMARK_SCHEMA_VERSIONS and (
+        not isinstance(embedded_contract, dict)
+        or hashlib.sha256(canonical_bytes(embedded_contract)).hexdigest()
+        != record["benchmark_contract_sha256"]
+    ):
+        raise ManifestError(f"benchmark migration contract identity differs: {where}")
     results = record.get("results")
     if not isinstance(results, list) or not results:
         raise ManifestError(f"benchmark migration results are unavailable: {where}")
-    results_sha = hashlib.sha256(canonical_bytes(results)).hexdigest()
+    if schema_version == TTFT_CACHE_BENCHMARK_SCHEMA_VERSION or (
+        schema_version in {7, 8} and "ttft_cache" in record
+    ):
+        ttft_cache = record.get("ttft_cache")
+        if not isinstance(ttft_cache, dict):
+            raise ManifestError(f"benchmark migration TTFT cache result is unavailable: {where}")
+        bound_results = {"results": results, "ttft_cache": ttft_cache}
+    else:
+        bound_results = results
+    results_sha = hashlib.sha256(canonical_bytes(bound_results)).hexdigest()
     if record.get("results_sha256") != results_sha:
         raise ManifestError(f"benchmark migration results identity differs: {where}")
     timestamp_ns = record.get("timestamp_unix_ns")
@@ -536,36 +552,7 @@ def validate_benchmark_integrity(record: dict[str, Any], where: str) -> None:
         raise ManifestError(f"benchmark migration identity differs: {where}")
 
 
-def contract_migration_entries(migration: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    entries = migration.get("contract_migrations")
-    if not isinstance(entries, dict):
-        raise ManifestError("runtime contract migration ledger is invalid")
-    fields = {
-        "from_version",
-        "benchmark_record",
-        "benchmark_record_sha256",
-        "execution_contract_sha256",
-    }
-    for identity, entry in entries.items():
-        candidate, separator, version = str(identity).rpartition("@")
-        if (
-            not separator
-            or not CANDIDATE_RE.fullmatch(candidate)
-            or not VERSION_RE.fullmatch(version)
-            or not isinstance(entry, dict)
-            or set(entry) != fields
-            or not VERSION_RE.fullmatch(str(entry.get("from_version")))
-            or entry["from_version"] == version
-            or entry.get("benchmark_record")
-            != f"{candidate}/benchmark.previous.json"
-            or not SHA256_RE.fullmatch(str(entry.get("benchmark_record_sha256")))
-            or not SHA256_RE.fullmatch(str(entry.get("execution_contract_sha256")))
-        ):
-            raise ManifestError(f"runtime contract migration is invalid: {identity}")
-    return entries
-
-
-def migrated_release(
+def carried_release(
     *,
     root: pathlib.Path,
     runtime: dict[str, Any],
@@ -625,7 +612,7 @@ def migrated_release(
     if (
         benchmark.get("benchmark_contract_sha256") != contract_sha
         or not isinstance(old_benchmark, dict)
-        or old_benchmark.get("id") != benchmark.get("id")
+        or not SHA256_RE.fullmatch(str(old_benchmark.get("id")))
         or old_benchmark.get("suite") != runtime["benchmark"]["contract"]["suite"]
         or old_benchmark.get("score") != benchmark_score(benchmark)
         or old_release.get("engine") != runtime["engine"]["id"]
@@ -639,6 +626,9 @@ def migrated_release(
     if (
         not isinstance(old_provenance, dict)
         or not isinstance(old_verification, dict)
+        or not SHA256_RE.fullmatch(
+            str(old_verification.get("consensus_sha256"))
+        )
         or not isinstance(old_verification.get("verifiers"), list)
     ):
         raise ManifestError(f"runtime migration qualification is invalid: {identity}")
@@ -656,32 +646,106 @@ def migrated_release(
         "authors": release_metadata["authors"],
         "source": source,
         "engine": runtime["engine"]["id"],
-        "engine_oci": engine_distribution(runtime)["reference"],
+        "engine_distribution": distribution_projection(
+            runtime["engine"]["distribution"],
+            platform=runtime["target"]["platform"],
+        ),
         "model_uri": runtime["model"]["uri"],
         "license": release_metadata["license"],
         "benchmark": {
-            "id": benchmark["id"],
+            "id": old_benchmark["id"],
             "suite": runtime["benchmark"]["contract"]["suite"],
             "score": benchmark_score(benchmark),
         },
         "provenance": {
-            "method": CONTRACT_MIGRATION_METHOD,
+            "method": CONTRACT_CARRYFORWARD_METHOD,
             **common_provenance,
             "from_version": from_version,
             "from_source": old_release["source"],
             "benchmark_record_sha256": entry["benchmark_record_sha256"],
             "execution_contract_sha256": execution_sha,
+            "consensus_sha256": old_verification["consensus_sha256"],
         },
         "verification": {
-            "method": CONTRACT_MIGRATION_METHOD,
+            "method": CONTRACT_CARRYFORWARD_METHOD,
             "from_version": from_version,
             "from_source": old_release["source"],
             "benchmark_record_path": entry["benchmark_record"],
             "benchmark_record_sha256": entry["benchmark_record_sha256"],
             "execution_contract_sha256": execution_sha,
+            "consensus_sha256": old_verification["consensus_sha256"],
             "verifiers": old_verification["verifiers"],
         },
     }
+
+
+def validate_carried_release(
+    *,
+    root: pathlib.Path,
+    runtime: dict[str, Any],
+    source: str | None,
+    release_metadata: dict[str, Any],
+    release: dict[str, Any],
+) -> None:
+    """Revalidate a materialized qualification against stable execution bytes."""
+
+    verification = release.get("verification")
+    provenance = release.get("provenance")
+    if (
+        not isinstance(verification, dict)
+        or verification.get("method") != CONTRACT_CARRYFORWARD_METHOD
+        or not isinstance(provenance, dict)
+        or provenance.get("method") != CONTRACT_CARRYFORWARD_METHOD
+    ):
+        raise ManifestError(
+            f"runtime qualification carry-forward is invalid: {runtime['id']}@{runtime['version']}"
+        )
+    release_distribution = release.get("engine_distribution")
+    old_release = {
+        "source": verification.get("from_source"),
+        "engine": release.get("engine"),
+        "engine_oci": (
+            release_distribution.get("reference")
+            if isinstance(release_distribution, dict)
+            else None
+        ),
+        "model_uri": release.get("model_uri"),
+        "benchmark": release.get("benchmark"),
+        "provenance": {
+            key: provenance.get(key)
+            for key in (
+                "repository",
+                "pull_request",
+                "pull_request_url",
+                "proposal_head_sha",
+                "qualified_commit_sha",
+            )
+        },
+        "verification": {
+            "consensus_sha256": verification.get("consensus_sha256"),
+            "verifiers": verification.get("verifiers"),
+        },
+    }
+    entry = {
+        "from_version": verification.get("from_version"),
+        "benchmark_record": verification.get("benchmark_record_path"),
+        "benchmark_record_sha256": verification.get("benchmark_record_sha256"),
+        "execution_contract_sha256": verification.get(
+            "execution_contract_sha256"
+        ),
+    }
+    expected = carried_release(
+        root=root,
+        runtime=runtime,
+        source=source,
+        release_metadata=release_metadata,
+        old_release=old_release,
+        entry=entry,
+    )
+    if release != expected:
+        raise ManifestError(
+            f"materialized qualification changed: {runtime['id']}@{runtime['version']}"
+        )
 
 
 def source_map(values: list[str]) -> dict[tuple[str, str], str]:
@@ -847,15 +911,6 @@ def validate_consensus_binding(
         ):
             raise ManifestError(f"runtime maintainer bypass score is invalid: {candidate}")
     if waived:
-        configured = os.environ.get("LETSINFER_VERIFIER_BYPASS_GITHUB_IDS", "")
-        values = configured.split(",") if configured else []
-        if (
-            not values
-            or any(re.fullmatch(r"[1-9][0-9]*", value) is None for value in values)
-            or len(values) != len({int(value) for value in values})
-        ):
-            raise ManifestError("maintainer verifier-waiver IDs are not configured")
-        authorized_ids = {int(value) for value in values}
         if (
             not isinstance(waiver, dict)
             or set(waiver)
@@ -899,8 +954,6 @@ def validate_consensus_binding(
             f"{candidate}.waiver.actor",
             allow_organization=False,
         )
-        if waiver["actor"]["github_id"] not in authorized_ids:
-            raise ManifestError(f"runtime verifier waiver actor is unauthorized: {candidate}")
     subject = consensus.get("subject")
     if not isinstance(subject, dict):
         raise ManifestError(f"runtime consensus subject is invalid: {candidate}")
@@ -1115,10 +1168,6 @@ def candidates(
 def _previous_releases(previous: dict[str, Any] | None) -> dict[tuple[str, str, str], dict[str, Any]]:
     if previous is None:
         return {}
-    # The one-time schema-6 to schema-7 cutover intentionally retires every
-    # pre-schema-6 runtime artifact. There are no users requiring compatibility.
-    if previous.get("schema_version") == 6:
-        return {}
     if previous.get("schema_version") != SCHEMA_VERSION:
         return {}
     result: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -1248,18 +1297,6 @@ def generate(
     items = candidates(root, sources)
     revoked = revocation_identities(root)
     history = _previous_releases(previous)
-    migration = read_object(root / "qualification-migration.json")
-    migration_releases = migration.get("releases")
-    if (
-        set(migration) != {"schema_version", "method", "releases", "contract_migrations"}
-        or migration.get("schema_version") != 2
-        or migration.get("method") != "maintainer-qualified-pre-community-v1"
-        or not isinstance(migration_releases, dict)
-    ):
-        raise ManifestError("pre-community qualification migration is invalid")
-    migration_entries = contract_migration_entries(migration)
-    consumed_migrations: set[str] = set()
-    retained_historical_migrations: set[str] = set()
     targets: dict[str, Any] = {}
     models: dict[str, Any] = {}
     for item in items:
@@ -1268,110 +1305,21 @@ def generate(
         target = runtime["target"]
         target_id = target["id"]
         releases = history.get((runtime["logical_model"], target_id, candidate), {})
-        retained_historical_migrations.update(
-            f"{candidate}@{version}" for version in releases
+        current_release = releases.get(runtime["version"])
+        carried = bool(
+            isinstance(current_release, dict)
+            and current_release.get("verification", {}).get("method")
+            == CONTRACT_CARRYFORWARD_METHOD
         )
-        normalized_releases: dict[str, Any] = {}
-        for version, old_release in releases.items():
-            if "qualified" not in old_release:
-                normalized_releases[version] = old_release
-                continue
-            migration_key = f"{candidate}@{version}"
-            provenance = migration_releases.get(migration_key)
-            if (
-                old_release.get("qualified") is not True
-                or old_release.get("revoked") is not False
-                or not isinstance(provenance, dict)
-            ):
-                raise ManifestError(
-                    f"legacy release lacks explicit qualification migration: {migration_key}"
-                )
-            benchmark = old_release.get("benchmark")
-            normalized_releases[version] = {
-                "authors": item["release_metadata"]["authors"],
-                "source": old_release["source"],
-                "engine": old_release["engine"],
-                "engine_oci": old_release["engine_oci"],
-                "model_uri": old_release["model_uri"],
-                "license": old_release["license"],
-                "benchmark": (
-                    None
-                    if benchmark is None
-                    else {
-                        "id": benchmark["id"],
-                        "suite": benchmark["suite"],
-                        "score": benchmark["score"],
-                    }
-                ),
-                "provenance": {
-                    "method": migration["method"],
-                    **provenance,
-                },
-                "verification": {
-                    "method": migration["method"],
-                    "verifiers": [],
-                },
-            }
-        releases = normalized_releases
-        migration_key = f"{candidate}@{runtime['version']}"
-        migration_entry = migration_entries.get(migration_key)
-        if migration_entry is not None:
-            if item["qualified"]:
-                raise ManifestError(
-                    f"runtime cannot use consensus and contract migration together: {migration_key}"
-                )
-            from_version = migration_entry["from_version"]
-            old_release = releases.get(from_version)
-            existing_release = releases.get(runtime["version"])
-            if old_release is None and existing_release is not None:
-                existing_verification = existing_release.get("verification")
-                existing_provenance = existing_release.get("provenance")
-                if not isinstance(existing_verification, dict) or not isinstance(
-                    existing_provenance, dict
-                ):
-                    raise ManifestError(
-                        f"runtime contract migration history is invalid: {migration_key}"
-                    )
-                old_release = {
-                    "source": existing_verification.get("from_source"),
-                    "engine": existing_release.get("engine"),
-                    "engine_oci": existing_release.get("engine_oci"),
-                    "model_uri": existing_release.get("model_uri"),
-                    "benchmark": existing_release.get("benchmark"),
-                    "provenance": {
-                        key: existing_provenance.get(key)
-                        for key in (
-                            "repository",
-                            "pull_request",
-                            "pull_request_url",
-                            "proposal_head_sha",
-                            "qualified_commit_sha",
-                        )
-                    },
-                    "verification": {
-                        "verifiers": existing_verification.get("verifiers")
-                    },
-                }
-            if old_release is None:
-                raise ManifestError(
-                    f"runtime contract migration source release is missing: {migration_key}"
-                )
-            release = migrated_release(
+        if carried:
+            validate_carried_release(
                 root=root,
                 runtime=runtime,
                 source=item["source"],
                 release_metadata=item["release_metadata"],
-                old_release=old_release,
-                entry=migration_entry,
+                release=current_release,
             )
-            if existing_release is not None and existing_release != release:
-                raise ManifestError(
-                    f"immutable migrated release changed for {migration_key}"
-                )
-            releases[runtime["version"]] = release
-            releases.pop(from_version, None)
-            consumed_migrations.add(migration_key)
-        if item["qualified"]:
+        if item["qualified"] and not carried:
             consensus = item["consensus"]
             consensus_path = f"{candidate}/benchmark.consensus.json"
             consensus_score = consensus["score"]["aggregate_tps"]
@@ -1470,16 +1418,6 @@ def generate(
             "latest": latest,
             "releases": dict(sorted(releases.items(), key=lambda item: _version_key(item[0]))),
         }
-    orphaned_migrations = sorted(
-        set(migration_entries)
-        - consumed_migrations
-        - retained_historical_migrations
-    )
-    if orphaned_migrations:
-        raise ManifestError(
-            "runtime contract migration does not identify a current candidate: "
-            + orphaned_migrations[0]
-        )
     for model in models.values():
         for target in model["targets"].values():
             qualified = [
