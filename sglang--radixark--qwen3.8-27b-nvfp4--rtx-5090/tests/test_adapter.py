@@ -70,6 +70,7 @@ class Rtx5090EngineTests(unittest.TestCase):
         self.assertIn("qwen3.8-27b", command)
         self.assertNotIn("DFLASH", command)
         self.assertNotIn("--disable-flashinfer-autotune", command)
+        self.assertIn("--disable-prefill-cuda-graph", command)
         self.assertNotIn("--disable-decode-cuda-graph", command)
         self.assertNotIn("--bf16-gemm-backend", command)
         self.assertNotIn("gemv", command)

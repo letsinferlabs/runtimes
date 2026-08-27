@@ -21,7 +21,8 @@ OpenAI-compatible API.
 
 - **One-command installation** -- Let's Infer downloads the exact model,
   runtime pack, and Engine OCI, then starts the API.
-- **64K context** -- qualified with a 65,536-token context ceiling.
+- **64K context** -- benchmarked with 65,536-token prompts and a 66,048-token
+  serving ceiling that preserves the declared completion budget.
 - **Native SGLang scheduling** -- up to four active requests behind 64 gateway
   connections, with dynamic admission and queueing.
 - **RTX 5090 tuning** -- the linux/amd64 CUDA 12.9 SGLang Engine, SM120
@@ -47,7 +48,7 @@ benchmark contract, qualification source, and target-specific settings live
 beside `runtime.json`; generic gateway, Watchdog, prompt, and benchmark-runner
 code stays in Let's Infer core.
 
-Install the qualified RTX 5090 candidate with:
+After qualification and catalog publication, install the RTX 5090 runtime with:
 
 ```bash
 letsinfer model install qwen3.8-27b
@@ -58,7 +59,7 @@ the pinned Engine OCI. You do not download or place the weights separately.
 
 ## Reproduce this
 
-After installing the qualified runtime, run its complete cache-aware benchmark:
+After installing the published runtime, run its complete cache-aware benchmark:
 
 ```bash
 letsinfer benchmark run qwen3.8-27b
