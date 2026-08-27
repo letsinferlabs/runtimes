@@ -779,20 +779,17 @@ class PublicationPolicyTests(unittest.TestCase):
         ).hexdigest()
         return runtime, consensus
 
-    def test_verifier_waiver_is_bound_to_configured_immutable_account_id(self) -> None:
+    def test_verifier_waiver_retains_immutable_account_identity(self) -> None:
         runtime, consensus = self._waived_consensus(10000001)
-        with mock.patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(
-            generate_manifest.ManifestError, "IDs are not configured"
-        ):
-            generate_manifest.validate_consensus_binding(runtime, consensus)
-        with mock.patch.dict(
-            os.environ, {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "999"}
-        ), self.assertRaisesRegex(generate_manifest.ManifestError, "unauthorized"):
-            generate_manifest.validate_consensus_binding(runtime, consensus)
-        with mock.patch.dict(
-            os.environ, {
-                "LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001,10000002"
-            }
+        generate_manifest.validate_consensus_binding(runtime, consensus)
+
+        consensus["waiver"]["actor"]["github_id"] = "10000001"
+        consensus.pop("consensus_id")
+        consensus["consensus_id"] = hashlib.sha256(
+            generate_manifest.canonical_bytes(consensus)
+        ).hexdigest()
+        with self.assertRaisesRegex(
+            generate_manifest.ManifestError, "GitHub account"
         ):
             generate_manifest.validate_consensus_binding(runtime, consensus)
 
@@ -810,23 +807,14 @@ class PublicationPolicyTests(unittest.TestCase):
         consensus["consensus_id"] = hashlib.sha256(
             generate_manifest.canonical_bytes(consensus)
         ).hexdigest()
-        with mock.patch.dict(
-            os.environ,
-            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
-            clear=True,
-        ):
-            generate_manifest.validate_consensus_binding(runtime, consensus)
+        generate_manifest.validate_consensus_binding(runtime, consensus)
 
         subject["engine_payload_sha256"] = "8" * 64
         consensus.pop("consensus_id")
         consensus["consensus_id"] = hashlib.sha256(
             generate_manifest.canonical_bytes(consensus)
         ).hexdigest()
-        with mock.patch.dict(
-            os.environ,
-            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
-            clear=True,
-        ), self.assertRaisesRegex(
+        with self.assertRaisesRegex(
             generate_manifest.ManifestError, "execution binding differs"
         ):
             generate_manifest.validate_consensus_binding(runtime, consensus)
@@ -847,23 +835,14 @@ class PublicationPolicyTests(unittest.TestCase):
             generate_manifest.canonical_bytes(consensus)
         ).hexdigest()
 
-        with mock.patch.dict(
-            os.environ,
-            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
-            clear=True,
-        ):
-            generate_manifest.validate_consensus_binding(runtime, consensus)
+        generate_manifest.validate_consensus_binding(runtime, consensus)
 
         consensus["score"]["aggregate_tps"] = 1.0
         consensus.pop("consensus_id")
         consensus["consensus_id"] = hashlib.sha256(
             generate_manifest.canonical_bytes(consensus)
         ).hexdigest()
-        with mock.patch.dict(
-            os.environ,
-            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
-            clear=True,
-        ), self.assertRaisesRegex(
+        with self.assertRaisesRegex(
             generate_manifest.ManifestError, "bypass score is invalid"
         ):
             generate_manifest.validate_consensus_binding(runtime, consensus)
@@ -995,12 +974,7 @@ class PublicationPolicyTests(unittest.TestCase):
             "allowlisted-maintainer-bypass-v1",
         )
         self.assertEqual(consensus["runtime_authors"], release["authors"])
-        with mock.patch.dict(
-            os.environ,
-            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
-            clear=True,
-        ):
-            generate_manifest.validate_consensus_binding(runtime, consensus)
+        generate_manifest.validate_consensus_binding(runtime, consensus)
 
     def test_maintainer_bypass_bootstraps_new_model_without_a_benchmark(self) -> None:
         source_candidate = "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark"
@@ -1080,12 +1054,7 @@ class PublicationPolicyTests(unittest.TestCase):
             },
         )
         self.assertEqual(consensus["runtime_authors"], release["authors"])
-        with mock.patch.dict(
-            os.environ,
-            {"LETSINFER_VERIFIER_BYPASS_GITHUB_IDS": "10000001"},
-            clear=True,
-        ):
-            generate_manifest.validate_consensus_binding(runtime, consensus)
+        generate_manifest.validate_consensus_binding(runtime, consensus)
 
 
 if __name__ == "__main__":
