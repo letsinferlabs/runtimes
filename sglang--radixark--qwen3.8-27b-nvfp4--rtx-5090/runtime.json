@@ -37,7 +37,6 @@
       "0.880",
       "--attention-backend",
       "flashinfer",
-      "--disable-flashinfer-autotune",
       "--chunked-prefill-size",
       "8192",
       "--max-prefill-tokens",
