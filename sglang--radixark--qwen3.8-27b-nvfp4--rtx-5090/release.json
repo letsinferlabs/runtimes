@@ -1,17 +1,1 @@
-{
-  "schema_version": 2,
-  "authors": [
-    {
-      "github_login": "MiaAI-Lab",
-      "github_id": 83042094,
-      "github_type": "User"
-    },
-    {
-      "github_login": "letsinferlabs",
-      "github_id": 317451145,
-      "github_type": "Organization"
-    }
-  ],
-  "license": "AGPL-3.0-only",
-  "provenance": null
-}
+{"authors":[{"github_id":83042094,"github_login":"MiaAI-Lab","github_type":"User"},{"github_id":317451145,"github_login":"letsinferlabs","github_type":"Organization"}],"license":"AGPL-3.0-only","provenance":{"consensus_sha256":"32ddad86aeaf34b313122e474b7d8bbf6d67feba4cc21935dc6a614a4ff4fa5c","execution_sha256":"a5542895a1667588df3ca29769ee04af87fdadee51427e353d44035afc24cf66","proposal_head_sha":"6f6679c2030e0a57f437eb4e08638e048891989e","pull_request":123,"pull_request_url":"https://github.com/letsinferlabs/runtimes/pull/123","qualified_commit_sha":"fe82ae79e9a08f9666c5747d73333323cfe458af","repository":"letsinferlabs/runtimes"},"schema_version":2}
