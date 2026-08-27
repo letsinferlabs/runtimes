@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "base_image": "docker.io/lmsysorg/sglang@sha256:440744edff15a933e8a472bd8ca94a3bc4a72989209f5d08ae11db075a2cad0b",
+  "base_image_id": "sha256:6305caa4b7bb7159ae4f079e24fdf628fafa5c208fe048ddfb44a8652e7c8efd",
+  "base_sglang_version": "0.0.0.dev0",
+  "base_upstream_commit": "5f55db35e926d50676f75b812640ea2410b0fe0e",
+  "base_cuda_version": "12.9.2",
+  "upstream_repository": "sgl-project/sglang",
+  "upstream_commit": "1cf2b8c54d81802abc15dcf23a29b9cc687bc01e",
+  "upstream_recipe": {
+    "repository": "Weschera/Qwen3.8-27B-NVFP4-DFlash2-DGX-Spark",
+    "commit": "3fad86cb3719876288b57b121ae0dd45bdb6343a"
+  },
+  "method": "full-tree-source-overlay",
+  "runtime_fixes": [
+    "hash-pinned-triton-3.6.0-sm120-jit-compatibility",
+    "enable-target-local-flashinfer-autotuning",
+    "rank-greedy-dflash-candidates-by-expected-accepted-prefix-value"
+  ],
+  "sealed_artifacts": {
+    "dflash_selector_sha256": "eda3392ea66597f113c76cf1d9113e9bba290590e31a75ceee537e4269df2dae",
+    "flashinfer_profile_sha256": "ea30460e95be5d3c14186e58048f8dc14b79a3416f73c073b6501c36ae8eae98"
+  }
+}
