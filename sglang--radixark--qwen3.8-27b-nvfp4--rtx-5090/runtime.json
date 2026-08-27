@@ -43,7 +43,6 @@
       "--max-prefill-tokens",
       "16384",
       "--disable-prefill-cuda-graph",
-      "--disable-decode-cuda-graph",
       "--kv-cache-dtype",
       "fp8_e4m3",
       "--mamba-ssm-dtype",
