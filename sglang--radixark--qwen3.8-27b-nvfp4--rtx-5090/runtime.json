@@ -1,0 +1,211 @@
+{
+  "schema_version": 6,
+  "id": "sglang--radixark--qwen3.8-27b-nvfp4--rtx-5090",
+  "version": "0.1.0-rc.1",
+  "logical_model": "qwen3.8-27b",
+  "target": {
+    "id": "rtx-5090",
+    "platform": "linux/amd64",
+    "accelerator": {
+      "vendor": "nvidia",
+      "architecture": "sm_120",
+      "count": 1,
+      "partitioning": "full-device",
+      "minimum_memory_gib": 32
+    },
+    "memory": {
+      "topology": "discrete",
+      "minimum_total_gib": 96
+    },
+    "placement": {
+      "strategy": "single",
+      "node_count": 1,
+      "interconnect": {
+        "kind": "any",
+        "rdma_required": false,
+        "minimum_speed_mbps": 0,
+        "minimum_mtu": 0
+      }
+    }
+  },
+  "engine": {
+    "model_format": "huggingface-snapshot",
+    "cache_provider": "sglang-radix-v1",
+    "arguments": [
+      "--trust-remote-code",
+      "--mem-fraction-static",
+      "0.880",
+      "--attention-backend",
+      "flashinfer",
+      "--chunked-prefill-size",
+      "8192",
+      "--max-prefill-tokens",
+      "16384",
+      "--disable-prefill-cuda-graph",
+      "--kv-cache-dtype",
+      "fp8_e4m3",
+      "--mamba-ssm-dtype",
+      "bfloat16",
+      "--mamba-full-memory-ratio",
+      "4.21",
+      "--mamba-radix-cache-strategy",
+      "extra_buffer",
+      "--max-mamba-cache-size",
+      "20",
+      "--max-running-requests",
+      "4",
+      "--context-length",
+      "66048",
+      "--reasoning-parser",
+      "qwen3",
+      "--tool-call-parser",
+      "qwen3_coder",
+      "--sampling-defaults",
+      "model",
+      "--random-seed",
+      "42042"
+    ],
+    "environment": {
+      "SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK": "0",
+      "SGLANG_FLASHINFER_AUTOTUNE_CACHE": "1",
+      "TRITON_CACHE_DIR": "/root/.triton"
+    },
+    "id": "sglang",
+    "protocol": {
+      "version": 2
+    },
+    "distribution": {
+      "kind": "oci-container",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:4938d201dfce629f4db2417cb5c3129e5115b5e277b37ddc210994cf1ed78637",
+      "immutable_id": "sha256:d1250f3fc4efb1d3dccbbd39a5bf3c0a9cc8a0de9af053777d462a6c5efee360",
+      "payload_id": "sha256:5b0bd9848d1aef89a65eb5ad1f166804179a82844d89f356cc1e0594e0713b9c",
+      "base": "docker.io/lmsysorg/sglang@sha256:7d81a16a2ebbe104be37263b49f1bfc0a6a95c1d57e500875dbe7f7c41301e45"
+    }
+  },
+  "model": {
+    "uri": "hf://RadixArk/Qwen3.8-27B-NVFP4",
+    "artifact": "model",
+    "acquisition": {
+      "image": "docker.io/lmsysorg/sglang@sha256:440744edff15a933e8a472bd8ca94a3bc4a72989209f5d08ae11db075a2cad0b",
+      "kind": "oci-container"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "model",
+      "format": "huggingface-snapshot",
+      "revision": "554ebba9b5f1b79dc11246341960360e6ef05ef4",
+      "uri": "hf://RadixArk/Qwen3.8-27B-NVFP4"
+    }
+  ],
+  "container": {
+    "memory_bytes": 85899345920,
+    "shm_bytes": 17179869184,
+    "cpuset_cpus": "0-15",
+    "min_available_gib": 64,
+    "runtime_min_available_gib": 8,
+    "min_gpu_free_gib": 28,
+    "runtime_min_gpu_free_gib": 2,
+    "startup_timeout_seconds": 1800
+  },
+  "cache": {
+    "provider": "sglang-radix-v1",
+    "persistent": false,
+    "prewarm": false,
+    "replay_output_policy": null,
+    "config": {}
+  },
+  "serving": {
+    "max_connections": 64,
+    "max_active_requests": 4,
+    "max_context_tokens": 66048,
+    "gate": {
+      "measured_commit": "d4ae1f5dd016bba03f80769a1c8e52203477ebf4"
+    }
+  },
+  "benchmark": {
+    "contract": {
+      "schema_version": 8,
+      "suite": "letsinfer-code-prose-v1",
+      "generator": {
+        "id": "letsinfer-code-prose",
+        "version": 8
+      },
+      "tokenizer": {
+        "capability": "engine-rendered-chat-count-v1",
+        "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
+        "engine_payload_sha256": "5b0bd9848d1aef89a65eb5ad1f166804179a82844d89f356cc1e0594e0713b9c",
+        "render_contract": "openai-chat-user-v1"
+      },
+      "request": {
+        "output_tokens": 128,
+        "min_completion_tokens": 128,
+        "require_natural_stop": false,
+        "temperature": 0,
+        "seed": 42042
+      },
+      "sample_interval_seconds": 5,
+      "cases": [
+        {
+          "id": "32k",
+          "prompt_tokens": 32768,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "64k",
+          "prompt_tokens": 65536,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        }
+      ],
+      "domains": [
+        "code",
+        "prose"
+      ],
+      "execution": {
+        "isolation": "fresh-matrix",
+        "prefix_state": "shared",
+        "samples_per_cell": 1,
+        "stream_prefix": "shared-body"
+      },
+      "short": {
+        "domains": [
+          "code",
+          "prose"
+        ],
+        "prompt_tokens": 256,
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "request": {
+          "output_tokens": 512,
+          "min_completion_tokens": 512,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      },
+      "ttft_cache": {
+        "prompt_tokens": 64000,
+        "prompt_domain": "code",
+        "repetitions": 2,
+        "request": {
+          "output_tokens": 1,
+          "min_completion_tokens": 1,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      }
+    }
+  }
+}
