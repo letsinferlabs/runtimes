@@ -148,15 +148,15 @@ jobs:
         run: |
           set -euo pipefail
           candidate="$RUNNER_TEMP/catalog-release"
-          PYTHONPATH=.core python3 - <<'PY'
+          catalog_schema=$(python3 -c 'from tools.generate_manifest import SCHEMA_VERSION; print(SCHEMA_VERSION)')
+          CATALOG_SCHEMA_VERSION="$catalog_schema" PYTHONPATH=.core python3 - <<'PY'
           import os, pathlib
-          from tools.generate_manifest import SCHEMA_VERSION as CATALOG_SCHEMA_VERSION
           from core.runtime_packs import load_catalog
           from core.revocations import SCHEMA_VERSION as REVOCATION_SCHEMA_VERSION, load_ledger
           root=pathlib.Path(os.environ['RUNNER_TEMP']) / 'catalog-release'
           catalog=load_catalog(str(root / 'catalog.json'), public_key=str(root / 'catalog-public-key.pem'))
           ledger, _data, _signature=load_ledger(str(root / 'revocations.json'), public_key=root / 'catalog-public-key.pem')
-          assert catalog['schema_version'] == CATALOG_SCHEMA_VERSION
+          assert catalog['schema_version'] == int(os.environ['CATALOG_SCHEMA_VERSION'])
           assert ledger['schema_version'] == REVOCATION_SCHEMA_VERSION
           PY
           python3 - "$candidate" "$GITHUB_SHA" <<'PY'
