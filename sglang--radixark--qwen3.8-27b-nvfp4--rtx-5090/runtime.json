@@ -78,9 +78,9 @@
     },
     "distribution": {
       "kind": "oci-container",
-      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:19f58df3fade5623ff039e23b409b3eb75887b1cae3744971ac9a2957c5d1aa0",
-      "immutable_id": "sha256:0107d02ace045088b6a3da4dace3586660786ac2c329127068d2d071a9a90bfa",
-      "payload_id": "sha256:32e49c73548cf03ae0d9c555e8b8a1a78e992ccebde74fae4ee321c46b6656c1",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:4938d201dfce629f4db2417cb5c3129e5115b5e277b37ddc210994cf1ed78637",
+      "immutable_id": "sha256:d1250f3fc4efb1d3dccbbd39a5bf3c0a9cc8a0de9af053777d462a6c5efee360",
+      "payload_id": "sha256:5b0bd9848d1aef89a65eb5ad1f166804179a82844d89f356cc1e0594e0713b9c",
       "base": "docker.io/lmsysorg/sglang@sha256:7d81a16a2ebbe104be37263b49f1bfc0a6a95c1d57e500875dbe7f7c41301e45"
     }
   },
@@ -136,7 +136,7 @@
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
         "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
-        "engine_payload_sha256": "32e49c73548cf03ae0d9c555e8b8a1a78e992ccebde74fae4ee321c46b6656c1",
+        "engine_payload_sha256": "5b0bd9848d1aef89a65eb5ad1f166804179a82844d89f356cc1e0594e0713b9c",
         "render_contract": "openai-chat-user-v1"
       },
       "request": {

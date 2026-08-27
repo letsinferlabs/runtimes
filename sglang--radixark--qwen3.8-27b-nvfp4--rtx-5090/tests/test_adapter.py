@@ -18,6 +18,9 @@ from unittest import mock
 CANDIDATE = pathlib.Path(__file__).resolve().parents[1]
 ADAPTER = CANDIDATE / "adapter"
 AMD64_BASE = "sha256:7d81a16a2ebbe104be37263b49f1bfc0a6a95c1d57e500875dbe7f7c41301e45"
+TRITON_WHEEL_SHA256 = (
+    "74caf5e34b66d9f3a429af689c1c7128daba1d8208df60e81106b115c00d6fca"
+)
 
 
 def load_adapter():
@@ -55,6 +58,9 @@ class Rtx5090EngineTests(unittest.TestCase):
         self.assertNotIn("aarch64-linux-gnu", dockerfile)
         self.assertIn('sysconfig.get_path("platlib")', dockerfile)
         self.assertNotIn("/usr/local/lib/python3.12/dist-packages", dockerfile)
+        self.assertIn(f"--checksum=sha256:{TRITON_WHEEL_SHA256}", dockerfile)
+        self.assertIn("triton-3.6.0-cp312-cp312-manylinux_2_27_x86_64", dockerfile)
+        self.assertIn('triton.__version__ == "3.6.0"', dockerfile)
 
     def test_runtime_command_preserves_protocol_owned_values(self) -> None:
         command = list(self.adapter.build_command(self.runtime, 18000))

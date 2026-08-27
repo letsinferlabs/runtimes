@@ -21,6 +21,14 @@ FROM docker.io/lmsysorg/sglang@sha256:7d81a16a2ebbe104be37263b49f1bfc0a6a95c1d57
 
 ARG SOURCE_DATE_EPOCH=0
 
+ADD --checksum=sha256:74caf5e34b66d9f3a429af689c1c7128daba1d8208df60e81106b115c00d6fca \
+  https://files.pythonhosted.org/packages/ab/a8/cdf8b3e4c98132f965f88c2313a4b493266832ad47fb52f23d14d4f86bb5/triton-3.6.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl \
+  /tmp/triton-3.6.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+RUN python3 -m pip install --no-cache-dir --no-deps \
+      /tmp/triton-3.6.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl && \
+    python3 -c 'import triton; assert triton.__version__ == "3.6.0"' && \
+    rm -f /tmp/triton-3.6.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+
 COPY --from=letsinfer-prefix-store-build \
   /opt/letsinfer/lib/letsinfer_prefix_store.so \
   /tmp/letsinfer_prefix_store.so
@@ -47,6 +55,7 @@ LABEL org.opencontainers.image.source="https://github.com/letsinferlabs/runtimes
       ai.letsinfer.runtime="sglang--radixark--qwen3.8-27b-nvfp4--rtx-5090" \
       ai.letsinfer.feature="dflash2-prefix-value,letsinfer-nvme-hicache" \
       ai.letsinfer.cuda="12.9.2" \
+      ai.letsinfer.triton="3.6.0" \
       ai.letsinfer.build.reproducibility="source-date-epoch-v1" \
       ai.letsinfer.sglang.source="1cf2b8c54d81802abc15dcf23a29b9cc687bc01e" \
       ai.letsinfer.flashinfer.profile="runtime-autotune-sm120-v1" \
