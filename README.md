@@ -180,6 +180,25 @@ git sparse-checkout set tools <candidate>
 
 ## Publication
 
+### Pull request flow
+
+Keep each runtime PR to one candidate. Tooling and documentation changes use a
+separate ordinary PR. Contributors edit candidate source only; do not edit
+`manifest.json`, `benchmark.consensus.json`, or qualification provenance.
+
+1. Open the candidate PR. Validation audits the source and prepares the exact
+   verifier bundle automatically.
+2. After source review, a maintainer adds `benchmark-ready`.
+3. Independent verifiers run
+   `letsinfer benchmark verification run <PR-URL>`; the bot owns the tally and
+   generated qualification files.
+4. When the required check is green, a maintainer comments `/shipit`. That one
+   command publishes the immutable artifacts and merges the exact reviewed
+   head.
+
+The PR checks state which step is pending. A contributor never creates a
+catalog tag, edits a score, publishes an OCI, or opens a release PR manually.
+
 Every runtime PR first runs a no-code sentinel. A default-branch `workflow_run`
 builder—not the contributor-editable PR workflow—then checks out the exact
 proposal as untrusted input. It has read-only permissions and no secrets. It
@@ -272,13 +291,15 @@ After qualification, merging the exact revision to the `release` branch:
 1. rebuilds and verifies deterministic runtime packs;
 2. checks that every advertised OCI digest matches the planned artifact;
 3. anonymously verifies every already-published runtime and Engine object;
-4. preserves immutable qualified releases and calculates the best release for
-   every model/target using the catalog's versioned scoring policy;
-5. verifies that every model/target has a qualified recommendation;
-6. signs the generated schema-v6 catalog and separate revocation ledger;
+4. revalidates materialized qualification against the stable execution
+   contract and calculates the best scored release for each model/target;
+5. leaves targets without scored evidence explicitly selectable but
+   unrecommended, and verifies every non-null recommendation is scored;
+6. signs the generated schema-v7 catalog and separate revocation ledger;
 7. verifies both signatures with the public key shipped by core;
 8. publishes the catalog, ledger, signatures, public key, and hash-bound
-   metadata record as the latest immutable GitHub Release in this repository;
+   metadata record under `catalog-<release-commit>` as the latest immutable
+   GitHub Release in this repository;
    and
 9. emits build-provenance attestations for runtime packs and signed selection
    metadata.
