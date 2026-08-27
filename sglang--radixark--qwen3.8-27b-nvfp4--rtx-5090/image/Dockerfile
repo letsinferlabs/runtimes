@@ -40,6 +40,7 @@ RUN PYTHON_PLATLIB="$(python3 -c 'import sysconfig; print(sysconfig.get_path("pl
     rm -f /tmp/letsinfer_prefix_store.so
 COPY engine/sglang/python /tmp/letsinfer-sglang/python
 RUN cp -a /tmp/letsinfer-sglang/python/. /sgl-workspace/sglang/python/ && \
+    mkdir -p /sgl-workspace/sglang/python/sglang/srt/server && \
     python3 -c 'import letsinfer_prefix_store' && \
     python3 -m compileall --invalidation-mode checked-hash -q \
       python/sglang/kernels/ops/speculative/dflash.py \
