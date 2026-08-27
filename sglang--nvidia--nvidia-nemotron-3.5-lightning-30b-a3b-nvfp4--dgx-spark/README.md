@@ -9,7 +9,7 @@
 > Then install this model:
 >
 > ```sh
-> letsinfer install nemotron-3.5-lightning
+> letsinfer model install nemotron-3.5-lightning
 > ```
 
 # Nemotron 3.5 Lightning 30B-A3B NVFP4 / SGLang / DGX Spark
@@ -53,7 +53,7 @@ After installing the qualified runtime, run its complete cache-aware
 benchmark:
 
 ```bash
-letsinfer benchmark nemotron-3.5-lightning
+letsinfer benchmark run nemotron-3.5-lightning
 ```
 
 The schema-7 contract runs short code and prose at C1/C2/C4, plus code at

@@ -69,7 +69,7 @@ GZIP_LAYER_MEDIA_TYPES = {
     "application/vnd.docker.image.rootfs.diff.tar.gzip",
 }
 RUNTIME_CONFIG_MEDIA_TYPE = "application/vnd.letsinfer.runtime.config.v1+json"
-RUNTIME_LAYER_MEDIA_TYPE = "application/vnd.letsinfer.runtime.v5+tar"
+RUNTIME_LAYER_MEDIA_TYPE = "application/vnd.letsinfer.runtime.v6+tar"
 
 
 class LayoutError(RuntimeError):

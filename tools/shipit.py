@@ -500,7 +500,7 @@ def _download_artifact(
     return root, bundle
 
 
-def _existing_model_has_release(
+def _existing_candidate_has_release(
     root: pathlib.Path, runtime: Mapping[str, Any]
 ) -> bool:
     manifest = generate_manifest.read_object(root / "manifest.json")
@@ -510,13 +510,9 @@ def _existing_model_has_release(
         if isinstance(model, Mapping)
         else None
     )
-    existing = (
-        target.get("candidates", {}) if isinstance(target, Mapping) else {}
-    )
-    return any(
-        isinstance(record, Mapping) and bool(record.get("releases"))
-        for record in existing.values()
-    )
+    candidates = target.get("candidates", {}) if isinstance(target, Mapping) else {}
+    record = candidates.get(runtime["id"]) if isinstance(candidates, Mapping) else None
+    return isinstance(record, Mapping) and bool(record.get("releases"))
 
 
 def _cheap_verifier_ids(number: int) -> set[int]:
@@ -539,7 +535,11 @@ def _cheap_verifier_ids(number: int) -> set[int]:
 
 
 def _preflight_publication(
-    *, number: int, candidate: str, root: pathlib.Path, bypass: bool
+    *,
+    number: int,
+    candidate: str,
+    root: pathlib.Path,
+    bypass: bool,
 ) -> None:
     """Reject missing evidence before retrieving any verifier artifact."""
 
@@ -555,10 +555,10 @@ def _preflight_publication(
         bypass
         and not verifier_ids
         and not (root / candidate / "benchmark.json").is_file()
-        and _existing_model_has_release(root, runtime)
+        and _existing_candidate_has_release(root, runtime)
     ):
         raise ShipitError(
-            "maintainer bypass requires benchmark.json for an existing model; "
+            "maintainer bypass requires benchmark.json for an existing candidate; "
             "verifier artifact was not downloaded"
         )
 
@@ -609,9 +609,9 @@ def _bypass_consensus(
             }
             if "ttft_cache" in benchmark:
                 author_result["ttft_cache"] = benchmark["ttft_cache"]
-        elif _existing_model_has_release(root, runtime):
+        elif _existing_candidate_has_release(root, runtime):
             raise ShipitError(
-                "maintainer bypass requires benchmark.json for an existing model"
+                "maintainer bypass requires benchmark.json for an existing candidate"
             )
         consensus = {
             "schema_version": community_verification.SCHEMA_VERSION,
@@ -703,11 +703,17 @@ def _publish(
         )
         if published_engine["reference"] != engine["reference"] or published_engine["config_digest"] != engine["config_digest"]:
             raise ShipitError("published Engine identity differs from verifier bundle")
-    engine_receipt = oci_layout.verify_reference(
-        engine["reference"],
-        expected_config=engine["config_digest"],
-        expected_platform=engine.get("platform"),
-    )
+    if bundle["mode"] == "build-native-engine":
+        engine_receipt = {
+            key: engine[key]
+            for key in ("kind", "payload_digest", "platform", "source_revision")
+        }
+    else:
+        engine_receipt = oci_layout.verify_reference(
+            engine["reference"],
+            expected_config=engine["config_digest"],
+            expected_platform=engine.get("platform"),
+        )
     runtime = bundle["runtime"]
     runtime_repository = str(runtime["source"]).rsplit("@", 1)[0]
     runtime_plan = oci_artifact.plan(
@@ -762,11 +768,7 @@ def _existing_publication_receipt(
     subject = consensus.get("subject")
     if not isinstance(provenance, Mapping) or not isinstance(subject, Mapping):
         return None
-    expected_engine = runtime.get("engine")
-    expected_oci = expected_engine.get("oci") if isinstance(expected_engine, Mapping) else None
-    expected_engine_reference = (
-        expected_oci.get("reference") if isinstance(expected_oci, Mapping) else None
-    )
+    expected_distribution = generate_manifest.engine_distribution(dict(runtime))
     expected_runtime_digest = subject.get("runtime_oci_manifest_digest")
     expected_execution = provenance.get("execution_sha256")
     for comment in reversed(comments):
@@ -796,6 +798,19 @@ def _existing_publication_receipt(
         runtime_artifact = (
             published.get("runtime") if isinstance(published, Mapping) else None
         )
+        if expected_distribution["kind"] == "oci-container":
+            engine_matches = (
+                isinstance(engine, Mapping)
+                and engine.get("anonymous_pull_verified") is True
+                and engine.get("reference") == expected_distribution["reference"]
+            )
+        else:
+            engine_matches = isinstance(engine, Mapping) and dict(engine) == {
+                "kind": expected_distribution["kind"],
+                "payload_digest": expected_distribution["payload_id"],
+                "platform": expected_distribution["platform"],
+                "source_revision": expected_distribution["source_revision"],
+            }
         if (
             receipt.get("schema_version") == 1
             and receipt.get("repository") == REPOSITORY
@@ -806,9 +821,7 @@ def _existing_publication_receipt(
             and receipt.get("proposal_head_sha") == provenance.get("proposal_head_sha")
             and receipt.get("execution_sha256") == expected_execution
             and receipt.get("waiver") == consensus.get("waiver")
-            and isinstance(engine, Mapping)
-            and engine.get("anonymous_pull_verified") is True
-            and engine.get("reference") == expected_engine_reference
+            and engine_matches
             and isinstance(runtime_artifact, Mapping)
             and runtime_artifact.get("anonymous_pull_verified") is True
             and isinstance(expected_runtime_digest, str)
@@ -844,6 +857,42 @@ def _update_behind_receipt_head(
     pull = _pull(number)
     if pull.get("mergeable_state") != "behind":
         return current
+    head = pull.get("head")
+    live_head = head.get("sha") if isinstance(head, Mapping) else None
+    if isinstance(live_head, str) and live_head != current:
+        fetch = subprocess.run(
+            ["git", "fetch", "--no-tags", "origin", f"pull/{number}/head"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        fetched = (
+            subprocess.check_output(
+                ["git", "rev-parse", "FETCH_HEAD"], cwd=root, text=True
+            ).strip()
+            if fetch.returncode == 0
+            else ""
+        )
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", current, live_head],
+            cwd=root,
+            check=False,
+        )
+        unchanged = subprocess.run(
+            ["git", "diff", "--quiet", current, live_head, "--", candidate],
+            cwd=root,
+            check=False,
+        )
+        if (
+            fetched != live_head
+            or ancestor.returncode != 0
+            or unchanged.returncode != 0
+        ):
+            raise ShipitError(
+                "newer proposal head changed its published runtime candidate"
+            )
+        current = live_head
     verification_bot.api(
         f"repos/{REPOSITORY}/pulls/{number}/update-branch",
         method="PUT",
@@ -929,11 +978,13 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
     if not bot_login:
         raise ShipitError("verification bot login is not configured")
     _approved_review(number, int(pr["user"]["id"]), required=not bypass)
+    existing_consensus: dict[str, Any] | None = None
     if bypass and (root / candidate / "benchmark.consensus.json").is_file():
         consensus = generate_manifest.read_object(
             root / candidate / "benchmark.consensus.json"
         )
         generate_manifest.validate_consensus_binding(runtime, consensus)
+        existing_consensus = consensus
         receipt = _existing_publication_receipt(
             number=number,
             candidate=candidate,
@@ -973,7 +1024,10 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
         bot_login=bot_login,
     )
     _preflight_publication(
-        number=number, candidate=candidate, root=root, bypass=bypass
+        number=number,
+        candidate=candidate,
+        root=root,
+        bypass=bypass,
     )
     with tempfile.TemporaryDirectory(prefix="letsinfer-shipit-") as temporary:
         artifact_root, bundle = _download_artifact(
@@ -985,11 +1039,25 @@ def process(event: Mapping[str, Any], root: pathlib.Path) -> dict[str, Any]:
         )
         if bundle["candidate"] != candidate or bundle["subject"]["runtime_version"] != runtime["version"]:
             raise ShipitError("verifier bundle candidate or version differs")
+        if (
+            existing_consensus is not None
+            and existing_consensus.get("subject") != bundle["subject"]
+        ):
+            raise ShipitError("existing consensus differs from verifier bundle")
         if bypass:
             assert reason is not None
-            consensus = _bypass_consensus(
-                pr=pr, candidate=candidate, subject=bundle["subject"], root=root,
-                actor=actor, reason=reason, comment=comment,
+            consensus = (
+                existing_consensus
+                if existing_consensus is not None
+                else _bypass_consensus(
+                    pr=pr,
+                    candidate=candidate,
+                    subject=bundle["subject"],
+                    root=root,
+                    actor=actor,
+                    reason=reason,
+                    comment=comment,
+                )
             )
             generate_manifest.validate_consensus_binding(runtime, consensus)
             _url, current = verification_bot.materialize(root, candidate, pr, consensus)

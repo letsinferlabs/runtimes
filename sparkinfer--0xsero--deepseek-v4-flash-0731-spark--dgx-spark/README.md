@@ -9,7 +9,7 @@
 > Then install this model:
 >
 > ```sh
-> letsinfer install deepseek-v4-flash
+> letsinfer model install deepseek-v4-flash
 > ```
 
 # DeepSeek V4 Flash EXL3 / SparkInfer / DGX Spark
@@ -63,9 +63,9 @@ workspace growth after vLLM locks allocation.
 After this candidate is independently verified and published:
 
 ```bash
-letsinfer install deepseek-v4-flash \
+letsinfer model install deepseek-v4-flash \
   --runtime sparkinfer--0xsero--deepseek-v4-flash-0731-spark--dgx-spark
-letsinfer benchmark deepseek-v4-flash
+letsinfer benchmark run deepseek-v4-flash
 ```
 
 The schema-7 contract first runs fixed short-code and short-prose workloads at

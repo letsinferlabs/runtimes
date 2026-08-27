@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+"""MLX-LM adapter for Let's Infer Engine protocol 2."""
+
+from __future__ import annotations
+
+import json
+import importlib.metadata
+import os
+import sys
+from collections.abc import Mapping, Sequence
+from functools import lru_cache
+
+from native_frontend import AdapterError, artifact_path, expand_arguments, run
+
+
+def build_command(runtime: Mapping[str, object], port: int) -> Sequence[str]:
+    return [
+        sys.executable,
+        "-m",
+        "mlx_lm.server",
+        "--model",
+        artifact_path(runtime, runtime["model"]["artifact"]),  # type: ignore[index]
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        *expand_arguments(runtime),
+    ]
+
+
+@lru_cache(maxsize=1)
+def tokenizer(model_path: str):
+    from transformers import AutoTokenizer
+
+    return AutoTokenizer.from_pretrained(
+        model_path,
+        local_files_only=True,
+        trust_remote_code=False,
+    )
+
+
+def count_tokens(_host: str, _port: int, body: bytes, _model: str) -> int:
+    runtime = json.loads(open(os.environ["LETSINFER_RUNTIME_CONFIG"], encoding="utf-8").read())
+    model_path = artifact_path(runtime, runtime["model"]["artifact"])
+    request = json.loads(body)
+    messages = request.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise AdapterError("MLX-LM token count requires chat messages")
+    value = tokenizer(model_path).apply_chat_template(
+        messages,
+        tools=request.get("tools"),
+        add_generation_prompt=True,
+        tokenize=True,
+        return_dict=False,
+    )
+    if not isinstance(value, list) or not value:
+        raise AdapterError("MLX-LM tokenizer returned an invalid count")
+    return len(value)
+
+
+def verify_engine() -> None:
+    import mlx
+    import mlx_lm
+
+    if (
+        importlib.metadata.version("mlx-lm") != "0.31.3"
+        or importlib.metadata.version("mlx") != "0.32.2"
+    ):
+        raise AdapterError("MLX-LM dependency versions differ")
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(
+            run("mlx-lm", build_command, count_tokens, verify_engine=verify_engine)
+        )
+    except (AdapterError, KeyError, OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"engine-adapter: {error}", file=sys.stderr)
+        raise SystemExit(1) from error

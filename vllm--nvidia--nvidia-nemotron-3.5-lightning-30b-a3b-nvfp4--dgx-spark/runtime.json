@@ -1,7 +1,7 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "id": "vllm--nvidia--nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "logical_model": "nemotron-3.5-lightning",
   "target": {
     "id": "dgx-spark",
@@ -31,12 +31,6 @@
     "id": "vllm",
     "protocol": {
       "version": 2
-    },
-    "oci": {
-      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:06a4d4017313ac0b32f402de518b74dda4da27b6212826b314a43835eadcf472",
-      "immutable_id": "sha256:34a93e33222ec63e8086cd2d053ac3b521e841e323724b8c1895425817fe8463",
-      "base": "docker.io/vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967",
-      "payload_id": "sha256:9b7e18e84042597a33f08e789304c6d54906d094aef47d3a5635096d92ddb1ae"
     },
     "model_format": "huggingface-snapshot",
     "cache_provider": "vllm-hybrid-prefix-v1",
@@ -88,13 +82,21 @@
     ],
     "environment": {
       "VLLM_MARLIN_USE_ATOMIC_ADD": "1"
+    },
+    "distribution": {
+      "kind": "oci-container",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:06a4d4017313ac0b32f402de518b74dda4da27b6212826b314a43835eadcf472",
+      "immutable_id": "sha256:34a93e33222ec63e8086cd2d053ac3b521e841e323724b8c1895425817fe8463",
+      "base": "docker.io/vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967",
+      "payload_id": "sha256:9b7e18e84042597a33f08e789304c6d54906d094aef47d3a5635096d92ddb1ae"
     }
   },
   "model": {
     "uri": "hf://nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
     "artifact": "model",
     "acquisition": {
-      "image": "docker.io/vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967"
+      "image": "docker.io/vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967",
+      "kind": "oci-container"
     }
   },
   "artifacts": [

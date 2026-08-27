@@ -9,7 +9,7 @@
 > Then install this model:
 >
 > ```sh
-> letsinfer install ling-3.0-flash
+> letsinfer model install ling-3.0-flash
 > ```
 
 # Ling 3.0 Flash INT4 / SGLang / DGX Spark
@@ -60,7 +60,7 @@ the exact count remain native SGLang results.
 After installing the qualified runtime, run its complete cache-aware benchmark:
 
 ```bash
-letsinfer benchmark ling-3.0-flash
+letsinfer benchmark run ling-3.0-flash
 ```
 
 The schema-7 contract runs short code and prose at C1/C2/C4, code at C1/C2/C4
