@@ -605,7 +605,12 @@ class ManifestToolTests(unittest.TestCase):
         self.assertIn("gh release create", workflow)
         self.assertIn('tag="catalog-$GITHUB_SHA"', workflow)
         self.assertNotIn("catalog-v7-$GITHUB_SHA", workflow)
-        self.assertIn("CATALOG_SCHEMA_VERSION", workflow)
+        self.assertIn(
+            "from tools.generate_manifest import SCHEMA_VERSION; print(SCHEMA_VERSION)",
+            workflow,
+        )
+        self.assertEqual(workflow.count("from tools.generate_manifest"), 1)
+        self.assertIn("int(os.environ['CATALOG_SCHEMA_VERSION'])", workflow)
         self.assertNotIn("catalog['schema_version'] == 7", workflow)
         self.assertNotIn("LETSINFER_VERIFIER_BYPASS_GITHUB_IDS", workflow)
         self.assertIn("revocations.json.sig", workflow)
