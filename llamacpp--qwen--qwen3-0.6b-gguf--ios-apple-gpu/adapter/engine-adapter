@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+import argparse
+import json
+
+parser = argparse.ArgumentParser()
+parser.add_argument("command", choices=("verify",))
+parser.add_argument("--protocol", type=int, required=True)
+arguments = parser.parse_args()
+if arguments.protocol != 2:
+    raise SystemExit("unsupported Engine protocol")
+print(json.dumps({"engine_protocol": 2, "status": "ok"}, separators=(",", ":")))

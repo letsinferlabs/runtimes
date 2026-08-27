@@ -1,0 +1,158 @@
+{
+  "schema_version": 6,
+  "id": "llamacpp--qwen--qwen3-0.6b-gguf--macos-apple-silicon",
+  "version": "0.1.0-rc.1",
+  "logical_model": "qwen3-0.6b",
+  "target": {
+    "id": "macos-apple-silicon",
+    "platform": "macos/arm64",
+    "accelerator": {
+      "vendor": "apple",
+      "architecture": "apple-silicon",
+      "count": 1,
+      "partitioning": "full-device"
+    },
+    "memory": {
+      "topology": "unified",
+      "minimum_total_gib": 8
+    },
+    "placement": {
+      "strategy": "single",
+      "node_count": 1,
+      "interconnect": {
+        "kind": "any",
+        "rdma_required": false,
+        "minimum_speed_mbps": 0,
+        "minimum_mtu": 0
+      }
+    }
+  },
+  "engine": {
+    "id": "llamacpp",
+    "protocol": {
+      "version": 2
+    },
+    "distribution": {
+      "kind": "native-archive",
+      "platform": "macos/arm64",
+      "payload_id": "sha256:b96e00defa35443b1d1b2957f1b088f606f7db3445550b1339fcf64eeea2bd65",
+      "source_revision": "c1d0e7a004015f23bc0233470b747b596f29b264",
+      "entrypoint": "adapter/engine-adapter",
+      "port_count": 2,
+      "archive": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10621/llama-b10621-bin-macos-arm64.tar.gz",
+        "sha256": "429c8270608600188035e5e92f7d78dffb7900904fe7dd7e6a84f48068cd13cf",
+        "bytes": 10954823,
+        "format": "tar.gz",
+        "strip_prefix": "llama-b10621"
+      },
+      "upstream_executable": "llama-server"
+    },
+    "model_format": "gguf-file",
+    "cache_provider": "llamacpp-memory-v1",
+    "arguments": [
+      "--ctx-size",
+      "32768",
+      "--parallel",
+      "4",
+      "--jinja",
+      "--flash-attn",
+      "on",
+      "--n-gpu-layers",
+      "999"
+    ],
+    "environment": {}
+  },
+  "model": {
+    "uri": "hf://Qwen/Qwen3-0.6B-GGUF",
+    "artifact": "model",
+    "acquisition": {
+      "kind": "huggingface-http",
+      "client": "huggingface-http-v1"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "model",
+      "uri": "hf://Qwen/Qwen3-0.6B-GGUF",
+      "format": "gguf-file",
+      "revision": "23749fefcc72300e3a2ad315e1317431b06b590a",
+      "filename": "Qwen3-0.6B-Q8_0.gguf",
+      "sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+      "bytes": 639446688
+    }
+  ],
+  "container": {
+    "memory_bytes": 8589934592,
+    "shm_bytes": 0,
+    "min_available_gib": 3,
+    "runtime_min_available_gib": 1,
+    "startup_timeout_seconds": 900
+  },
+  "cache": {
+    "provider": "llamacpp-memory-v1",
+    "persistent": false,
+    "prewarm": false,
+    "replay_output_policy": null,
+    "config": {}
+  },
+  "serving": {
+    "max_connections": 32,
+    "max_active_requests": 4,
+    "max_context_tokens": 32768,
+    "gate": null
+  },
+  "benchmark": {
+    "contract": {
+      "schema_version": 2,
+      "suite": "letsinfer-code-prose-v1",
+      "generator": {
+        "id": "letsinfer-code-prose",
+        "version": 2
+      },
+      "tokenizer": {
+        "capability": "engine-rendered-chat-count-v1",
+        "model_sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+        "engine_image_sha256": "b96e00defa35443b1d1b2957f1b088f606f7db3445550b1339fcf64eeea2bd65",
+        "render_contract": "openai-chat-user-v1"
+      },
+      "request": {
+        "output_tokens": 128,
+        "min_completion_tokens": 128,
+        "require_natural_stop": false,
+        "temperature": 0,
+        "seed": 42042
+      },
+      "sample_interval_seconds": 5,
+      "cases": [
+        {
+          "id": "8k",
+          "prompt_tokens": 8192,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "16k",
+          "prompt_tokens": 16384,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "32k",
+          "prompt_tokens": 32000,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark",
-  "version": "0.1.0-rc.17",
+  "version": "0.1.0-rc.18",
   "logical_model": "qwen3.8-27b",
   "target": {
     "id": "dgx-spark",
@@ -81,7 +81,8 @@
     "protocol": {
       "version": 2
     },
-    "oci": {
+    "distribution": {
+      "kind": "oci-container",
       "reference": "ghcr.io/letsinferlabs/engines/sglang--radixark--qwen3.8-27b-nvfp4--dgx-spark@sha256:f70057989f8207323ee499671496fdf8054af3b89ebb69e4a6bd799fca864d74",
       "immutable_id": "sha256:cf79d71ed72d94d9acf35bb8602969c5c159db8abe802ff3399925f9270d8650",
       "base": "docker.io/lmsysorg/sglang@sha256:3c0abdf41ef22de9d7a859dc16ed71eae69452e36c91f071a25e60c85a6d1fc6"
@@ -91,7 +92,8 @@
     "uri": "hf://RadixArk/Qwen3.8-27B-NVFP4",
     "artifact": "model",
     "acquisition": {
-      "image": "docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1"
+      "image": "docker.io/lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1",
+      "kind": "oci-container"
     }
   },
   "artifacts": [

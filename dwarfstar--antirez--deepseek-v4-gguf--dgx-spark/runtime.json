@@ -1,7 +1,7 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "id": "dwarfstar--antirez--deepseek-v4-gguf--dgx-spark",
-  "version": "0.11.0-rc.11",
+  "version": "0.11.0-rc.12",
   "logical_model": "deepseek-v4-flash",
   "target": {
     "id": "dgx-spark",
@@ -85,7 +85,8 @@
     "protocol": {
       "version": 2
     },
-    "oci": {
+    "distribution": {
+      "kind": "oci-container",
       "reference": "ghcr.io/letsinferlabs/engines/dwarfstar--antirez--deepseek-v4-gguf--dgx-spark@sha256:b988911ca7f97858a20179f1c7ecdab1c68ffd4ee9412189312f1d73aeb19d16",
       "immutable_id": "sha256:26b02e07bf3790a4b7a1eaf69d4007f278de7e7d6bcb1dad513d73dc33a19a3d",
       "base": "ghcr.io/miaai-lab/mia-vllm-gb10-linear-b12x@sha256:19627342e1da2607f4db50745dca30e57d7dd0ebff06062f03fd69b43a252931"
@@ -95,6 +96,7 @@
     "uri": "hf://antirez/deepseek-v4-gguf",
     "artifact": "model",
     "acquisition": {
+      "kind": "oci-container",
       "image": "vllm/vllm-openai@sha256:e51157695347d2cee1b13f1ac05369df6216af5d2991b6ad5a2e700861cba4b1"
     }
   },

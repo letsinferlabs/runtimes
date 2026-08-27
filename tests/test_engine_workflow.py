@@ -8,6 +8,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class EngineWorkflowTests(unittest.TestCase):
+    def test_workflows_use_the_exact_core_pack_library_not_product_cli(self) -> None:
+        workflows = [
+            ROOT / ".github/workflows/validate.yml",
+            ROOT / ".github/workflows/build-verifier.yml",
+            ROOT / ".github/workflows/finalize-verifier.yml",
+            ROOT / ".github/workflows/release.yml",
+        ]
+        for path in workflows:
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("tools/pack_runtime.py", source, path.name)
+            self.assertNotIn("bin/letsinfer pack", source, path.name)
+
     def test_untrusted_pr_builder_has_no_publication_authority(self) -> None:
         workflow = (ROOT / ".github/workflows/build-verifier.yml").read_text(
             encoding="utf-8"
@@ -48,6 +60,8 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertIn("rewrite-timestamp=true", builder)
         self.assertIn("--inventory-output", workflow)
         self.assertIn('kwargs.setdefault("stdout", sys.stderr)', builder)
+        self.assertIn("engine_distribution.validate", builder)
+        self.assertNotIn('runtime["engine"]["oci"]', builder)
 
     def test_unchanged_engine_uses_a_finalizer_attested_proof(self) -> None:
         build = (ROOT / ".github/workflows/build-verifier.yml").read_text(
@@ -89,9 +103,20 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertNotIn("engine-pin-request.json", workflow)
         self.assertIn("exact authored Engine identity", workflow)
         self.assertIn("runtime/verifier-bundle", workflow)
+        self.assertIn('["engine"]["distribution"]', workflow)
+        self.assertNotIn('engine.get("distribution", engine.get("oci"))', workflow)
         self.assertIn('run.get("head_branch") != "main"', workflow)
         self.assertIn("actions/attest@", workflow)
         self.assertNotIn("working-directory: proposal", workflow)
+
+    def test_native_protocol_validation_does_not_execute_uninstalled_engines(self) -> None:
+        workflow = (ROOT / ".github/workflows/validate.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('engine_kind=$(python3 -c', workflow)
+        self.assertIn('test "$engine_kind" = native-archive', workflow)
+        self.assertIn("compile(path.read_text", workflow)
+        self.assertIn("engine-adapter\" verify --protocol 2", workflow)
 
     def test_engine_pin_bot_is_removed(self) -> None:
         self.assertFalse((ROOT / ".github/workflows/auto-pin-engine.yml").exists())
@@ -115,6 +140,9 @@ class EngineWorkflowTests(unittest.TestCase):
         self.assertNotIn("packages: write", release)
         self.assertNotIn("oci_artifact.py push", release)
         self.assertIn("oci_layout.py verify", release)
+        self.assertIn('test "$engine_kind" = oci-container', release)
+        self.assertIn('["engine"]["distribution"]', release)
+        self.assertNotIn('engine.get("distribution", engine.get("oci"))', release)
 
     def test_every_engine_exports_the_same_inventory_contract(self) -> None:
         for dockerfile in ROOT.glob("*/image/Dockerfile"):

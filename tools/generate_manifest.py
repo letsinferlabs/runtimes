@@ -14,9 +14,22 @@ import re
 import sys
 from typing import Any
 
+try:
+    from tools.engine_distribution import (
+        DistributionError,
+        projection as distribution_projection,
+        validate as validate_distribution,
+    )
+except ModuleNotFoundError:  # Direct ``python3 tools/generate_manifest.py``.
+    from engine_distribution import (  # type: ignore[no-redef]
+        DistributionError,
+        projection as distribution_projection,
+        validate as validate_distribution,
+    )
 
-SCHEMA_VERSION = 6
-RUNTIME_SCHEMA_VERSION = 5
+
+SCHEMA_VERSION = 7
+RUNTIME_SCHEMA_VERSION = 6
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 OCI_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 LICENSE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,126}")
@@ -33,8 +46,8 @@ RECOMMENDATION_POLICY = {
     "tie_breakers": ["score", "version", "candidate"],
 }
 CONTRACT_MIGRATION_METHOD = "runtime-contract-migration-v1"
-BENCHMARK_SCHEMA_VERSIONS = {4, 5, 6, 7}
-SHARED_BENCHMARK_SCHEMA_VERSIONS = {5, 6, 7}
+BENCHMARK_SCHEMA_VERSIONS = {4, 5, 6, 7, 8}
+SHARED_BENCHMARK_SCHEMA_VERSIONS = {5, 6, 7, 8}
 TTFT_CACHE_BENCHMARK_SCHEMA_VERSION = 6
 EXECUTION_PAYLOAD_BENCHMARK_SCHEMA_VERSION = 7
 REVOCATION_REASON_CODES = {
@@ -104,6 +117,19 @@ def normalized_candidate(runtime: dict[str, Any]) -> str:
     return "--".join((engine, match[1].lower(), match[2].lower(), target))
 
 
+def engine_distribution(runtime: dict[str, Any]) -> dict[str, Any]:
+    """Validate the one schema-6 Engine distribution without compatibility paths."""
+
+    target = runtime.get("target", {})
+    engine = runtime.get("engine", {})
+    try:
+        return validate_distribution(
+            engine.get("distribution"), platform=str(target.get("platform", ""))
+        )
+    except DistributionError as error:
+        raise ManifestError(str(error)) from error
+
+
 def validate_runtime_execution_contract(runtime: dict[str, Any]) -> None:
     """Keep repository candidates aligned with core's generic group boundary."""
     target = runtime.get("target")
@@ -122,6 +148,74 @@ def validate_runtime_execution_contract(runtime: dict[str, Any]) -> None:
         or (strategy == "single" and node_count != 1)
     ):
         raise ManifestError("runtime target placement strategy or node_count is invalid")
+    engine = runtime.get("engine")
+    model = runtime.get("model")
+    if not isinstance(engine, dict) or not isinstance(model, dict):
+        raise ManifestError("runtime Engine or model identity is invalid")
+    distribution = engine_distribution(runtime)
+    acquisition = model.get("acquisition")
+    if distribution["kind"] == "oci-container":
+        if not (
+            isinstance(acquisition, dict)
+            and set(acquisition) == {"kind", "image"}
+            and acquisition.get("kind") == "oci-container"
+            and OCI_RE.fullmatch(str(acquisition.get("image", ""))) is not None
+        ):
+            raise ManifestError("OCI runtime model acquisition is invalid")
+    elif acquisition != {
+        "kind": "huggingface-http",
+        "client": "huggingface-http-v1",
+    }:
+        raise ManifestError("native runtime model acquisition is invalid")
+    artifacts = runtime.get("artifacts")
+    primary = [
+        artifact
+        for artifact in artifacts or []
+        if isinstance(artifact, dict)
+        and artifact.get("name") == model.get("artifact")
+    ]
+    benchmark_contract = runtime.get("benchmark", {}).get("contract")
+    tokenizer = (
+        benchmark_contract.get("tokenizer")
+        if isinstance(benchmark_contract, dict)
+        else None
+    )
+    if len(primary) != 1 or not isinstance(tokenizer, dict):
+        raise ManifestError("runtime benchmark model identity is unavailable")
+    artifact = primary[0]
+    if isinstance(artifact.get("sha256"), str):
+        model_sha256 = artifact["sha256"]
+    else:
+        match = re.fullmatch(
+            r"hf://([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)",
+            str(artifact.get("uri")),
+        )
+        if match is None or re.fullmatch(
+            r"[0-9a-f]{40}", str(artifact.get("revision"))
+        ) is None:
+            raise ManifestError("runtime benchmark model revision is invalid")
+        model_sha256 = hashlib.sha256(
+            canonical_bytes(
+                {
+                    "repository": f"{match[1]}/{match[2]}",
+                    "revision": artifact["revision"],
+                }
+            )
+        ).hexdigest()
+    if tokenizer.get("model_sha256") != model_sha256:
+        raise ManifestError("runtime benchmark model identity differs")
+    engine_field = (
+        "engine_payload_sha256"
+        if benchmark_contract.get("schema_version") == 8
+        else "engine_image_sha256"
+    )
+    engine_sha256 = str(
+        distribution.get("payload_id")
+        if distribution["kind"] != "oci-container"
+        else distribution.get("payload_id", distribution.get("immutable_id"))
+    ).removeprefix("sha256:")
+    if tokenizer.get(engine_field) != engine_sha256:
+        raise ManifestError("runtime benchmark Engine identity differs")
     interconnect = placement.get("interconnect")
     if not isinstance(interconnect, dict) or set(interconnect) != {
         "kind", "rdma_required", "minimum_speed_mbps", "minimum_mtu"
@@ -228,6 +322,21 @@ def runtime_execution_contract(runtime: dict[str, Any]) -> dict[str, Any]:
     engine = value.get("engine")
     if isinstance(engine, dict):
         engine.pop("protocol", None)
+        distribution = engine.pop("distribution", None)
+        if (
+            isinstance(distribution, dict)
+            and distribution.get("kind") == "oci-container"
+        ):
+            engine["oci"] = {
+                key: item for key, item in distribution.items() if key != "kind"
+            }
+    model = value.get("model")
+    acquisition = model.get("acquisition") if isinstance(model, dict) else None
+    if (
+        isinstance(acquisition, dict)
+        and acquisition.get("kind") == "oci-container"
+    ):
+        acquisition.pop("kind", None)
     target = value.get("target")
     placement = target.get("placement") if isinstance(target, dict) else None
     if isinstance(placement, dict):
@@ -283,15 +392,21 @@ def benchmark_subject(
     target = runtime.get("target")
     if not isinstance(target, dict):
         raise ManifestError(f"runtime target is invalid: {runtime.get('id')}")
-    oci = runtime.get("engine", {}).get("oci", {})
-    payload_id = oci.get("payload_id") if isinstance(oci, dict) else None
+    distribution = engine_distribution(runtime)
+    payload = distribution.get("payload_id") if isinstance(distribution, dict) else None
     engine_identity = (
         {
-            "engine_payload_sha256": str(payload_id).removeprefix("sha256:"),
-            "measured_engine_oci": measured_engine_oci or oci.get("reference"),
+            "engine_payload_sha256": str(payload).removeprefix("sha256:"),
+            "measured_engine_kind": distribution.get("kind"),
         }
-        if isinstance(payload_id, str)
-        else {"engine_oci": oci.get("reference")}
+        if payload is not None and distribution.get("kind") != "oci-container"
+        else {"engine_oci": distribution.get("reference")}
+        if payload is None
+        else {
+            "engine_payload_sha256": str(payload).removeprefix("sha256:"),
+            "measured_engine_oci": measured_engine_oci
+            or distribution.get("reference"),
+        }
     )
     return {
         "candidate_id": runtime.get("id"),
@@ -338,7 +453,9 @@ def validate_benchmark_binding(
     results = record.get("results")
     if not isinstance(results, list) or not results:
         raise ManifestError(f"benchmark results are unavailable: {runtime['id']}")
-    if schema_version == TTFT_CACHE_BENCHMARK_SCHEMA_VERSION:
+    if schema_version == TTFT_CACHE_BENCHMARK_SCHEMA_VERSION or (
+        schema_version in {7, 8} and "ttft_cache" in record
+    ):
         ttft_cache = record.get("ttft_cache")
         if not isinstance(ttft_cache, dict):
             raise ManifestError(f"benchmark TTFT cache result is unavailable: {runtime['id']}")
@@ -493,7 +610,7 @@ def migrated_release(
         "runtime_version": from_version,
         "model_uri": runtime["model"]["uri"],
         "model_revision": primary["revision"],
-        "engine_oci": runtime["engine"]["oci"]["reference"],
+        "engine_oci": engine_distribution(runtime)["reference"],
         "target": runtime["target"]["id"],
         # A schema-only target rename changes this historical digest. Its
         # semantic equivalence is attested by execution_contract_sha256.
@@ -512,7 +629,7 @@ def migrated_release(
         or old_benchmark.get("suite") != runtime["benchmark"]["contract"]["suite"]
         or old_benchmark.get("score") != benchmark_score(benchmark)
         or old_release.get("engine") != runtime["engine"]["id"]
-        or old_release.get("engine_oci") != runtime["engine"]["oci"]["reference"]
+        or old_release.get("engine_oci") != engine_distribution(runtime)["reference"]
         or old_release.get("model_uri") != runtime["model"]["uri"]
         or not OCI_RE.fullmatch(str(old_release.get("source")))
     ):
@@ -539,7 +656,7 @@ def migrated_release(
         "authors": release_metadata["authors"],
         "source": source,
         "engine": runtime["engine"]["id"],
-        "engine_oci": runtime["engine"]["oci"]["reference"],
+        "engine_oci": engine_distribution(runtime)["reference"],
         "model_uri": runtime["model"]["uri"],
         "license": release_metadata["license"],
         "benchmark": {
@@ -787,15 +904,16 @@ def validate_consensus_binding(
     subject = consensus.get("subject")
     if not isinstance(subject, dict):
         raise ManifestError(f"runtime consensus subject is invalid: {candidate}")
-    engine_oci = runtime["engine"]["oci"]
-    payload_id = engine_oci.get("payload_id")
+    distribution = engine_distribution(runtime)
+    payload_id = distribution.get("payload_id")
     engine_bound = (
         subject.get("engine_payload_sha256")
         == str(payload_id).removeprefix("sha256:")
         and "engine_oci_manifest_digest" not in subject
         if payload_id is not None
-        else subject.get("engine_oci_manifest_digest")
-        == engine_oci["reference"].rsplit("@", 1)[-1]
+        else distribution["kind"] == "oci-container"
+        and subject.get("engine_oci_manifest_digest")
+        == distribution["reference"].rsplit("@", 1)[-1]
         and "engine_payload_sha256" not in subject
     )
     if (
@@ -914,8 +1032,14 @@ def candidates(
         if engine_source:
             if not adapter.is_file() or adapter.is_symlink():
                 raise ManifestError(f"Engine protocol adapter is missing: {candidate}")
-            if not dockerfile.is_file() or dockerfile.is_symlink():
-                raise ManifestError(f"Engine OCI Dockerfile is missing: {candidate}")
+            distribution = engine_distribution(runtime)
+            if distribution["kind"] == "oci-container":
+                if not dockerfile.is_file() or dockerfile.is_symlink():
+                    raise ManifestError(f"Engine OCI Dockerfile is missing: {candidate}")
+            elif dockerfile.exists():
+                raise ManifestError(
+                    f"native Engine candidate cannot contain image/Dockerfile: {candidate}"
+                )
         benchmark_path = directory / "benchmark.json"
         benchmark = read_object(benchmark_path) if benchmark_path.is_file() else None
         if benchmark is not None:
@@ -964,9 +1088,12 @@ def candidates(
             raise ManifestError(
                 f"published OCI source is missing for {candidate}@{runtime['version']}"
             )
-        engine_oci = runtime.get("engine", {}).get("oci", {}).get("reference")
-        if not OCI_RE.fullmatch(str(engine_oci)):
-            raise ManifestError(f"Engine OCI is not digest-pinned: {candidate}")
+        try:
+            engine_distribution(runtime)
+        except ManifestError as error:
+            raise ManifestError(
+                f"Engine distribution is invalid for {candidate}: {error}"
+            ) from error
         contract = runtime.get("benchmark", {}).get("contract")
         if not isinstance(contract, dict) or not isinstance(contract.get("suite"), str):
             raise ManifestError(f"runtime benchmark contract is invalid: {candidate}")
@@ -988,7 +1115,11 @@ def candidates(
 def _previous_releases(previous: dict[str, Any] | None) -> dict[tuple[str, str, str], dict[str, Any]]:
     if previous is None:
         return {}
-    if previous.get("schema_version") not in {5, SCHEMA_VERSION}:
+    # The one-time schema-6 to schema-7 cutover intentionally retires every
+    # pre-schema-6 runtime artifact. There are no users requiring compatibility.
+    if previous.get("schema_version") == 6:
+        return {}
+    if previous.get("schema_version") != SCHEMA_VERSION:
         return {}
     result: dict[tuple[str, str, str], dict[str, Any]] = {}
     for model, model_record in previous.get("models", {}).items():
@@ -1256,7 +1387,10 @@ def generate(
                 "authors": item["release_metadata"]["authors"],
                 "source": item["source"],
                 "engine": runtime["engine"]["id"],
-                "engine_oci": runtime["engine"]["oci"]["reference"],
+                "engine_distribution": distribution_projection(
+                    runtime["engine"]["distribution"],
+                    platform=runtime["target"]["platform"],
+                ),
                 "model_uri": runtime["model"]["uri"],
                 "license": item["release_metadata"]["license"],
                 "benchmark": (
