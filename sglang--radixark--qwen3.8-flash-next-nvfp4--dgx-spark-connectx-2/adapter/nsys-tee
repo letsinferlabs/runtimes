@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -o pipefail
+
+log="/root/nsight-launch-${LETSINFER_TASK_ID:-unknown}.log"
+mkdir -p /root/nsys-tmp
+export NSYS_TMPDIR=/root/nsys-tmp
+export TMPDIR=/root/nsys-tmp
+nsys "$@" 2>&1 | tee "$log"
+exit "${PIPESTATUS[0]}"
