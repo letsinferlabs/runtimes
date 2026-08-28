@@ -34,7 +34,7 @@
     },
     "distribution": {
       "kind": "oci-container",
-      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:debff52905a2aaa5641f5bbe317c234647afc43e07d56558869b5055d14a5a18",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:363c364ee5029e9a49c4735ada372f430fd14f566b4cb2ca2cec70515b786ae4",
       "immutable_id": "sha256:7be16441d906930f8babaf30ebe8779587845ce7da8503ba7b1d59e271a6d5e4",
       "payload_id": "sha256:8dd2e3e209847ffd75c6960d22cb98b14cca7f43c44ad22189f0fd0f97c4ff43",
       "base": "docker.io/lmsysorg/sglang@sha256:14ed582518584c5c830206b5318a2c2769e68229c3422e48a28b952b3a888bd4"
