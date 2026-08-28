@@ -116,14 +116,14 @@ class Rtx5090EngineTests(unittest.TestCase):
         self.assertNotIn("--bf16-gemm-backend", command)
         self.assertNotIn("gemv", command)
         memory_index = command.index("--mem-fraction-static")
-        self.assertEqual(command[memory_index + 1], "0.980")
+        self.assertEqual(command[memory_index + 1], "0.979")
         cache_index = command.index("--max-mamba-cache-size")
         self.assertEqual(command[cache_index + 1], "16")
         strategy_index = command.index("--mamba-radix-cache-strategy")
         self.assertEqual(command[strategy_index + 1], "extra_buffer")
         running_index = command.index("--max-running-requests")
-        self.assertEqual(command[running_index + 1], "64")
-        self.assertEqual(self.runtime["serving"]["max_active_requests"], 4)
+        self.assertEqual(command[running_index + 1], "3")
+        self.assertEqual(self.runtime["serving"]["max_active_requests"], 3)
         self.assertEqual(
             self.runtime["engine"]["environment"][
                 "SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK"

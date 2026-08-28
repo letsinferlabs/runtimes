@@ -34,7 +34,7 @@
     "arguments": [
       "--trust-remote-code",
       "--mem-fraction-static",
-      "0.980",
+      "0.979",
       "--attention-backend",
       "flashinfer",
       "--chunked-prefill-size",
@@ -53,7 +53,7 @@
       "--max-mamba-cache-size",
       "16",
       "--max-running-requests",
-      "64",
+      "3",
       "--context-length",
       "66048",
       "--speculative-algorithm",
@@ -128,7 +128,7 @@
   },
   "serving": {
     "max_connections": 64,
-    "max_active_requests": 4,
+    "max_active_requests": 3,
     "max_context_tokens": 66048,
     "gate": {
       "measured_commit": "ef610a5a725bc2195224d3cac9e8af06ab89a8f0"

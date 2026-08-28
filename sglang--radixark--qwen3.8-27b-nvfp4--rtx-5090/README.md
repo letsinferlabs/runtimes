@@ -23,14 +23,14 @@ OpenAI-compatible API.
   runtime pack, and Engine OCI, then starts the API.
 - **64K context** -- benchmarked with 65,536-token prompts and a 66,048-token
   serving ceiling that preserves the declared completion budget.
-- **Concurrent serving recipe** -- four hardware-backed active requests behind
-  64 gateway connections; the Engine admits up to 64 and queues excess work.
+- **Concurrent serving recipe** -- three hardware-backed active requests behind
+  64 gateway connections, with excess work queued by the managed service.
 - **RTX 5090 tuning** -- the linux/amd64 CUDA 12.9 SGLang Engine, SM120
   FlashInfer attention, exact live-M=9 FP8 tactics, FP8 KV cache, depth-8
-  NEXTN, ReplaySSM, chunked prefill, P-core affinity, and a four-request Mamba
+  NEXTN, ReplaySSM, chunked prefill, P-core affinity, and a three-request Mamba
   state envelope without the redundant decode lock are sealed together; excess
   admissions remain queued.
-  The measured 0.980 static-memory fraction retains the runtime's explicit
+  The measured 0.979 static-memory fraction retains the runtime's explicit
   2 GiB physical free-VRAM safety floor.
 - **Safe cache policy** -- SGLang process-local prefix reuse is enabled; this
   candidate makes no persistent-restart cache claim.
