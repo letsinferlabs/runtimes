@@ -131,7 +131,7 @@
     "max_active_requests": 3,
     "max_context_tokens": 66048,
     "gate": {
-      "measured_commit": "ef610a5a725bc2195224d3cac9e8af06ab89a8f0"
+      "measured_commit": "614da4d9e812fd5988983a24f993c471d1edea82"
     }
   },
   "benchmark": {
