@@ -30,7 +30,8 @@ OpenAI-compatible API.
   NEXTN, ReplaySSM, chunked prefill, P-core affinity, and a three-request Mamba
   state envelope without the redundant decode lock are sealed together; excess
   admissions remain queued.
-  The measured 0.979 static-memory fraction retains the runtime's explicit
+  Only C1 decode is graph-captured; concurrent decode runs eagerly so the
+  measured 0.974 static-memory fraction retains the runtime's explicit
   2 GiB physical free-VRAM safety floor.
 - **Safe cache policy** -- SGLang process-local prefix reuse is enabled; this
   candidate makes no persistent-restart cache claim.

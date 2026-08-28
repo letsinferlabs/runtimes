@@ -34,7 +34,7 @@
     "arguments": [
       "--trust-remote-code",
       "--mem-fraction-static",
-      "0.979",
+      "0.974",
       "--attention-backend",
       "flashinfer",
       "--chunked-prefill-size",
@@ -42,6 +42,8 @@
       "--max-prefill-tokens",
       "16384",
       "--disable-prefill-cuda-graph",
+      "--cuda-graph-bs-decode",
+      "1",
       "--kv-cache-dtype",
       "fp8_e4m3",
       "--mamba-ssm-dtype",
