@@ -1,7 +1,7 @@
 {
   "schema_version": 6,
   "id": "sglang--radixark--qwen3.8-27b-nvfp4--rtx-5090",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "logical_model": "qwen3.8-27b",
   "target": {
     "id": "rtx-5090",
@@ -34,7 +34,7 @@
     "arguments": [
       "--trust-remote-code",
       "--mem-fraction-static",
-      "0.880",
+      "0.980",
       "--attention-backend",
       "flashinfer",
       "--chunked-prefill-size",
@@ -51,11 +51,22 @@
       "--mamba-radix-cache-strategy",
       "extra_buffer",
       "--max-mamba-cache-size",
-      "20",
+      "16",
       "--max-running-requests",
-      "4",
+      "64",
       "--context-length",
       "66048",
+      "--speculative-algorithm",
+      "NEXTN",
+      "--speculative-draft-model-path",
+      "${artifact:model}",
+      "--speculative-num-steps",
+      "8",
+      "--speculative-eagle-topk",
+      "1",
+      "--speculative-num-draft-tokens",
+      "9",
+      "--enable-linear-replayssm-spec",
       "--reasoning-parser",
       "qwen3",
       "--tool-call-parser",
@@ -66,7 +77,7 @@
       "42042"
     ],
     "environment": {
-      "SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK": "0",
+      "SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK": "1",
       "SGLANG_FLASHINFER_AUTOTUNE_CACHE": "1",
       "TRITON_CACHE_DIR": "/root/.triton"
     },
@@ -76,9 +87,9 @@
     },
     "distribution": {
       "kind": "oci-container",
-      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:faa226597858690160a98b37fb0f7b697629d06bdaeedef5e7700a85f51fc7db",
-      "immutable_id": "sha256:92bfdfe96ca48a88babbbfb3d54bac75a3ce04f76e7828de47ad5bdb3657ded1",
-      "payload_id": "sha256:5b0bd9848d1aef89a65eb5ad1f166804179a82844d89f356cc1e0594e0713b9c",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:211473c78c599a2b004e49b4db7114dfb984fa2cb835522222d4efb898b9f798",
+      "immutable_id": "sha256:5f42e63f084eae091c153f67fad354d92736f31f350c6b113c37c5210d1a3520",
+      "payload_id": "sha256:9af04e3f294864e19564e958e70cddb4e4e9c5b372744f78fa241f57bca099a4",
       "base": "docker.io/lmsysorg/sglang@sha256:7d81a16a2ebbe104be37263b49f1bfc0a6a95c1d57e500875dbe7f7c41301e45"
     }
   },
@@ -134,7 +145,7 @@
       "tokenizer": {
         "capability": "engine-rendered-chat-count-v1",
         "model_sha256": "25b14cf56098afec59553481ff2c28e41d042e71bb38d5a48472305b754e8be8",
-        "engine_payload_sha256": "5b0bd9848d1aef89a65eb5ad1f166804179a82844d89f356cc1e0594e0713b9c",
+        "engine_payload_sha256": "9af04e3f294864e19564e958e70cddb4e4e9c5b372744f78fa241f57bca099a4",
         "render_contract": "openai-chat-user-v1"
       },
       "request": {
@@ -170,7 +181,7 @@
         "prose"
       ],
       "execution": {
-        "isolation": "fresh-matrix",
+        "isolation": "fresh-context",
         "prefix_state": "shared",
         "samples_per_cell": 1,
         "stream_prefix": "shared-body"

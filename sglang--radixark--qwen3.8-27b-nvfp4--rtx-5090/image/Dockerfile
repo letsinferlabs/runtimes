@@ -30,6 +30,13 @@ RUN python3 -m pip install --no-cache-dir --no-deps \
     python3 -c 'import triton; assert triton.__version__ == "3.6.0"' && \
     rm -f /tmp/triton-3.6.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
 
+COPY engine/patches/apply_flashinfer_fp8_m9.py \
+  /tmp/apply-flashinfer-fp8-m9.py
+RUN python3 /tmp/apply-flashinfer-fp8-m9.py \
+      /opt/sglang/lib/python3.12/site-packages/flashinfer/gemm/gemm_base.py && \
+    python3 -c 'import flashinfer.gemm.gemm_base' && \
+    rm -f /tmp/apply-flashinfer-fp8-m9.py
+
 COPY --from=letsinfer-prefix-store-build \
   /opt/letsinfer/lib/letsinfer_prefix_store.so \
   /tmp/letsinfer_prefix_store.so
@@ -61,4 +68,5 @@ LABEL org.opencontainers.image.source="https://github.com/letsinferlabs/runtimes
       ai.letsinfer.build.reproducibility="source-date-epoch-v1" \
       ai.letsinfer.sglang.source="1cf2b8c54d81802abc15dcf23a29b9cc687bc01e" \
       ai.letsinfer.flashinfer.profile="runtime-autotune-sm120-v1" \
+      ai.letsinfer.flashinfer.fp8-m9="live-shape-tactics-v1" \
       ai.letsinfer.dflash.selector="prefix-value:eda3392ea66597f113c76cf1d9113e9bba290590e31a75ceee537e4269df2dae"
