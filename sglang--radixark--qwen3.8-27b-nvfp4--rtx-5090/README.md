@@ -23,11 +23,16 @@ OpenAI-compatible API.
   runtime pack, and Engine OCI, then starts the API.
 - **64K context** -- benchmarked with 65,536-token prompts and a 66,048-token
   serving ceiling that preserves the declared completion budget.
-- **Native SGLang scheduling** -- up to four active requests behind 64 gateway
-  connections, with dynamic admission and queueing.
+- **Concurrent serving recipe** -- three hardware-backed active requests behind
+  64 gateway connections, with excess work queued by the managed service.
 - **RTX 5090 tuning** -- the linux/amd64 CUDA 12.9 SGLang Engine, SM120
-  FlashInfer attention, FP8 KV cache, chunked prefill, P-core affinity, and
-  Mamba state envelope are sealed together.
+  FlashInfer attention, exact live-M=9 FP8 tactics, FP8 KV cache, depth-8
+  NEXTN, ReplaySSM, chunked prefill, P-core affinity, and a three-request Mamba
+  state envelope without the redundant decode lock are sealed together; excess
+  admissions remain queued.
+  Only C1 decode is graph-captured; concurrent decode runs eagerly so the
+  measured 0.974 static-memory fraction retains the runtime's explicit
+  2 GiB physical free-VRAM safety floor.
 - **Safe cache policy** -- SGLang process-local prefix reuse is enabled; this
   candidate makes no persistent-restart cache claim.
 - **Reproducible evidence** -- the canonical code-and-prose contract binds every
@@ -59,6 +64,11 @@ the pinned Engine OCI. You do not download or place the weights separately.
 
 ## Reproduce this
 
+The exact 32K code C1 prequalification cell produced 128 reasoning tokens with
+the required marker and restart-reproduced at 250.91--252.34 decode tokens per
+second on the declared RTX 5090 target. This local screen is not community
+qualification; the complete contract below remains authoritative.
+
 After installing the published runtime, run its complete cache-aware benchmark:
 
 ```bash
@@ -66,6 +76,8 @@ letsinfer benchmark run qwen3.8-27b
 ```
 
 The schema-8 contract runs short code and prose plus 32K and 64K code/prose
-contexts at C1/C2/C4, then one 64K cold/warm TTFT pair. Let's Infer owns the
-prompts, shared-prefix ordering, lifecycle, Watchdog telemetry, cache-hit
-validation, and the final `benchmark.json`.
+contexts at C1/C2/C4, then one 64K cold/warm TTFT pair. Its `fresh-context`
+lifecycle gives short, 32K, 64K, and the TTFT pair independent processes while
+preserving shared-prefix ordering inside each group. Let's Infer owns the
+prompts, lifecycle, Watchdog telemetry, cache-hit validation, and the final
+`benchmark.json`.
