@@ -1,17 +1,1 @@
-{
-  "schema_version": 2,
-  "authors": [
-    {
-      "github_login": "tonyd2wild",
-      "github_id": 219747476,
-      "github_type": "User"
-    },
-    {
-      "github_login": "letsinferlabs",
-      "github_id": 317451145,
-      "github_type": "Organization"
-    }
-  ],
-  "license": "AGPL-3.0-only",
-  "provenance": null
-}
+{"authors":[{"github_id":219747476,"github_login":"tonyd2wild","github_type":"User"},{"github_id":317451145,"github_login":"letsinferlabs","github_type":"Organization"}],"license":"AGPL-3.0-only","provenance":{"consensus_sha256":"bec1e01ba008511641ad60188032b998a0e59cecbb5f4691a196b9b02fe17ef3","execution_sha256":"5493a5a186d65c10637c1d42ab1967bc91b95c0a02d384b86b27d48b3d59ad81","proposal_head_sha":"546e78c3f7ddd20671b46558c18b5c15f8320b7e","pull_request":126,"pull_request_url":"https://github.com/letsinferlabs/runtimes/pull/126","qualified_commit_sha":"08b3b203a76b546326f46a5dfbd6887d34356d30","repository":"letsinferlabs/runtimes"},"schema_version":2}
