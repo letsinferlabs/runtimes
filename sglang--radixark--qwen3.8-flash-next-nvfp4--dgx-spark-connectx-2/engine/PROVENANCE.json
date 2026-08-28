@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "base_image": "docker.io/lmsysorg/sglang@sha256:14ed582518584c5c830206b5318a2c2769e68229c3422e48a28b952b3a888bd4",
+  "base_image_id": "sha256:64c58f100438fa5f036bdfbeb3edd3136fb12c5d22d8ae52786c4a701263c55d",
+  "base_sglang_version": "day-zero-qwen38-flash-next",
+  "upstream_repository": "sgl-project/sglang",
+  "upstream_commit": "d91c3682b0b429e4c70df63cd57f819588ce29b0",
+  "official_recipe": {
+    "repository": "RadixArk/Qwen3.8-Flash-Next-NVFP4",
+    "commit": "7b719225242aacd3dbd3f9407468c2ee9a9d2594"
+  },
+  "upstream_overlay": {
+    "repository": "Qiaolin-Yu/sglang-qwen-next",
+    "pull_request": 38,
+    "commits": [
+      "3ea3a37a1",
+      "12070370f"
+    ]
+  },
+  "derived_recipe": {
+    "repository": "tonyd2wild/Qwen3.8-Flash-Next-NVFP4-DGX-Spark",
+    "commit": "65ea3883b8dd80438b58ace56eb7979c52fa6ea6",
+    "incorporation": "serving-configuration-and-operational-recipe"
+  },
+  "method": "immutable-base-parallel-adapter-overlay",
+  "runtime_recipe": {
+    "tensor_parallel_size": 2,
+    "context_tokens": 262144,
+    "max_total_tokens": 600000,
+    "max_active_requests": 6,
+    "mamba_slots": 97,
+    "mtp": {
+      "algorithm": "NEXTN",
+      "steps": 3,
+      "topk": 1,
+      "draft_tokens": 4,
+      "linear_replayssm": true,
+      "attention_mode": "decode"
+    },
+    "cuda_graph_max_batch": 8,
+    "cuda_graph_padding": false,
+    "prefill_cuda_graph": false,
+    "ple_embedding_offload": true,
+    "radix_cache": true,
+    "thinking": true,
+    "persistent_cache": false
+  },
+  "runtime_fixes": [
+    "letsinfer-engine-protocol-v2-adapter",
+    "core-assigned-two-node-task-mapping",
+    "forced-nccl-ib-without-socket-fallback",
+    "core-sealed-connectx-interface-and-hca",
+    "rdma-counter-and-nccl-log-readiness",
+    "sm12x-qsa-trtllm-sparse-decode",
+    "qsa-radix-topk-deterministic-order",
+    "sm121-bf16-single-row-decode-tactics",
+    "sm121-hc-deterministic-two-way-split-k",
+    "thinking-aligned-mtp4-replayssm-recipe",
+    "digest-pinned-linux-arm64-base",
+    "immutable-model-revision"
+  ]
+}
