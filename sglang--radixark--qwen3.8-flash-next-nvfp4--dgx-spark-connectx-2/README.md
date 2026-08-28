@@ -63,7 +63,7 @@ silently shortened.
   `d91c3682b0b429e4c70df63cd57f819588ce29b0`, with the exact upstream
   overlay recorded in `engine/PROVENANCE.json`.
 - Engine OCI manifest:
-  `sha256:debff52905a2aaa5641f5bbe317c234647afc43e07d56558869b5055d14a5a18`.
+  `sha256:363c364ee5029e9a49c4735ada372f430fd14f566b4cb2ca2cec70515b786ae4`.
 - Engine image configuration:
   `sha256:7be16441d906930f8babaf30ebe8779587845ce7da8503ba7b1d59e271a6d5e4`.
 - Normalized Engine execution payload:
