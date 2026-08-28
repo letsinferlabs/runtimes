@@ -1,0 +1,302 @@
+{
+  "schema_version": 6,
+  "id": "sglang--radixark--qwen3.8-flash-next-nvfp4--dgx-spark-connectx-2",
+  "version": "0.1.0-rc.1",
+  "logical_model": "qwen3.8-flash-next",
+  "target": {
+    "id": "dgx-spark-connectx-2",
+    "platform": "linux/arm64",
+    "accelerator": {
+      "vendor": "nvidia",
+      "architecture": "sm_121",
+      "count": 1,
+      "partitioning": "full-device"
+    },
+    "memory": {
+      "topology": "unified",
+      "minimum_total_gib": 118
+    },
+    "placement": {
+      "strategy": "parallel",
+      "node_count": 2,
+      "interconnect": {
+        "kind": "connectx",
+        "rdma_required": true,
+        "minimum_speed_mbps": 200000,
+        "minimum_mtu": 1500
+      }
+    }
+  },
+  "engine": {
+    "id": "sglang",
+    "protocol": {
+      "version": 2
+    },
+    "distribution": {
+      "kind": "oci-container",
+      "reference": "ghcr.io/letsinferlabs/engine-images@sha256:363c364ee5029e9a49c4735ada372f430fd14f566b4cb2ca2cec70515b786ae4",
+      "immutable_id": "sha256:7be16441d906930f8babaf30ebe8779587845ce7da8503ba7b1d59e271a6d5e4",
+      "payload_id": "sha256:8dd2e3e209847ffd75c6960d22cb98b14cca7f43c44ad22189f0fd0f97c4ff43",
+      "base": "docker.io/lmsysorg/sglang@sha256:14ed582518584c5c830206b5318a2c2769e68229c3422e48a28b952b3a888bd4"
+    },
+    "model_format": "huggingface-snapshot",
+    "cache_provider": "sglang-radix-v1",
+    "arguments": [
+      "--quantization",
+      "modelopt_fp4",
+      "--fp4-gemm-backend",
+      "flashinfer_cutlass",
+      "--page-size",
+      "64",
+      "--mamba-scheduler-strategy",
+      "extra_buffer",
+      "--mamba-track-interval",
+      "64",
+      "--max-mamba-cache-size",
+      "97",
+      "--speculative-algorithm",
+      "NEXTN",
+      "--speculative-num-steps",
+      "3",
+      "--speculative-eagle-topk",
+      "1",
+      "--speculative-num-draft-tokens",
+      "4",
+      "--enable-linear-replayssm-spec",
+      "--speculative-attention-mode",
+      "decode",
+      "--chunked-prefill-size",
+      "4096",
+      "--weight-loader-prefetch-checkpoints",
+      "--weight-loader-prefetch-num-threads",
+      "4",
+      "--max-running-requests",
+      "6",
+      "--context-length",
+      "262144",
+      "--max-total-tokens",
+      "600000",
+      "--mem-fraction-static",
+      "0.80",
+      "--allow-auto-truncate",
+      "--reasoning-parser",
+      "auto",
+      "--tool-call-parser",
+      "qwen3_coder",
+      "--trust-remote-code",
+      "--ple-offload-embedding",
+      "--cuda-graph-max-bs",
+      "8",
+      "--disable-cuda-graph-padding",
+      "--disable-prefill-cuda-graph",
+      "--sampling-backend",
+      "pytorch",
+      "--sampling-defaults",
+      "model",
+      "--random-seed",
+      "42042"
+    ],
+    "environment": {
+      "FLASHINFER_DISABLE_VERSION_CHECK": "1",
+      "NCCL_CROSS_NIC": "1",
+      "NCCL_CUMEM_ENABLE": "0",
+      "NCCL_IGNORE_CPU_AFFINITY": "1",
+      "NCCL_MAX_NCHANNELS": "4",
+      "NCCL_MIN_NCHANNELS": "4",
+      "TRITON_CACHE_DIR": "/root/.triton"
+    }
+  },
+  "model": {
+    "uri": "hf://RadixArk/Qwen3.8-Flash-Next-NVFP4",
+    "artifact": "model",
+    "acquisition": {
+      "kind": "oci-container",
+      "image": "docker.io/lmsysorg/sglang@sha256:14ed582518584c5c830206b5318a2c2769e68229c3422e48a28b952b3a888bd4"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "model",
+      "uri": "hf://RadixArk/Qwen3.8-Flash-Next-NVFP4",
+      "format": "huggingface-snapshot",
+      "revision": "7b719225242aacd3dbd3f9407468c2ee9a9d2594"
+    }
+  ],
+  "container": {
+    "memory_bytes": 118111600640,
+    "shm_bytes": 34359738368,
+    "min_available_gib": 105,
+    "runtime_min_available_gib": 8,
+    "startup_timeout_seconds": 7200
+  },
+  "cache": {
+    "provider": "sglang-radix-v1",
+    "persistent": false,
+    "prewarm": false,
+    "replay_output_policy": null,
+    "config": {}
+  },
+  "serving": {
+    "max_connections": 32,
+    "max_active_requests": 6,
+    "max_context_tokens": 262144,
+    "gate": {
+      "measured_commit": "d91c3682b0b429e4c70df63cd57f819588ce29b0"
+    }
+  },
+  "benchmark": {
+    "contract": {
+      "schema_version": 8,
+      "suite": "letsinfer-code-prose-v1",
+      "generator": {
+        "id": "letsinfer-code-prose",
+        "version": 8
+      },
+      "domains": [
+        "code"
+      ],
+      "execution": {
+        "isolation": "fresh-context",
+        "prefix_state": "shared",
+        "samples_per_cell": 1,
+        "stream_prefix": "shared-body"
+      },
+      "short": {
+        "domains": [
+          "code",
+          "prose"
+        ],
+        "prompt_tokens": 256,
+        "concurrencies": [
+          1,
+          2,
+          4
+        ],
+        "request": {
+          "output_tokens": 512,
+          "min_completion_tokens": 512,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      },
+      "ttft_cache": {
+        "prompt_tokens": 64000,
+        "prompt_domain": "code",
+        "repetitions": 2,
+        "request": {
+          "output_tokens": 1,
+          "min_completion_tokens": 1,
+          "require_natural_stop": false,
+          "temperature": 0,
+          "seed": 42042
+        }
+      },
+      "tokenizer": {
+        "capability": "engine-rendered-chat-count-v1",
+        "model_sha256": "dad3eb6e68da1cec05d9393fda228292ee89e1359f62b5d07426dbebb89c31e3",
+        "engine_payload_sha256": "8dd2e3e209847ffd75c6960d22cb98b14cca7f43c44ad22189f0fd0f97c4ff43",
+        "render_contract": "openai-chat-user-v1"
+      },
+      "request": {
+        "output_tokens": 128,
+        "min_completion_tokens": 128,
+        "require_natural_stop": false,
+        "temperature": 0,
+        "seed": 42042
+      },
+      "sample_interval_seconds": 5,
+      "cases": [
+        {
+          "id": "32k",
+          "prompt_tokens": 32768,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "64k",
+          "prompt_tokens": 65536,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "128k",
+          "prompt_tokens": 131072,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        },
+        {
+          "id": "256k",
+          "prompt_tokens": 260000,
+          "concurrencies": [
+            1,
+            2,
+            4
+          ]
+        }
+      ]
+    }
+  },
+  "orchestration": {
+    "schema_version": 3,
+    "failure_policy": "whole-group",
+    "endpoint_owner": "task-0",
+    "startup_order": [
+      [
+        "task-0",
+        "task-1"
+      ]
+    ],
+    "tasks": [
+      {
+        "task_id": "task-0",
+        "launcher": "runtime-command",
+        "port_count": 4,
+        "command": [
+          "/opt/letsinfer/bin/engine-adapter",
+          "serve"
+        ],
+        "environment": {},
+        "readiness": {
+          "kind": "exec",
+          "command": [
+            "/opt/letsinfer/bin/engine-adapter",
+            "ready"
+          ],
+          "interval_seconds": 10,
+          "timeout_seconds": 5,
+          "retries": 600
+        }
+      },
+      {
+        "task_id": "task-1",
+        "launcher": "runtime-command",
+        "port_count": 4,
+        "command": [
+          "/opt/letsinfer/bin/engine-adapter",
+          "worker"
+        ],
+        "environment": {},
+        "readiness": {
+          "kind": "exec",
+          "command": [
+            "/opt/letsinfer/bin/engine-adapter",
+            "ready"
+          ],
+          "interval_seconds": 10,
+          "timeout_seconds": 5,
+          "retries": 600
+        }
+      }
+    ]
+  }
+}
