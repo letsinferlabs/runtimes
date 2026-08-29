@@ -12,7 +12,7 @@ FROM ghcr.io/pyo3/maturin@sha256:b6c8b59a0170b77eb31a35b56034abd39972483ad0ebfff
 
 WORKDIR /build/letsinfer-prefix-store
 COPY adapter/letsinfer-prefix-store/ ./
-RUN cargo build --release --locked --features python \
+RUN RUST_MIN_STACK=16777216 cargo build --release --locked --features python \
     && strip --strip-debug target/release/libletsinfer_prefix_store.so \
     && install -D -m 0555 target/release/libletsinfer_prefix_store.so \
       /opt/letsinfer/lib/letsinfer_prefix_store.so

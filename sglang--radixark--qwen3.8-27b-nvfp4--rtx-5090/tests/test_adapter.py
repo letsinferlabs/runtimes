@@ -68,6 +68,7 @@ class Rtx5090EngineTests(unittest.TestCase):
         self.assertIn(f"--checksum=sha256:{TRITON_WHEEL_SHA256}", dockerfile)
         self.assertIn("triton-3.6.0-cp312-cp312-manylinux_2_27_x86_64", dockerfile)
         self.assertIn('triton.__version__ == "3.6.0"', dockerfile)
+        self.assertIn("RUST_MIN_STACK=16777216 cargo build", dockerfile)
         self.assertIn("apply-flashinfer-fp8-m9.py", dockerfile)
         self.assertIn("PYTHONDONTWRITEBYTECODE=1 python3 -c", dockerfile)
         self.assertIn("--invalidation-mode checked-hash -q", dockerfile)
