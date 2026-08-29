@@ -19,6 +19,7 @@
 """Inference-only Qwen2MoE model compatible with HuggingFace weights."""
 
 import logging
+import os
 from contextlib import nullcontext
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -242,10 +243,8 @@ class Qwen2MoeMLP(nn.Module):
         y_sf = y_sf.view(torch.uint8).permute(2, 4, 0, 1, 3, 5).reshape(m_padded, -1)
         return y_fp4, y_sf
 
-    def forward(
-        self,
-        x,
-    ):
+    def _forward_chunk(self, x):
+        """Run one dense MLP token chunk through the unchanged projections."""
         gate_up, _ = self.gate_up_proj(x)
         if self._enable_silu_fp4_quant_fusion and not isinstance(gate_up, tuple):
             x, _ = self.down_proj(self._silu_fp4_quant_fused(gate_up))
@@ -253,6 +252,20 @@ class Qwen2MoeMLP(nn.Module):
         x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
+
+    def forward(
+        self,
+        x,
+    ):
+        chunk_size = int(os.environ.get("SGLANG_OPT_DENSE_MLP_CHUNK_SIZE", "0"))
+        if chunk_size <= 0 or x.shape[0] <= chunk_size:
+            return self._forward_chunk(x)
+
+        output = torch.empty_like(x)
+        for start in range(0, x.shape[0], chunk_size):
+            end = min(start + chunk_size, x.shape[0])
+            output[start:end].copy_(self._forward_chunk(x[start:end]))
+        return output
 
 
 class Qwen2MoeSparseMoeBlock(nn.Module):

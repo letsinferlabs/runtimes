@@ -1,5 +1,7 @@
 import contextlib
+import ctypes
 import logging
+import os
 import time
 from dataclasses import replace
 from typing import List, Optional
@@ -126,6 +128,59 @@ _is_xpu = is_xpu()
 logger = logging.getLogger(__name__)
 
 
+def _host_mapped_bf16_parameter(weight: torch.Tensor, label: str):
+    """Copy one BF16 parameter into pinned host memory with a CUDA view."""
+    if not weight.is_cuda or weight.dtype != torch.bfloat16:
+        raise ValueError(
+            f"Host-mapped {label} requires one contiguous CUDA BF16 tensor, "
+            f"got device={weight.device}, dtype={weight.dtype}, shape={weight.shape}."
+        )
+    if not weight.is_contiguous():
+        raise ValueError(f"Host-mapped {label} requires contiguous storage.")
+
+    host_weight = torch.empty_like(weight, device="cpu", pin_memory=True)
+    host_weight.copy_(weight)
+    torch.cuda.synchronize(weight.device)
+
+    cuda_runtime = ctypes.CDLL("libcudart.so.12")
+    cuda_runtime.cudaHostGetDevicePointer.argtypes = [
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_void_p,
+        ctypes.c_uint,
+    ]
+    cuda_runtime.cudaHostGetDevicePointer.restype = ctypes.c_int
+    device_pointer = ctypes.c_void_p()
+    result = cuda_runtime.cudaHostGetDevicePointer(
+        ctypes.byref(device_pointer),
+        ctypes.c_void_p(host_weight.data_ptr()),
+        ctypes.c_uint(0),
+    )
+    if result != 0 or device_pointer.value is None:
+        raise RuntimeError(
+            f"cudaHostGetDevicePointer failed for the pinned {label} "
+            f"with CUDA status {result}."
+        )
+
+    import cupy
+
+    byte_count = host_weight.numel() * host_weight.element_size()
+    unowned_memory = cupy.cuda.UnownedMemory(
+        device_pointer.value,
+        byte_count,
+        host_weight,
+        device_id=weight.device.index or torch.cuda.current_device(),
+    )
+    memory_pointer = cupy.cuda.MemoryPointer(unowned_memory, 0)
+    array = cupy.ndarray(weight.shape, dtype=cupy.uint16, memptr=memory_pointer)
+    mapped_weight = torch.as_tensor(array, device=weight.device).view(weight.dtype)
+    if mapped_weight.data_ptr() != device_pointer.value:
+        raise RuntimeError(f"The mapped {label} CUDA view copied its storage.")
+
+    parameter = torch.nn.Parameter(mapped_weight, requires_grad=False)
+    owners = (host_weight, unowned_memory, memory_pointer, array, mapped_weight)
+    return parameter, owners
+
+
 class EagleDraftWorker(EagleDraftWorkerBase):
     def __init__(
         self,
@@ -191,6 +246,13 @@ class EagleDraftWorker(EagleDraftWorkerBase):
 
         self.plan_stream, self.plan_stream_ctx = get_plan_stream(self.device)
 
+        # Share the target embedding and output head before the scheduler sizes
+        # either KV pool.  Embedded MTP checkpoints construct temporary draft
+        # copies while loading; keeping those copies through target-pool sizing
+        # permanently turns reclaimable weight memory into a smaller KV budget.
+        self.init_token_map()
+        self.init_lm_head()
+
     def alloc_memory_pool(
         self,
         memory_pool_config=None,
@@ -205,8 +267,6 @@ class EagleDraftWorker(EagleDraftWorkerBase):
             req_to_token_pool=req_to_token_pool,
             token_to_kv_pool_allocator=token_to_kv_pool_allocator,
         )
-        self.init_token_map()
-        self.init_lm_head()
 
         if get_spec().speculative_use_rejection_sampling:
             target_vocab_size = self.target_worker.model_config.vocab_size
@@ -317,6 +377,40 @@ class EagleDraftWorker(EagleDraftWorkerBase):
             # Share the embedding and lm_head
             self.draft_runner.model.set_embed_and_head(embed, head)
             maybe_share_target_lm_head()
+
+        if os.environ.get("SGLANG_OPT_HOST_MAPPED_EMBEDDING") == "1":
+            if embed.ndim != 2:
+                raise ValueError(
+                    f"Host-mapped embedding requires a matrix, got {embed.shape}."
+                )
+            mapped_embed, owners = _host_mapped_bf16_parameter(
+                embed, "embedding"
+            )
+            self.target_worker.model_runner.model.set_embed_and_head(
+                mapped_embed, head
+            )
+            self.draft_runner.model.set_embed_and_head(mapped_embed, head)
+            self._host_mapped_embedding_owners = owners
+
+        if os.environ.get("SGLANG_OPT_HOST_MAPPED_VISION") == "1":
+            target_model = self.target_worker.model_runner.model
+            visual = getattr(target_model, "visual", None)
+            if visual is None:
+                raise ValueError(
+                    "Host-mapped vision requires the target vision tower to be loaded."
+                )
+            visual_owners = []
+            for name, parameter in list(visual.named_parameters()):
+                module_name, _, parameter_name = name.rpartition(".")
+                module = visual.get_submodule(module_name) if module_name else visual
+                mapped_parameter, owners = _host_mapped_bf16_parameter(
+                    parameter, f"vision parameter {name}"
+                )
+                module._parameters[parameter_name] = mapped_parameter
+                visual_owners.append(owners)
+            self._host_mapped_vision_owners = visual_owners
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
 
     def init_attention_backend(self):
         # Create multi-step attn backends and cuda graph runners

@@ -15,10 +15,12 @@
   "runtime_fixes": [
     "hash-pinned-triton-3.6.0-sm120-jit-compatibility",
     "enable-target-local-flashinfer-autotuning",
+    "sm120-live-m9-cublas-fp8-tactic-correction",
     "rank-greedy-dflash-candidates-by-expected-accepted-prefix-value"
   ],
   "sealed_artifacts": {
     "dflash_selector_sha256": "eda3392ea66597f113c76cf1d9113e9bba290590e31a75ceee537e4269df2dae",
+    "flashinfer_fp8_m9_postimage_sha256": "0b70932864f6d0225388b51742f6b8324d0e7c0b99d431b4bb2467dbeacb26c2",
     "flashinfer_profile_sha256": "ea30460e95be5d3c14186e58048f8dc14b79a3416f73c073b6501c36ae8eae98"
   }
 }
