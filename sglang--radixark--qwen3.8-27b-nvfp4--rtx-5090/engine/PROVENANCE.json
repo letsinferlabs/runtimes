@@ -21,6 +21,8 @@
   "sealed_artifacts": {
     "dflash_selector_sha256": "eda3392ea66597f113c76cf1d9113e9bba290590e31a75ceee537e4269df2dae",
     "flashinfer_fp8_m9_postimage_sha256": "0b70932864f6d0225388b51742f6b8324d0e7c0b99d431b4bb2467dbeacb26c2",
-    "flashinfer_profile_sha256": "ea30460e95be5d3c14186e58048f8dc14b79a3416f73c073b6501c36ae8eae98"
+    "flashinfer_profile_sha256": "ea30460e95be5d3c14186e58048f8dc14b79a3416f73c073b6501c36ae8eae98",
+    "prefix_store_sha256": "13bbcf8ffd6593769d09ec252c11b75fe40e86c06d36748f0d5450b17ed5fff8",
+    "prefix_store_source_engine": "ghcr.io/letsinferlabs/engine-images@sha256:faa226597858690160a98b37fb0f7b697629d06bdaeedef5e7700a85f51fc7db"
   }
 }

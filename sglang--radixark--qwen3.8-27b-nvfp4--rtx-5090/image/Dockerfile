@@ -8,13 +8,10 @@ FROM scratch AS letsinfer-engine-inventory
 COPY --from=letsinfer-engine-inventory-build \
   /tmp/engine-inventory.json /engine-inventory.json
 
-FROM ghcr.io/pyo3/maturin@sha256:b6c8b59a0170b77eb31a35b56034abd39972483ad0ebfff344deaa42a85f3bd3 AS letsinfer-prefix-store-build
+FROM ghcr.io/letsinferlabs/engine-images@sha256:faa226597858690160a98b37fb0f7b697629d06bdaeedef5e7700a85f51fc7db AS letsinfer-prefix-store-build
 
-WORKDIR /build/letsinfer-prefix-store
-COPY adapter/letsinfer-prefix-store/ ./
-RUN RUST_MIN_STACK=16777216 cargo build --release --locked --features python \
-    && strip --strip-debug target/release/libletsinfer_prefix_store.so \
-    && install -D -m 0555 target/release/libletsinfer_prefix_store.so \
+RUN install -D -m 0555 \
+      /opt/sglang/lib/python3.12/site-packages/letsinfer_prefix_store.so \
       /opt/letsinfer/lib/letsinfer_prefix_store.so
 
 FROM docker.io/lmsysorg/sglang@sha256:7d81a16a2ebbe104be37263b49f1bfc0a6a95c1d57e500875dbe7f7c41301e45
