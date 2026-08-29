@@ -903,7 +903,61 @@ class FlashInferAttnBackend(AttentionBackend):
     def _kv_write_scales(self, layer: RadixAttention):
         if self.kv_cache_quant_method.needs_global_scale():
             return None, None
+        # Checkpoints without KV scales resolve to exact unit scalars. Avoid
+        # launching identity BF16 divisions before the FP8 cache conversion.
+        if layer.k_scale_float == 1.0 and layer.v_scale_float == 1.0:
+            return None, None
         return layer.k_scale, layer.v_scale
+
+    def _try_fused_unit_scale_fp8_kv_write(
+        self,
+        layer: RadixAttention,
+        cache_loc: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        kv_cache,
+    ) -> bool:
+        """Fuse unit-scale FP8 conversion and an NHD paged-cache write."""
+        if (
+            self.flashinfer_kv_cache_dtype != torch.float8_e4m3fn
+            or self.prefill_uses_dequant_workspace
+            or self.kv_cache_quant_method.needs_global_scale()
+            or layer.is_cross_attention
+            or layer.k_scale_float != 1.0
+            or layer.v_scale_float != 1.0
+            or layer.k_scale is None
+            or layer.v_scale is None
+            or self.forward_metadata.swa_out_cache_loc is not None
+            or getattr(self.token_to_kv_pool, "use_hnd", False)
+            or not isinstance(kv_cache, (tuple, list))
+            or len(kv_cache) != 2
+            or not all(isinstance(cache, torch.Tensor) for cache in kv_cache)
+            or not all(cache.dtype == torch.float8_e4m3fn for cache in kv_cache)
+            or not all(cache.is_contiguous() for cache in kv_cache)
+            or cache_loc.ndim != 1
+            or cache_loc.dtype not in (torch.int32, torch.int64)
+            or k.dtype not in (torch.bfloat16, torch.float16)
+            or v.dtype != k.dtype
+            or k.shape[0] != v.shape[0]
+            or k.shape[0] != cache_loc.shape[0]
+        ):
+            return False
+
+        from sglang.kernels.ops.kvcache.fused_fp8_qkv_kv_cache import (
+            fused_fp8_qkv_kv_cache,
+        )
+
+        fused_fp8_qkv_kv_cache(
+            q=None,
+            k=k,
+            v=v,
+            k_cache=kv_cache[0],
+            v_cache=kv_cache[1],
+            cache_loc=cache_loc,
+            k_scale=layer.k_scale,
+            v_scale=layer.v_scale,
+        )
+        return True
 
     def init_forward_metadata(self, forward_batch: ForwardBatch):
         swa_out_cache_loc = None
@@ -1289,13 +1343,18 @@ class FlashInferAttnBackend(AttentionBackend):
         if not self.forward_metadata.use_ragged:
             if k is not None and save_kv_cache:
                 assert v is not None
-                self.token_to_kv_pool.set_kv_buffer(
-                    layer,
-                    KVWriteLoc(cache_loc, self.forward_metadata.swa_out_cache_loc),
-                    k,
-                    v,
-                    *self._kv_write_scales(layer),
-                )
+                if not self._try_fused_unit_scale_fp8_kv_write(
+                    layer, cache_loc, k, v, kv_cache
+                ):
+                    self.token_to_kv_pool.set_kv_buffer(
+                        layer,
+                        KVWriteLoc(
+                            cache_loc, self.forward_metadata.swa_out_cache_loc
+                        ),
+                        k,
+                        v,
+                        *self._kv_write_scales(layer),
+                    )
 
             causal = (
                 not layer.is_cross_attention
